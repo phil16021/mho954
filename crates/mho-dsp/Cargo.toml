@@ -1,0 +1,13 @@
+[package]
+name = "mho-dsp"
+description = "Waveform measurements, FFT, decimation and export for oscilloscope data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+csv.workspace = true
+realfft.workspace = true
+schemars.workspace = true
+serde.workspace = true
+utoipa.workspace = true

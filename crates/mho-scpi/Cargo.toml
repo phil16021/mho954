@@ -1,0 +1,11 @@
+[package]
+name = "mho-scpi"
+description = "SCPI transport layer (USBTMC kernel driver, raw TCP socket) with IEEE 488.2 block parsing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nix.workspace = true
+thiserror.workspace = true
+tracing.workspace = true

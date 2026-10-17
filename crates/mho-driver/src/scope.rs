@@ -1,0 +1,536 @@
+//! Typed access to the MHO900 SCPI command set.
+
+use std::path::PathBuf;
+use std::time::Duration;
+
+use mho_scpi::{Scpi, TcpTransport, Transport, UsbTmcTransport};
+use serde::{Deserialize, Serialize};
+use tracing::{debug, info};
+
+use crate::error::{DriverError, Result};
+use crate::measure::{find_item, valid_value};
+use crate::model::*;
+use crate::options::OPTIONS;
+use crate::sim::SimTransport;
+
+/// Where to find the scope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Connection {
+    /// Linux `usbtmc` kernel driver; `path = None` auto-detects the device node.
+    Usbtmc { path: Option<PathBuf> },
+    /// Raw SCPI socket, `host` or `host:port` (default port 5555).
+    Tcp { addr: String },
+    /// Built-in simulator, no hardware needed.
+    Sim,
+}
+
+impl Default for Connection {
+    fn default() -> Self {
+        Connection::Usbtmc { path: None }
+    }
+}
+
+impl std::str::FromStr for Connection {
+    type Err = DriverError;
+
+    /// `usbtmc`, `usbtmc:/dev/usbtmc0`, `/dev/usbtmc0`, `tcp:192.168.1.20[:5555]`, `sim`.
+    fn from_str(s: &str) -> Result<Self> {
+        let s = s.trim();
+        if s.eq_ignore_ascii_case("sim") {
+            return Ok(Connection::Sim);
+        }
+        if s.eq_ignore_ascii_case("usbtmc") || s.eq_ignore_ascii_case("usb") {
+            return Ok(Connection::Usbtmc { path: None });
+        }
+        if let Some(p) = s.strip_prefix("usbtmc:") {
+            return Ok(Connection::Usbtmc { path: Some(p.into()) });
+        }
+        if s.starts_with("/dev/") {
+            return Ok(Connection::Usbtmc { path: Some(s.into()) });
+        }
+        if let Some(a) = s.strip_prefix("tcp:") {
+            return Ok(Connection::Tcp { addr: a.into() });
+        }
+        Err(DriverError::Invalid(format!("unknown connection {s:?} (usbtmc[:path] | tcp:host[:port] | sim)")))
+    }
+}
+
+impl std::fmt::Display for Connection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Connection::Usbtmc { path: None } => write!(f, "usbtmc"),
+            Connection::Usbtmc { path: Some(p) } => write!(f, "usbtmc:{}", p.display()),
+            Connection::Tcp { addr } => write!(f, "tcp:{addr}"),
+            Connection::Sim => write!(f, "sim"),
+        }
+    }
+}
+
+/// Cached `:WAVeform` settings, to skip redundant writes in the live loop.
+#[derive(Debug, Default, Clone, PartialEq)]
+struct WavSettings {
+    source: Option<String>,
+    mode: Option<WaveMode>,
+    word: bool,
+}
+
+pub struct Scope {
+    scpi: Scpi,
+    idn: Idn,
+    wav: WavSettings,
+    /// Points per `:WAV:DATA?` request when downloading RAW memory.
+    pub raw_chunk_points: usize,
+}
+
+impl Scope {
+    pub fn open(conn: &Connection) -> Result<Scope> {
+        let transport: Box<dyn Transport> = match conn {
+            Connection::Usbtmc { path: Some(p) } => Box::new(UsbTmcTransport::open(p)?),
+            Connection::Usbtmc { path: None } => Box::new(UsbTmcTransport::open_first()?),
+            Connection::Tcp { addr } => Box::new(TcpTransport::connect(addr)?),
+            Connection::Sim => Box::new(SimTransport::new()),
+        };
+        Self::from_transport(transport)
+    }
+
+    pub fn from_transport(transport: Box<dyn Transport>) -> Result<Scope> {
+        let mut scpi = Scpi::new(transport);
+        // A previous session may have left an unread response behind.
+        scpi.recover();
+        let idn = Idn::parse(&scpi.query("*IDN?")?)?;
+        info!(model = %idn.model, serial = %idn.serial, firmware = %idn.firmware, via = %scpi.describe(), "connected");
+        if !idn.model.starts_with("MHO") && !idn.model.starts_with("DHO") {
+            tracing::warn!(model = %idn.model, "not an MHO/DHO scope; commands may not match");
+        }
+        Ok(Scope { scpi, idn, wav: WavSettings::default(), raw_chunk_points: 250_000 })
+    }
+
+    pub fn idn(&self) -> &Idn {
+        &self.idn
+    }
+
+    pub fn describe(&self) -> String {
+        self.scpi.describe()
+    }
+
+    /// Direct SCPI access. Invalidates cached waveform settings.
+    pub fn scpi(&mut self) -> &mut Scpi {
+        self.wav = WavSettings::default();
+        &mut self.scpi
+    }
+
+    /// Drains the error queue; returns an error listing all entries if it was not empty.
+    pub fn check_errors(&mut self) -> Result<()> {
+        let errs = self.scpi.errors()?;
+        if errs.is_empty() {
+            Ok(())
+        } else {
+            let msg = errs.iter().map(|(c, m)| format!("{c}: {m}")).collect::<Vec<_>>().join("; ");
+            Err(DriverError::Device(msg))
+        }
+    }
+
+    // ---- status -------------------------------------------------------------------------
+
+    pub fn status(&mut self) -> Result<ScopeStatus> {
+        let channels = (1..=CHANNELS).map(|n| self.channel(n)).collect::<Result<Vec<_>>>()?;
+        Ok(ScopeStatus {
+            idn: self.idn.clone(),
+            trigger_status: self.trigger_status()?,
+            channels,
+            timebase: self.timebase()?,
+            trigger: self.trigger()?,
+            acquire: self.acquire()?,
+        })
+    }
+
+    pub fn trigger_status(&mut self) -> Result<String> {
+        Ok(self.scpi.query(":TRIG:STAT?")?.trim().to_string())
+    }
+
+    pub fn action(&mut self, action: Action) -> Result<()> {
+        let cmd = match action {
+            Action::Run => ":RUN",
+            Action::Stop => ":STOP",
+            Action::Single => ":SING",
+            Action::Autoscale => ":AUT",
+            Action::Clear => ":CLE",
+            Action::Force => ":TFOR",
+        };
+        self.scpi.write(cmd)?;
+        if action == Action::Autoscale {
+            // Autoscale takes a few seconds; the next query would otherwise time out.
+            self.scpi.with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
+        }
+        Ok(())
+    }
+
+    // ---- channels -----------------------------------------------------------------------
+
+    fn check_channel(n: u8) -> Result<()> {
+        if (1..=CHANNELS).contains(&n) {
+            Ok(())
+        } else {
+            Err(DriverError::Invalid(format!("channel {n} out of range 1..={CHANNELS}")))
+        }
+    }
+
+    pub fn channel(&mut self, n: u8) -> Result<ChannelState> {
+        Self::check_channel(n)?;
+        let p = format!(":CHAN{n}");
+        Ok(ChannelState {
+            channel: n,
+            display: self.scpi.query_bool(&format!("{p}:DISP?"))?,
+            scale: self.scpi.query_f64(&format!("{p}:SCAL?"))?,
+            offset: self.scpi.query_f64(&format!("{p}:OFFS?"))?,
+            coupling: Coupling::from_scpi(&self.scpi.query(&format!("{p}:COUP?"))?)?,
+            bw_limit: self.scpi.query(&format!("{p}:BWL?"))?,
+            probe: self.scpi.query_f64(&format!("{p}:PROB?"))?,
+            impedance: Impedance::from_scpi(&self.scpi.query(&format!("{p}:IMP?"))?)?,
+            invert: self.scpi.query_bool(&format!("{p}:INV?"))?,
+            vernier: self.scpi.query_bool(&format!("{p}:VERN?"))?,
+            unit: self.scpi.query(&format!("{p}:UNIT?"))?,
+        })
+    }
+
+    pub fn channel_displayed(&mut self, n: u8) -> Result<bool> {
+        Self::check_channel(n)?;
+        Ok(self.scpi.query_bool(&format!(":CHAN{n}:DISP?"))?)
+    }
+
+    pub fn set_channel(&mut self, n: u8, u: &ChannelUpdate) -> Result<ChannelState> {
+        Self::check_channel(n)?;
+        let p = format!(":CHAN{n}");
+        // Probe ratio first: it rescales V/div and offset.
+        if let Some(v) = u.probe {
+            positive("probe", v)?;
+            self.scpi.write(&format!("{p}:PROB {v}"))?;
+        }
+        if let Some(v) = u.impedance {
+            self.scpi.write(&format!("{p}:IMP {}", v.scpi()))?;
+        }
+        if let Some(v) = u.display {
+            self.scpi.write(&format!("{p}:DISP {}", on_off(v)))?;
+        }
+        if let Some(v) = u.vernier {
+            self.scpi.write(&format!("{p}:VERN {}", on_off(v)))?;
+        }
+        if let Some(v) = u.scale {
+            positive("scale", v)?;
+            self.scpi.write(&format!("{p}:SCAL {v:e}"))?;
+        }
+        if let Some(v) = u.offset {
+            finite("offset", v)?;
+            self.scpi.write(&format!("{p}:OFFS {v:e}"))?;
+        }
+        if let Some(v) = u.coupling {
+            self.scpi.write(&format!("{p}:COUP {}", v.scpi()))?;
+        }
+        if let Some(v) = &u.bw_limit {
+            self.scpi.write(&format!("{p}:BWL {}", token("bw_limit", v)?))?;
+        }
+        if let Some(v) = u.invert {
+            self.scpi.write(&format!("{p}:INV {}", on_off(v)))?;
+        }
+        self.check_errors()?;
+        self.channel(n)
+    }
+
+    // ---- timebase -----------------------------------------------------------------------
+
+    pub fn timebase(&mut self) -> Result<TimebaseState> {
+        Ok(TimebaseState {
+            scale: self.scpi.query_f64(":TIM:SCAL?")?,
+            offset: self.scpi.query_f64(":TIM:OFFS?")?,
+            mode: self.scpi.query(":TIM:MODE?")?,
+        })
+    }
+
+    pub fn set_timebase(&mut self, u: &TimebaseUpdate) -> Result<TimebaseState> {
+        if let Some(m) = &u.mode {
+            self.scpi.write(&format!(":TIM:MODE {}", token("mode", m)?))?;
+        }
+        if let Some(v) = u.scale {
+            positive("scale", v)?;
+            self.scpi.write(&format!(":TIM:SCAL {v:e}"))?;
+        }
+        if let Some(v) = u.offset {
+            finite("offset", v)?;
+            self.scpi.write(&format!(":TIM:OFFS {v:e}"))?;
+        }
+        self.check_errors()?;
+        self.timebase()
+    }
+
+    // ---- trigger ------------------------------------------------------------------------
+
+    pub fn trigger(&mut self) -> Result<TriggerState> {
+        Ok(TriggerState {
+            mode: self.scpi.query(":TRIG:MODE?")?,
+            sweep: TriggerSweep::from_scpi(&self.scpi.query(":TRIG:SWE?")?)?,
+            status: self.trigger_status()?,
+            coupling: self.scpi.query(":TRIG:COUP?")?,
+            holdoff: self.scpi.query_f64(":TRIG:HOLD?")?,
+            edge_source: self.scpi.query(":TRIG:EDGE:SOUR?")?,
+            edge_slope: Slope::from_scpi(&self.scpi.query(":TRIG:EDGE:SLOP?")?)?,
+            edge_level: self.scpi.query_f64(":TRIG:EDGE:LEV?")?,
+        })
+    }
+
+    pub fn set_trigger(&mut self, u: &TriggerUpdate) -> Result<TriggerState> {
+        if let Some(m) = &u.mode {
+            self.scpi.write(&format!(":TRIG:MODE {}", token("mode", m)?))?;
+        }
+        if let Some(v) = &u.edge_source {
+            let src = match normalize_source(v) {
+                Ok(s) => s,
+                Err(_) => token("edge_source", v)?.to_ascii_uppercase(),
+            };
+            self.scpi.write(&format!(":TRIG:EDGE:SOUR {src}"))?;
+        }
+        if let Some(v) = u.edge_slope {
+            self.scpi.write(&format!(":TRIG:EDGE:SLOP {}", v.scpi()))?;
+        }
+        if let Some(v) = u.edge_level {
+            finite("edge_level", v)?;
+            self.scpi.write(&format!(":TRIG:EDGE:LEV {v:e}"))?;
+        }
+        if let Some(v) = &u.coupling {
+            self.scpi.write(&format!(":TRIG:COUP {}", token("coupling", v)?))?;
+        }
+        if let Some(v) = u.holdoff {
+            positive("holdoff", v)?;
+            self.scpi.write(&format!(":TRIG:HOLD {v:e}"))?;
+        }
+        if let Some(v) = u.sweep {
+            self.scpi.write(&format!(":TRIG:SWE {}", v.scpi()))?;
+        }
+        self.check_errors()?;
+        self.trigger()
+    }
+
+    // ---- acquisition --------------------------------------------------------------------
+
+    pub fn acquire(&mut self) -> Result<AcquireState> {
+        Ok(AcquireState {
+            sample_rate: self.scpi.query_f64(":ACQ:SRAT?")?,
+            memory_depth: self.scpi.query_f64(":ACQ:MDEP?").unwrap_or(f64::NAN),
+            acq_type: AcquireType::from_scpi(&self.scpi.query(":ACQ:TYPE?")?)?,
+            averages: self.scpi.query_f64(":ACQ:AVER?")? as u32,
+        })
+    }
+
+    pub fn set_acquire(&mut self, u: &AcquireUpdate) -> Result<AcquireState> {
+        if let Some(t) = u.acq_type {
+            self.scpi.write(&format!(":ACQ:TYPE {}", t.scpi()))?;
+        }
+        if let Some(n) = u.averages {
+            if !n.is_power_of_two() || n < 2 {
+                return Err(DriverError::Invalid(format!("averages must be a power of two ≥ 2, got {n}")));
+            }
+            self.scpi.write(&format!(":ACQ:AVER {n}"))?;
+        }
+        if let Some(d) = &u.memory_depth {
+            self.scpi.write(&format!(":ACQ:MDEP {}", token("memory_depth", d)?))?;
+        }
+        self.check_errors()?;
+        self.acquire()
+    }
+
+    // ---- measurements -------------------------------------------------------------------
+
+    /// Queries one `:MEASure:ITEM?`. `source2` is required for delay/phase items.
+    pub fn measure(&mut self, item: &str, source: &str, source2: Option<&str>) -> Result<Measurement> {
+        let it = find_item(item)?;
+        let src = normalize_source(source)?;
+        let cmd = if it.dual_source {
+            let s2 = source2
+                .ok_or_else(|| DriverError::Invalid(format!("{} needs a second source", it.long)))?;
+            format!(":MEAS:ITEM? {},{},{}", it.token, src, normalize_source(s2)?)
+        } else {
+            format!(":MEAS:ITEM? {},{}", it.token, src)
+        };
+        let raw = self.scpi.query_f64(&cmd)?;
+        Ok(Measurement { item: it.long.to_string(), source: src, value: valid_value(raw), unit: it.unit.to_string() })
+    }
+
+    pub fn measure_many(&mut self, items: &[String], source: &str) -> Result<Vec<Measurement>> {
+        items.iter().map(|i| self.measure(i, source, None)).collect()
+    }
+
+    // ---- waveforms ----------------------------------------------------------------------
+
+    fn configure_wav(&mut self, source: &str, mode: WaveMode) -> Result<()> {
+        if self.wav.source.as_deref() != Some(source) {
+            self.scpi.write(&format!(":WAV:SOUR {source}"))?;
+            self.wav.source = Some(source.to_string());
+        }
+        if self.wav.mode != Some(mode) {
+            self.scpi.write(&format!(":WAV:MODE {}", mode.scpi()))?;
+            self.wav.mode = Some(mode);
+        }
+        if !self.wav.word {
+            self.scpi.write(":WAV:FORM WORD")?;
+            self.wav.word = true;
+        }
+        Ok(())
+    }
+
+    pub fn preamble(&mut self, source: &str, mode: WaveMode) -> Result<Preamble> {
+        let src = normalize_source(source)?;
+        self.configure_wav(&src, mode)?;
+        Preamble::parse(&self.scpi.query(":WAV:PRE?")?)
+    }
+
+    /// Reads waveform data for an already configured source (see [`Self::preamble`]).
+    fn read_words(&mut self, cmd: &str, progress: &mut dyn FnMut(usize, usize)) -> Result<Vec<u16>> {
+        let bytes = self.scpi.query_block_progress(cmd, progress)?;
+        if bytes.len() % 2 != 0 {
+            return Err(DriverError::Invalid(format!("odd WORD data length {}", bytes.len())));
+        }
+        Ok(bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect())
+    }
+
+    /// Screen waveform (`NORM`, ~1000 points). Pass a cached preamble to save a round trip.
+    pub fn screen_waveform(&mut self, source: &str, preamble: Option<Preamble>) -> Result<Waveform> {
+        let src = normalize_source(source)?;
+        self.configure_wav(&src, WaveMode::Normal)?;
+        let preamble = match preamble {
+            Some(p) => p,
+            None => Preamble::parse(&self.scpi.query(":WAV:PRE?")?)?,
+        };
+        let raw = self.read_words(":WAV:DATA?", &mut |_, _| {})?;
+        Ok(Waveform { source: src, preamble, raw })
+    }
+
+    /// Full acquisition memory (`RAW`). The scope must be stopped; downloads in chunks of
+    /// [`Self::raw_chunk_points`] and reports `(points_done, points_total)`.
+    pub fn raw_waveform(&mut self, source: &str, progress: &mut dyn FnMut(usize, usize)) -> Result<Waveform> {
+        let status = self.trigger_status()?;
+        if status != "STOP" {
+            return Err(DriverError::Invalid(format!(
+                "RAW readout needs a stopped acquisition (trigger status is {status}); send STOP or SINGLE first"
+            )));
+        }
+        let src = normalize_source(source)?;
+        self.configure_wav(&src, WaveMode::Raw)?;
+        let preamble = Preamble::parse(&self.scpi.query(":WAV:PRE?")?)?;
+        let total = preamble.points;
+        let chunk = self.raw_chunk_points.max(1000);
+        let mut raw = Vec::with_capacity(total);
+        let timeout = self.scpi.timeout().max(Duration::from_secs(10));
+        self.scpi.with_timeout(timeout, |scpi| {
+            let mut start = 1usize;
+            while start <= total {
+                let stop = (start + chunk - 1).min(total);
+                // STOP before STAR so that start never exceeds the previous stop.
+                scpi.write(&format!(":WAV:STOP {stop}"))?;
+                scpi.write(&format!(":WAV:STAR {start}"))?;
+                let done = raw.len();
+                let bytes = scpi.query_block_progress(":WAV:DATA?", &mut |got, _| progress(done + got / 2, total))?;
+                raw.extend(bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])));
+                debug!(start, stop, got = raw.len(), "raw chunk");
+                start = stop + 1;
+            }
+            Ok(())
+        })?;
+        progress(raw.len(), total);
+        Ok(Waveform { source: src, preamble, raw })
+    }
+
+    // ---- display / setup ----------------------------------------------------------------
+
+    pub fn screenshot(&mut self) -> Result<Vec<u8>> {
+        let png = self.scpi.with_timeout(Duration::from_secs(15), |s| s.query_block(":DISP:DATA? PNG"))?;
+        if !png.starts_with(b"\x89PNG") {
+            return Err(DriverError::Invalid("screenshot is not a PNG".into()));
+        }
+        Ok(png)
+    }
+
+    /// Binary setup blob (`:SYSTem:SETup?`) for later restore.
+    pub fn setup_save(&mut self) -> Result<Vec<u8>> {
+        Ok(self.scpi.with_timeout(Duration::from_secs(10), |s| s.query_block(":SYST:SET?"))?)
+    }
+
+    pub fn setup_load(&mut self, blob: &[u8]) -> Result<()> {
+        self.scpi.write_block(":SYST:SET", blob)?;
+        self.wav = WavSettings::default();
+        self.scpi.with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
+        self.check_errors()
+    }
+
+    // ---- options ------------------------------------------------------------------------
+
+    pub fn options(&mut self) -> Result<Vec<OptionInfo>> {
+        OPTIONS
+            .iter()
+            .map(|(name, description)| {
+                Ok(OptionInfo {
+                    name: name.to_string(),
+                    description: description.to_string(),
+                    active: self.scpi.query_bool(&format!(":SYST:OPT:VAL? {name}"))?,
+                })
+            })
+            .collect()
+    }
+
+    /// Installs a purchased option license key.
+    pub fn install_option(&mut self, key: &str) -> Result<()> {
+        let key = key.trim();
+        if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(DriverError::Invalid("license key must be alphanumeric (dashes allowed)".into()));
+        }
+        self.scpi.write(&format!(":SYST:OPT:INST {key}"))?;
+        self.scpi.with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
+        self.check_errors()
+    }
+
+    // ---- raw SCPI -----------------------------------------------------------------------
+
+    /// Sends arbitrary SCPI. Queries (containing `?`) return the response line; commands
+    /// return `None` after checking the error queue. Uses a short timeout because the scope
+    /// does not answer unknown queries.
+    pub fn raw(&mut self, cmd: &str, timeout: Duration) -> Result<Option<String>> {
+        let cmd = cmd.trim();
+        if cmd.is_empty() {
+            return Err(DriverError::Invalid("empty command".into()));
+        }
+        let scpi = self.scpi();
+        if cmd.contains('?') {
+            Ok(Some(scpi.with_timeout(timeout, |s| s.query(cmd))?))
+        } else {
+            scpi.write(cmd)?;
+            self.check_errors()?;
+            Ok(None)
+        }
+    }
+}
+
+fn on_off(v: bool) -> &'static str {
+    if v { "ON" } else { "OFF" }
+}
+
+fn positive(name: &str, v: f64) -> Result<()> {
+    if v.is_finite() && v > 0.0 {
+        Ok(())
+    } else {
+        Err(DriverError::Invalid(format!("{name} must be > 0, got {v}")))
+    }
+}
+
+fn finite(name: &str, v: f64) -> Result<()> {
+    if v.is_finite() { Ok(()) } else { Err(DriverError::Invalid(format!("{name} must be finite"))) }
+}
+
+/// Accepts a bare SCPI token (letters, digits, `.`, `+`, `-`) to prevent command injection
+/// through `;` or newlines in string parameters.
+fn token<'a>(name: &str, v: &'a str) -> Result<&'a str> {
+    let v = v.trim();
+    if !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-')) {
+        Ok(v)
+    } else {
+        Err(DriverError::Invalid(format!("{name}: invalid value {v:?}")))
+    }
+}

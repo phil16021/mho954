@@ -1,0 +1,16 @@
+[package]
+name = "mho-driver"
+description = "Typed driver for Rigol MHO900-series oscilloscopes, plus a simulator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mho-dsp.workspace = true
+mho-scpi.workspace = true
+png.workspace = true
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+utoipa.workspace = true

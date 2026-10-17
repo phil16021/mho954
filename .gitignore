@@ -1,0 +1,5 @@
+/target
+*.npy
+*.png
+!docs/**/*.png
+/captures

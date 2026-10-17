@@ -1,0 +1,4 @@
+# Rigol MHO954 (USB/IP-durchgereicht vom Windows-Host). USBTMC-Geraeteknoten
+# /dev/usbtmcN fuer Gruppe dialout lesbar/schreibbar.
+SUBSYSTEM=="usb", ATTR{idVendor}=="1ab1", ATTR{idProduct}=="0452", MODE="0660", GROUP="dialout", TAG+="uaccess"
+KERNEL=="usbtmc[0-9]*", ATTRS{idVendor}=="1ab1", ATTRS{idProduct}=="0452", MODE="0660", GROUP="dialout", SYMLINK+="usbtmc_MHO954"
