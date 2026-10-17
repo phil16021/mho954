@@ -79,7 +79,7 @@ pub fn analyze(v: &[f64], dt: f64) -> Measurements {
         let period = periods.iter().sum::<f64>() / periods.len() as f64 * dt;
         m.period = Some(period);
         m.frequency = Some(1.0 / period);
-        m.duty = duty_cycle(&edges).map(|d| d * 100.0);
+        m.duty = duty_cycle(&edges, period / dt).map(|d| d * 100.0);
     }
 
     let lo = vbase + 0.1 * vamp;
@@ -158,16 +158,14 @@ fn find_edges(v: &[f64], mid: f64, hyst: f64) -> Vec<Edge> {
     edges
 }
 
-fn duty_cycle(edges: &[Edge]) -> Option<f64> {
-    let mut high = 0.0;
-    let mut total = 0.0;
-    for w in edges.windows(3) {
-        if w[0].rising && !w[1].rising && w[2].rising {
-            high += w[1].pos - w[0].pos;
-            total += w[2].pos - w[0].pos;
-        }
+/// Mean high time (rising → next falling edge) relative to the period (in samples).
+fn duty_cycle(edges: &[Edge], period: f64) -> Option<f64> {
+    let highs: Vec<f64> =
+        edges.windows(2).filter(|w| w[0].rising && !w[1].rising).map(|w| w[1].pos - w[0].pos).collect();
+    if highs.is_empty() || period <= 0.0 {
+        return None;
     }
-    (total > 0.0).then(|| high / total)
+    Some(highs.iter().sum::<f64>() / highs.len() as f64 / period)
 }
 
 /// Time in samples between crossing `from` and `to` around the edge at `pos`.
@@ -252,6 +250,15 @@ mod tests {
         assert!((rise - 8e-6).abs() < 0.5e-6, "rise {rise}");
         let fall = m.fall_time.unwrap();
         assert!((fall - 8e-6).abs() < 0.5e-6, "fall {fall}");
+    }
+
+    #[test]
+    fn duty_with_single_rising_edge() {
+        // high, low, high, low: only one rising edge in the record.
+        let v: Vec<f64> = (0..2000).map(|i| if (i / 500) % 2 == 0 { 3.0 } else { 0.0 }).collect();
+        let m = analyze(&v, 1e-6);
+        assert!((m.duty.unwrap() - 50.0).abs() < 0.5, "duty {:?}", m.duty);
+        assert!((m.frequency.unwrap() - 1e3).abs() < 1.0);
     }
 
     #[test]
