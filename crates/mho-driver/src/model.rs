@@ -53,7 +53,7 @@ scpi_enum!(TriggerSweep { Auto => "AUTO", Normal => "NORM" | "NORMAL", Single =>
 
 scpi_enum!(Slope { Positive => "POS" | "RISING" | "RISE", Negative => "NEG" | "FALLING" | "FALL", Either => "RFAL" | "EITHER" | "BOTH" });
 
-scpi_enum!(AcquireType { Normal => "NORM" | "NORMAL", Peak => "PEAK", Average => "AVER" | "AVERAGE", Ultra => "ULTR" | "ULTRA" });
+scpi_enum!(AcquireType { Normal => "NORM" | "NORMAL", Peak => "PEAK", Average => "AVER" | "AVERAGES" | "AVERAGE", HighRes => "HRES" | "HRESOLUTION" });
 
 scpi_enum!(
     /// `:WAVeform:MODE`: `NORM` = screen data (1000 pts), `RAW` = acquisition memory (needs STOP).
@@ -116,7 +116,7 @@ pub struct ChannelUpdate {
     /// Vertical offset in volts.
     pub offset: Option<f64>,
     pub coupling: Option<Coupling>,
-    /// `OFF`, `20M`, ...
+    /// `OFF`, `20M`, `250M`.
     pub bw_limit: Option<String>,
     pub probe: Option<f64>,
     pub impedance: Option<Impedance>,
@@ -181,7 +181,7 @@ pub struct AcquireState {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct AcquireUpdate {
-    /// `AUTO`, `1k`, `10k`, `100k`, `1M`, `10M`, `25M`, `50M`, `100M` ...
+    /// `AUTO`, `1k`, `10k`, `100k`, `1M`, `10M`, `25M`, `50M`, `100M` (125M…500M with RLU-05).
     pub memory_depth: Option<String>,
     pub acq_type: Option<AcquireType>,
     /// Power of two, used with `acq_type = Average`.

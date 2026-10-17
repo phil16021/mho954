@@ -466,21 +466,30 @@ impl Scope {
     pub fn options(&mut self) -> Result<Vec<OptionInfo>> {
         OPTIONS
             .iter()
-            .map(|(name, description)| {
+            .map(|o| {
                 Ok(OptionInfo {
-                    name: name.to_string(),
-                    description: description.to_string(),
-                    active: self.scpi.query_bool(&format!(":SYST:OPT:VAL? {name}"))?,
+                    name: o.code.to_string(),
+                    description: o.description.to_string(),
+                    active: self.scpi.query_bool(&format!(":SYST:OPT:STAT? {}", o.token))?,
                 })
             })
             .collect()
     }
 
-    /// Installs a purchased option license key.
-    pub fn install_option(&mut self, key: &str) -> Result<()> {
-        let key = key.trim();
-        if key.is_empty() || !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-            return Err(DriverError::Invalid("license key must be alphanumeric (dashes allowed)".into()));
+    /// Installs a purchased option license (`<series>-<option>@<code>`, generated on
+    /// rigol.com → License Activation from the purchased key and the serial number).
+    pub fn install_option(&mut self, license: &str) -> Result<()> {
+        let key: String = license.chars().filter(|c| !c.is_whitespace()).collect();
+        let valid = key.split_once('@').is_some_and(|(head, code)| {
+            head.contains('-')
+                && head.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+                && !code.is_empty()
+                && code.chars().all(|c| c.is_ascii_alphanumeric())
+        });
+        if !valid {
+            return Err(DriverError::Invalid(
+                "license must look like MHO900-<OPTION>@<code> (from rigol.com License Activation)".into(),
+            ));
         }
         self.scpi.write(&format!(":SYST:OPT:INST {key}"))?;
         self.scpi.with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;

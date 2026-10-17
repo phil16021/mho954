@@ -33,7 +33,7 @@ pub struct ChannelArgs {
     /// DC | AC | GND.
     #[arg(long)]
     pub coupling: Option<Coupling>,
-    /// Bandwidth limit, e.g. OFF | 20M.
+    /// Bandwidth limit: OFF | 20M | 250M.
     #[arg(long)]
     pub bwl: Option<String>,
     /// Probe ratio, e.g. 10.
@@ -83,8 +83,9 @@ pub struct TriggerArgs {
 pub enum OptionsCmd {
     /// List options and their state.
     List,
-    /// Install a purchased license key.
-    Install { key: String },
+    /// Install a purchased option license: MHO900-<OPTION>@<code>, generated on
+    /// rigol.com → License Activation from the key you bought and the scope's serial.
+    Install { license: String },
 }
 
 #[derive(Subcommand)]
@@ -289,8 +290,8 @@ pub async fn run(cli: Cli, cfg: Config) -> anyhow::Result<()> {
                     println!("{} {:<10} {}", if o.active { "[x]" } else { "[ ]" }, o.name, o.description);
                 }
             }
-            OptionsCmd::Install { key } => {
-                api.install_option(key).await?;
+            OptionsCmd::Install { license } => {
+                api.install_option(license).await?;
                 println!("key accepted; current options:");
                 for o in api.options().await?.iter().filter(|o| o.active) {
                     println!("  [x] {:<10} {}", o.name, o.description);

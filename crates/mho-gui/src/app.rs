@@ -17,7 +17,7 @@ pub const CH_COLORS: [Color32; 4] = [
     Color32::from_rgb(70, 130, 255),
 ];
 
-const DEPTHS: &[&str] = &["AUTO", "1k", "10k", "100k", "1M", "10M", "25M", "50M", "100M"];
+const DEPTHS: &[&str] = &["AUTO", "1k", "10k", "100k", "1M", "10M", "25M", "50M", "100M", "125M", "200M", "250M", "500M"];
 const H_DIVS: f64 = 10.0;
 const V_DIVS: f64 = 8.0;
 
@@ -500,7 +500,7 @@ impl ScopeApp {
                 });
                 ui.horizontal(|ui| {
                     ui.label("BWL");
-                    for bwl in ["OFF", "20M"] {
+                    for bwl in ["OFF", "20M", "250M"] {
                         if ui.selectable_label(c.bw_limit.eq_ignore_ascii_case(bwl), bwl).clicked() {
                             self.set_channel(n, ChannelUpdate { bw_limit: Some(bwl.into()), ..Default::default() });
                         }

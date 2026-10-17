@@ -121,7 +121,7 @@ impl McpScope {
     }
 
     #[tool(description = "Change settings of one analog channel. Only the given fields are changed. \
-        scale is volts/div, offset in volts, coupling DC|AC|GND, impedance OneMeg|Fifty, bw_limit e.g. OFF|20M.")]
+        scale is volts/div, offset in volts, coupling DC|AC|GND, impedance OneMeg|Fifty, bw_limit OFF|20M|250M.")]
     async fn configure_channel(&self, Parameters(p): Parameters<ConfigureChannel>) -> ToolResult {
         ok_json(&try_api!(self.api.set_channel(p.channel, p.settings).await))
     }
@@ -137,8 +137,8 @@ impl McpScope {
         ok_json(&try_api!(self.api.set_trigger(p).await))
     }
 
-    #[tool(description = "Change acquisition: memory_depth (AUTO, 1k, 10k, 100k, 1M, 10M, 25M, 50M, 100M), \
-        acq_type (Normal|Peak|Average|Ultra), averages (power of two).")]
+    #[tool(description = "Change acquisition: memory_depth (AUTO, 1k, 10k, 100k, 1M, 10M, 25M, 50M, 100M; up to 500M with RLU-05), \
+        acq_type (Normal|Peak|Average|HighRes), averages (power of two).")]
     async fn configure_acquisition(&self, Parameters(p): Parameters<AcquireUpdate>) -> ToolResult {
         ok_json(&try_api!(self.api.set_acquire(p).await))
     }

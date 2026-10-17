@@ -1,0 +1,19 @@
+# systemd user unit for the mho954 daemon (REST API, live WebSocket, MCP).
+#
+#   install -Dm644 contrib/mho954.service ~/.config/systemd/user/mho954.service
+#   systemctl --user daemon-reload && systemctl --user enable --now mho954
+#
+# The daemon reconnects automatically when the scope (re)appears on USB.
+
+[Unit]
+Description=Rigol MHO954 control daemon (REST, WebSocket, MCP)
+After=network.target
+
+[Service]
+ExecStart=%h/.cargo/bin/mho954 serve
+Restart=on-failure
+RestartSec=3
+Environment=RUST_LOG=info
+
+[Install]
+WantedBy=default.target

@@ -355,8 +355,8 @@ impl SimTransport {
                 None => "0,\"No error\"".into(),
             },
             ":SYST:VERS" => "3.0".into(),
-            ":SYST:OPT:VAL" => {
-                if OPTIONS.iter().any(|(n, _)| n.eq_ignore_ascii_case(args)) {
+            ":SYST:OPT:VAL" | ":SYST:OPT:STAT" => {
+                if OPTIONS.iter().any(|o| o.token.eq_ignore_ascii_case(args)) {
                     "0".into()
                 } else {
                     return false;

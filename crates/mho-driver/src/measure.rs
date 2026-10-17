@@ -42,7 +42,7 @@ pub const MEASURE_ITEMS: &[MeasureItem] = &[
     item("VUPP", "VUPPER", "V", "Upper threshold level"),
     item("VMID", "VMID", "V", "Middle threshold level"),
     item("VLOW", "VLOWER", "V", "Lower threshold level"),
-    item("VAR", "VARIANCE", "V²", "Variance"),
+    item("ACRM", "ACRMS", "V", "AC RMS (DC removed)"),
     item("OVER", "OVERSHOOT", "%", "Overshoot"),
     item("PRES", "PRESHOOT", "%", "Preshoot"),
     item("MAR", "MAREA", "Vs", "Area"),
