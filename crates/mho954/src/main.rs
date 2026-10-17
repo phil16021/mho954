@@ -148,6 +148,23 @@ pub enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Verify guide commands on the instrument (budgeted: the firmware hangs after ~5
+    /// unanswered queries per power cycle). Direct connection only.
+    Verify {
+        /// Groups to check (default: all). `--list` shows them.
+        groups: Vec<String>,
+        #[arg(long)]
+        list: bool,
+        /// After a power cycle: reset the unanswered-query budget.
+        #[arg(long)]
+        reset_budget: bool,
+        /// Unanswered queries already spent in this power cycle (e.g. by earlier tests).
+        #[arg(long)]
+        assume_used: Option<u32>,
+        /// Results file (merged with earlier runs).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
     /// Print the effective configuration as TOML.
     Config,
 }

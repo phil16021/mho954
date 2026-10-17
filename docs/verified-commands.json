@@ -1,0 +1,116 @@
+[
+  {
+    "command": ":SYST:OPT:STAT? BWU05T08",
+    "group": "options",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SYST:OPT:STAT? BWU03T05",
+    "group": "options",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SYST:OPT:STAT? BWU03T08",
+    "group": "options",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SYST:OPT:STAT? RLU-05",
+    "group": "options",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SYST:OPT:STAT? AFG50",
+    "group": "options",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SYST:OPT:STAT? AFG100",
+    "group": "options",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SYST:OPT:STAT? CAN-FD",
+    "group": "options",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SYST:OPT:STAT? FLEX",
+    "group": "options",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SYST:OPT:STAT? AUDio",
+    "group": "options",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SYST:OPT:STAT? AERO",
+    "group": "options",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SYST:OPT:STAT? BND",
+    "group": "options",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SYST:MOD?",
+    "group": "system",
+    "outcome": "ok",
+    "detail": "1,0,0,0,0"
+  },
+  {
+    "command": "*ESR?",
+    "group": "system",
+    "outcome": "ok",
+    "detail": "32"
+  },
+  {
+    "command": "*STB?",
+    "group": "system",
+    "outcome": "ok",
+    "detail": "20"
+  },
+  {
+    "command": "*CLS",
+    "group": "system",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":TIM:SCAL?;:CHAN1:SCAL?",
+    "group": "compound",
+    "outcome": "ok",
+    "detail": "2.000000E-6;5.000000E-02"
+  },
+  {
+    "command": ":WAV:SOUR D0",
+    "group": "digital",
+    "outcome": "rejected",
+    "detail": "-200: Command execute failed"
+  },
+  {
+    "command": ":WAV:SOUR CHAN1",
+    "group": "digital",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":MEAS:ITEM VPP,CHAN1",
+    "group": "measure",
+    "outcome": "ok",
+    "detail": ""
+  }
+]

@@ -124,6 +124,26 @@ impl Scpi {
         r
     }
 
+    /// Sends several queries in one message (`a?;b?;c?`) and returns the answers. The MHO954
+    /// answers compound queries with one line, values separated by `;` (verified on hardware).
+    /// Answers must not contain `;` themselves.
+    pub fn query_many(&mut self, cmds: &[String]) -> Result<Vec<String>> {
+        let joined = cmds.join(";");
+        let line = self.query(&joined)?;
+        let parts: Vec<String> = line.split(';').map(|p| p.trim().to_string()).collect();
+        if parts.len() != cmds.len() {
+            return Err(ScpiError::parse(
+                &joined,
+                format!(
+                    "expected {} answers, got {}: {line:?}",
+                    cmds.len(),
+                    parts.len()
+                ),
+            ));
+        }
+        Ok(parts)
+    }
+
     pub fn query_f64(&mut self, cmd: &str) -> Result<f64> {
         let s = self.query(cmd)?;
         s.trim()

@@ -196,6 +196,8 @@ pub struct SimTransport {
     unknown_count: u32,
     /// Firmware hung for good (power cycle needed).
     hung: bool,
+    /// Length of `pending` when the current message arrived (compound answers).
+    message_start: usize,
     /// `:MEAS:ITEM?` item/source pairs seen; the first query of each returns 9.9E37.
     measured: std::collections::HashSet<String>,
     errors: Vec<(i32, String)>,
@@ -234,6 +236,7 @@ impl SimTransport {
             unknown_count: 0,
             hung: false,
             measured: Default::default(),
+            message_start: 0,
             errors: Vec::new(),
             pending: Vec::new(),
             rng: 0x2545_F491_4F6C_DD1D,
@@ -438,6 +441,11 @@ impl SimTransport {
     }
 
     fn respond(&mut self, s: impl AsRef<[u8]>) {
+        // Compound queries are answered in one line with `;` separators, like the real scope.
+        if self.pending.len() > self.message_start && self.pending.last() == Some(&b'\n') {
+            self.pending.pop();
+            self.pending.push(b';');
+        }
         self.pending.extend_from_slice(s.as_ref());
         self.pending.push(b'\n');
     }
@@ -948,6 +956,7 @@ impl Transport for SimTransport {
             return Ok(());
         }
         let text = String::from_utf8_lossy(data).into_owned();
+        self.message_start = self.pending.len();
         for line in text.split(['\n', ';']) {
             self.execute(line);
         }

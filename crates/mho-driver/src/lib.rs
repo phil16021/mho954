@@ -9,6 +9,7 @@ pub mod model;
 pub mod options;
 mod scope;
 pub mod sim;
+pub mod verify;
 
 pub use error::{DriverError, Result};
 pub use measure::{MEASURE_ITEMS, MeasureItem, find_item};

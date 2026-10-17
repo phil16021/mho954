@@ -272,19 +272,23 @@ impl Scope {
 
     pub fn channel(&mut self, n: u8) -> Result<ChannelState> {
         Self::check_channel(n)?;
-        let p = format!(":CHAN{n}");
+        let props = [
+            "DISP", "SCAL", "OFFS", "COUP", "BWL", "PROB", "IMP", "INV", "VERN", "UNIT",
+        ];
+        let cmds: Vec<String> = props.iter().map(|p| format!(":CHAN{n}:{p}?")).collect();
+        let a = self.scpi.query_many(&cmds)?;
         let state = ChannelState {
             channel: n,
-            display: self.scpi.query_bool(&format!("{p}:DISP?"))?,
-            scale: self.scpi.query_f64(&format!("{p}:SCAL?"))?,
-            offset: self.scpi.query_f64(&format!("{p}:OFFS?"))?,
-            coupling: Coupling::from_scpi(&self.scpi.query(&format!("{p}:COUP?"))?)?,
-            bw_limit: self.scpi.query(&format!("{p}:BWL?"))?,
-            probe: self.scpi.query_f64(&format!("{p}:PROB?"))?,
-            impedance: Impedance::from_scpi(&self.scpi.query(&format!("{p}:IMP?"))?)?,
-            invert: self.scpi.query_bool(&format!("{p}:INV?"))?,
-            vernier: self.scpi.query_bool(&format!("{p}:VERN?"))?,
-            unit: self.scpi.query(&format!("{p}:UNIT?"))?,
+            display: parse_bool(&cmds[0], &a[0])?,
+            scale: parse_f64(&cmds[1], &a[1])?,
+            offset: parse_f64(&cmds[2], &a[2])?,
+            coupling: Coupling::from_scpi(&a[3])?,
+            bw_limit: a[4].clone(),
+            probe: parse_f64(&cmds[5], &a[5])?,
+            impedance: Impedance::from_scpi(&a[6])?,
+            invert: parse_bool(&cmds[7], &a[7])?,
+            vernier: parse_bool(&cmds[8], &a[8])?,
+            unit: a[9].clone(),
         };
         self.chan_cache[(n - 1) as usize] = Some(state.clone());
         Ok(state)
@@ -340,10 +344,12 @@ impl Scope {
     // ---- timebase -----------------------------------------------------------------------
 
     pub fn timebase(&mut self) -> Result<TimebaseState> {
+        let cmds = queries(&[":TIM:SCAL?", ":TIM:OFFS?", ":TIM:MODE?"]);
+        let a = self.scpi.query_many(&cmds)?;
         Ok(TimebaseState {
-            scale: self.scpi.query_f64(":TIM:SCAL?")?,
-            offset: self.scpi.query_f64(":TIM:OFFS?")?,
-            mode: self.scpi.query(":TIM:MODE?")?,
+            scale: parse_f64(&cmds[0], &a[0])?,
+            offset: parse_f64(&cmds[1], &a[1])?,
+            mode: a[2].clone(),
         })
     }
 
@@ -373,15 +379,25 @@ impl Scope {
     }
 
     fn trigger_with_status(&mut self, status: String) -> Result<TriggerState> {
+        let cmds = queries(&[
+            ":TRIG:MODE?",
+            ":TRIG:SWE?",
+            ":TRIG:COUP?",
+            ":TRIG:HOLD?",
+            ":TRIG:EDGE:SOUR?",
+            ":TRIG:EDGE:SLOP?",
+            ":TRIG:EDGE:LEV?",
+        ]);
+        let a = self.scpi.query_many(&cmds)?;
         Ok(TriggerState {
-            mode: self.scpi.query(":TRIG:MODE?")?,
-            sweep: TriggerSweep::from_scpi(&self.scpi.query(":TRIG:SWE?")?)?,
+            mode: a[0].clone(),
+            sweep: TriggerSweep::from_scpi(&a[1])?,
             status,
-            coupling: self.scpi.query(":TRIG:COUP?")?,
-            holdoff: self.scpi.query_f64(":TRIG:HOLD?")?,
-            edge_source: self.scpi.query(":TRIG:EDGE:SOUR?")?,
-            edge_slope: Slope::from_scpi(&self.scpi.query(":TRIG:EDGE:SLOP?")?)?,
-            edge_level: self.scpi.query_f64(":TRIG:EDGE:LEV?")?,
+            coupling: a[2].clone(),
+            holdoff: parse_f64(&cmds[3], &a[3])?,
+            edge_source: a[4].clone(),
+            edge_slope: Slope::from_scpi(&a[5])?,
+            edge_level: parse_f64(&cmds[6], &a[6])?,
         })
     }
 
@@ -423,15 +439,14 @@ impl Scope {
     // ---- acquisition --------------------------------------------------------------------
 
     pub fn acquire(&mut self) -> Result<AcquireState> {
+        let cmds = queries(&[":ACQ:SRAT?", ":ACQ:MDEP?", ":ACQ:TYPE?", ":ACQ:AVER?"]);
+        let a = self.scpi.query_many(&cmds)?;
         Ok(AcquireState {
-            sample_rate: self.scpi.query_f64(":ACQ:SRAT?")?,
-            memory_depth: match self.scpi.query_f64(":ACQ:MDEP?") {
-                Ok(v) => Some(v),
-                Err(mho_scpi::ScpiError::Parse { .. }) => None,
-                Err(e) => return Err(e.into()),
-            },
-            acq_type: AcquireType::from_scpi(&self.scpi.query(":ACQ:TYPE?")?)?,
-            averages: self.scpi.query_f64(":ACQ:AVER?")? as u32,
+            sample_rate: parse_f64(&cmds[0], &a[0])?,
+            // Unparsable depth (e.g. while AUTO settles) is reported as unknown.
+            memory_depth: a[1].parse::<f64>().ok(),
+            acq_type: AcquireType::from_scpi(&a[2])?,
+            averages: parse_f64(&cmds[3], &a[3])? as u32,
         })
     }
 
@@ -715,22 +730,38 @@ impl Scope {
     // ---- network (RJ45) -----------------------------------------------------------------
 
     pub fn network(&mut self) -> Result<NetworkState> {
-        let s = &mut self.scpi;
+        let cmds = queries(&[
+            ":LAN:STAT?",
+            ":LAN:DHCP?",
+            ":LAN:AUT?",
+            ":LAN:MAN?",
+            ":LAN:IPAD?",
+            ":LAN:SMAS?",
+            ":LAN:GAT?",
+            ":LAN:DNS?",
+            ":LAN:MAC?",
+            ":LAN:DSER?",
+            ":LAN:MDNS?",
+            ":LAN:HOST:NAME?",
+            ":LAN:DESC?",
+            ":LAN:VISA?",
+        ]);
+        let a = self.scpi.query_many(&cmds)?;
         Ok(NetworkState {
-            status: s.query(":LAN:STAT?")?,
-            dhcp: s.query_bool(":LAN:DHCP?")?,
-            auto_ip: s.query_bool(":LAN:AUT?")?,
-            manual: s.query_bool(":LAN:MAN?")?,
-            ip: s.query(":LAN:IPAD?")?,
-            mask: s.query(":LAN:SMAS?")?,
-            gateway: s.query(":LAN:GAT?")?,
-            dns: s.query(":LAN:DNS?")?,
-            mac: s.query(":LAN:MAC?")?,
-            dhcp_server: s.query(":LAN:DSER?")?,
-            mdns: s.query_bool(":LAN:MDNS?")?,
-            hostname: s.query(":LAN:HOST:NAME?")?,
-            description: s.query(":LAN:DESC?")?,
-            visa: s.query(":LAN:VISA?")?,
+            status: a[0].clone(),
+            dhcp: parse_bool(&cmds[1], &a[1])?,
+            auto_ip: parse_bool(&cmds[2], &a[2])?,
+            manual: parse_bool(&cmds[3], &a[3])?,
+            ip: a[4].clone(),
+            mask: a[5].clone(),
+            gateway: a[6].clone(),
+            dns: a[7].clone(),
+            mac: a[8].clone(),
+            dhcp_server: a[9].clone(),
+            mdns: parse_bool(&cmds[10], &a[10])?,
+            hostname: a[11].clone(),
+            description: a[12].clone(),
+            visa: a[13].clone(),
         })
     }
 
@@ -894,6 +925,26 @@ impl Scope {
             scpi.write(cmd)?;
             self.check_errors()?;
             Ok(None)
+        }
+    }
+}
+
+fn queries(q: &[&str]) -> Vec<String> {
+    q.iter().map(|s| s.to_string()).collect()
+}
+
+fn parse_f64(cmd: &str, v: &str) -> Result<f64> {
+    v.trim()
+        .parse::<f64>()
+        .map_err(|e| mho_scpi::ScpiError::parse(cmd, format!("{v:?}: {e}")).into())
+}
+
+fn parse_bool(cmd: &str, v: &str) -> Result<bool> {
+    match v.trim().to_ascii_uppercase().as_str() {
+        "1" | "ON" => Ok(true),
+        "0" | "OFF" => Ok(false),
+        other => {
+            Err(mho_scpi::ScpiError::parse(cmd, format!("expected boolean, got {other:?}")).into())
         }
     }
 }

@@ -222,6 +222,24 @@ pub async fn run(cli: Cli, cfg: Config) -> anyhow::Result<()> {
             let n = *count;
             return with_scope(&cfg, move |s| bench(s, n)).await;
         }
+        Command::Verify {
+            groups,
+            list,
+            reset_budget,
+            assume_used,
+            output,
+        } => {
+            return verify_cmd(
+                &cli,
+                &cfg,
+                groups.clone(),
+                *list,
+                *reset_budget,
+                *assume_used,
+                output.clone(),
+            )
+            .await;
+        }
         Command::Probe { output } => {
             ensure_no_daemon(&cli, &cfg).await?;
             let output = output.clone();
@@ -468,6 +486,7 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
         | Command::Config
         | Command::Bench { .. }
         | Command::Probe { .. }
+        | Command::Verify { .. }
         | Command::Fw { cmd: FwCmd::Update } => unreachable!("handled above"),
     }
     Ok(())
@@ -889,7 +908,10 @@ async fn backup(api: &dyn ScopeApi, base: std::path::PathBuf) -> anyhow::Result<
     std::fs::write(dir.join("status.json"), serde_json::to_vec_pretty(&status)?)?;
     let options = api.options().await?;
     let network = api.network().await?;
-    std::fs::write(dir.join("network.json"), serde_json::to_vec_pretty(&network)?)?;
+    std::fs::write(
+        dir.join("network.json"),
+        serde_json::to_vec_pretty(&network)?,
+    )?;
     let live = api.live_config().await?;
     std::fs::write(dir.join("live.json"), serde_json::to_vec_pretty(&live)?)?;
     std::fs::write(
@@ -1126,6 +1148,131 @@ fn probe(s: &mut Scope, output: Option<&Path>) -> anyhow::Result<()> {
     if let Some(path) = output {
         std::fs::write(path, serde_json::to_vec_pretty(&report)?)?;
         println!("report written to {}", path.display());
+    }
+    Ok(())
+}
+
+// ---- verify -------------------------------------------------------------------------------------
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct Budget {
+    used: u32,
+}
+
+fn state_dir() -> std::path::PathBuf {
+    directories::ProjectDirs::from("", "", "mho954")
+        .and_then(|d| d.state_dir().map(Path::to_path_buf))
+        .unwrap_or_else(|| std::env::temp_dir().join("mho954"))
+}
+
+fn load_budget(path: &Path) -> Budget {
+    std::fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn save_budget(path: &Path, b: &Budget) -> anyhow::Result<()> {
+    std::fs::create_dir_all(path.parent().unwrap())?;
+    std::fs::write(path, serde_json::to_vec(b)?)?;
+    Ok(())
+}
+
+async fn verify_cmd(
+    cli: &Cli,
+    cfg: &Config,
+    groups: Vec<String>,
+    list: bool,
+    reset: bool,
+    assume_used: Option<u32>,
+    output: Option<std::path::PathBuf>,
+) -> anyhow::Result<()> {
+    use mho_driver::verify::{
+        CANDIDATES, Kind, Outcome, UNKNOWN_QUERY_BUDGET, VerifyResult, check,
+    };
+    if list {
+        for g in mho_driver::verify::groups() {
+            let cmds: Vec<&str> = CANDIDATES
+                .iter()
+                .filter(|c| c.group == g)
+                .map(|c| c.command)
+                .collect();
+            println!("{g:<10} {}", cmds.join("  "));
+        }
+        return Ok(());
+    }
+    let budget_path = state_dir().join("verify-budget.json");
+    let mut budget = load_budget(&budget_path);
+    if reset {
+        budget.used = 0;
+    }
+    if let Some(n) = assume_used {
+        budget.used = n;
+    }
+    save_budget(&budget_path, &budget)?;
+    if reset && groups.is_empty() {
+        println!("budget reset ({UNKNOWN_QUERY_BUDGET} unanswered queries available)");
+        return Ok(());
+    }
+    ensure_no_daemon(cli, cfg).await?;
+
+    let selected: Vec<_> = CANDIDATES
+        .iter()
+        .filter(|c| groups.is_empty() || groups.iter().any(|g| g == c.group))
+        .copied()
+        .collect();
+    if selected.is_empty() {
+        bail!("no candidates for {groups:?} (see `mho954 verify --list`)");
+    }
+    let out_path = output.unwrap_or_else(|| state_dir().join("verified.json"));
+    let mut results: Vec<VerifyResult> = std::fs::read(&out_path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+
+    let conn = connection(cfg)?;
+    let (results, budget, stop) = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+        let mut scope = Scope::open(&conn)?;
+        let mut stop = None;
+        for cand in selected {
+            if results.iter().any(|r| r.command == cand.command && r.outcome == Outcome::Ok) {
+                println!("{:<32} already verified", cand.command);
+                continue;
+            }
+            if cand.kind == Kind::Query && budget.used >= UNKNOWN_QUERY_BUDGET {
+                stop = Some(format!(
+                    "budget of {UNKNOWN_QUERY_BUDGET} unanswered queries used up — power-cycle the scope, \
+                     then `mho954 verify --reset-budget` and run again"
+                ));
+                break;
+            }
+            let r = check(&mut scope, &cand)?;
+            println!("{:<32} {:?} {}", r.command, r.outcome, r.detail);
+            if r.outcome == Outcome::NoAnswer {
+                budget.used += 1;
+            }
+            let unresponsive = r.outcome == Outcome::ScopeUnresponsive;
+            results.retain(|x| x.command != r.command);
+            results.push(r);
+            if unresponsive {
+                budget.used = UNKNOWN_QUERY_BUDGET;
+                stop = Some("the scope stopped answering — power-cycle it".into());
+                break;
+            }
+        }
+        Ok((results, budget, stop))
+    })
+    .await??;
+    save_budget(&budget_path, &budget)?;
+    std::fs::create_dir_all(out_path.parent().unwrap_or(Path::new(".")))?;
+    std::fs::write(&out_path, serde_json::to_vec_pretty(&results)?)?;
+    println!(
+        "results: {}  (budget used {}/{UNKNOWN_QUERY_BUDGET})",
+        out_path.display(),
+        budget.used
+    );
+    if let Some(msg) = stop {
+        bail!(msg);
     }
     Ok(())
 }

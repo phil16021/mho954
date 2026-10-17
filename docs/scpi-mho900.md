@@ -101,9 +101,22 @@ Es gibt keinen SCPI-Befehl zum Firmware-Update (Guide durchsucht). Das Update l�
 `*IDN?` meldet die Version gekürzt (`00.01.00`); die vollständige Version steht unter
 Utility → About.
 
+## Verifikation am Gerät (`mho954 verify`, Ergebnisse in `docs/verified-commands.json`)
+
+| Befehl | Ergebnis |
+|---|---|
+| `:SYST:OPT:STAT? <token>` für alle 11 Tokens (BWU05T08 … BND) | beantwortet, alle `0` (keine Option installiert) |
+| `:SYST:MOD?` | `1,0,0,0,0` → Logikanalysator-Hardware vorhanden, Funktionsgenerator (DG) nicht |
+| `*ESR?`, `*STB?`, `*CLS` | beantwortet bzw. angenommen |
+| Compound `:TIM:SCAL?;:CHAN1:SCAL?` | eine Zeile, Werte mit `;` getrennt. Das Scope braucht aber ~20 ms je Teilabfrage (10 Abfragen: 0,2 s statt 0,25 s); der Gewinn ist also klein |
+| `:WAV:SOUR D0` | **abgelehnt** (`-200 Command execute failed`) → Digitalkanäle nicht über `:WAV:DATA?` lesbar |
+| `:MEAS:ITEM VPP,CHAN1` (Set-Form) | angenommen (Messung anlegen ohne Abfrage) |
+| `*TST?` | bewusst nicht getestet (Selbsttest kann länger als der Timeout dauern) |
+
+Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigger`/`acquire`/`timebase`
+(`:CHANn:UNIT?/VERN?/INV?`, `:TRIG:HOLD?/SWE?`, `:ACQ:AVER?/SRAT?` usw.) und alle 14 `:LAN`-Abfragen.
+
 ## Offene Punkte
 
-- Verifikation der bisher nur im Guide belegten Abfragen (`:CHANn:UNIT?/VERN?/INV?`,
-  `:TRIG:HOLD?/SWE?`, `:ACQ:AVER?/SRAT?`, `:LAN:DSER?/HOST:NAME?/MDNS?/DESC?/VISA?`, Options-Tokens)
-  und neuer Subsysteme mit `mho954 verify` (Budget: 3 ungeprüfte Queries pro Einschaltzyklus).
-- Compound-Queries (`;`) und `:WAV:SOUR D0` (Digitalkanäle) am Gerät prüfen.
+- Neue Subsysteme (Trigger-Typen, Messstatistik, Dekoder, Math, Cursor, Display, Speichern, LA)
+  einzeln mit `mho954 verify` prüfen (Budget: 3 ungeprüfte Queries pro Einschaltzyklus).
