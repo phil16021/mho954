@@ -367,7 +367,7 @@ impl ScopeApp {
                 Ok((path, w.raw.len()))
             },
             |sh: &mut Shared, (p, n): (PathBuf, usize)| {
-                sh.log(format!("RAW {n} pts → {}", p.display()), false)
+                sh.log(format!("RAW {n} pts -> {}", p.display()), false)
             },
         );
     }
@@ -1055,7 +1055,7 @@ impl ScopeApp {
                         ui.label(if o.active {
                             RichText::new("active").color(Color32::LIGHT_GREEN)
                         } else {
-                            RichText::new("—").weak()
+                            RichText::new("-").weak()
                         });
                         ui.end_row();
                     }
