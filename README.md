@@ -73,6 +73,18 @@ mho954 net set --dhcp --mdns true --hostname mho954
 mho954 options                             # Optionen; options install 'MHO900-…@…'
 mho954 fw status | fw update               # Firmware-Version / Update-Ablauf
 mho954 bench | probe -o report.json        # Latenz/Durchsatz, SCPI-Dialekt (ohne laufenden Daemon)
+
+mho954 groups trigger --params             # Einstellungsgruppen (Trigger-Typen, Dekoder, Math, …)
+mho954 get trigger.pulse                   # Gruppe lesen
+mho954 set trigger.pulse --activate when=less upper=2u   # schreiben; --activate wählt den Typ
+mho954 stats VPP -s 1 --reset              # Messstatistik (aktuell/Mittel/Min/Max/σ/Anzahl)
+mho954 counter | dvm                       # Frequenzzähler, Voltmeter (vorher `set counter enable=true`)
+mho954 set bus.rs232 -n 1 --activate baud=115200 tx=CHAN2 tx_threshold=1.6
+mho954 decode 1                            # Dekoder-Ereignistabelle (--csv, -o bus1.csv)
+mho954 set math -n 1 --activate operator=mult source1=CHAN1 source2=CHAN2
+mho954 set math.fft -n 2 --activate source=CHAN2 peak_search=true peaks=5
+mho954 peaks 2                             # Peak-Tabelle der Scope-FFT
+mho954 verify --list                       # Befehle einzeln am Gerät prüfen (siehe unten)
 ```
 
 Globale Optionen: `-c/--connection`, `--url`, `--direct`, `--config`, `-v`/`-vv`/`-vvv`.
@@ -115,6 +127,12 @@ bevor das Gerät freigegeben wird.
 | GET/PUT | `/api/v1/setup` | Setup-Blob sichern/laden |
 | GET/PUT | `/api/v1/network` | LAN: DHCP/Auto-IP/statisch, IP, Maske, Gateway, DNS, mDNS, Hostname |
 | GET/PUT | `/api/v1/live` | Live-Loop: fps, Messliste (max. 10) |
+| GET | `/api/v1/groups`, GET/PUT `/api/v1/groups/{id}?instance=n&activate=true` | Einstellungsgruppen: Katalog, lesen, schreiben |
+| GET | `/api/v1/measure/stats?item=VPP&source=CHAN1` | Messstatistik |
+| POST | `/api/v1/measure/actions/{reset_statistics,clear_all,clear_totalizer}` | Statistik/Messungen/Totalizer zurücksetzen |
+| GET | `/api/v1/counter`, `/api/v1/dvm`, `/api/v1/modules` | Zähler, Voltmeter, LA/AFG-Hardware |
+| GET | `/api/v1/bus/{n}/data?format=json\|csv` | Dekoder-Ereignistabelle |
+| GET | `/api/v1/math/{n}/peaks` | Peak-Tabelle der Scope-FFT |
 | POST | `/api/v1/scpi` | Raw-SCPI (nur mit `--allow-raw-scpi`) |
 | WS | `/api/v1/stream` | Live-Frames (binär) + Messwerte (JSON) |
 
@@ -155,7 +173,12 @@ freien Port, damit die CLI nicht versehentlich den Simulator steuert.
 | `measure`, `list_measurement_items` | Messungen am Scope |
 | `analyze_waveform` | lokale Messungen (`has_data`) |
 | `get_waveform` | dezimierte Samples; `save_as` speichert CSV/NPY im Capture-Ordner (nie überschreibend) |
-| `fft_peaks` | Spektrum-Peaks |
+| `fft_peaks` | Spektrum-Peaks (lokal berechnet) |
+| `list_settings_groups`, `get_settings`, `configure_settings` | alle Einstellungsgruppen (Trigger-Typen, Dekoder, Math, Zähler, DVM, Mess-Setup) |
+| `measurement_statistics`, `measurement_action` | Messstatistik, Zurücksetzen |
+| `read_counter`, `read_dvm` | Frequenzzähler, Voltmeter |
+| `decode_bus` | Dekoder-Ereignisse |
+| `scope_fft_peaks` | Peak-Tabelle der Scope-FFT |
 | `screenshot` | Bild als MCP-Image |
 | `list_options` | Optionen |
 | `get_network`, `configure_network` | LAN-Einstellungen (Änderungen nur nach Rückfrage) |
@@ -195,6 +218,23 @@ measurements = [{ item = "VPP", source = "CHAN1" }, { item = "FREQ", source = "C
   wird auf rigol.com → License Activation aus dem Key und der Seriennummer erzeugt.
 - Das Umgehen der Lizenzprüfung (Keygen, `vendor.bin`-Patch, gepatchte Firmware) ist bewusst
   **nicht** enthalten.
+
+## Einstellungsgruppen und Verifikation
+
+Trigger-Typen, Mess-Setup, Zähler, Voltmeter, die Dekoder `bus.*` (1–4) und die Math-Kanäle
+`math*` (1–4) beschreibt eine Tabelle in `crates/mho-driver/src/params.rs`. Daraus entstehen
+Validierung, CLI (`groups/get/set`), REST, MCP, das GUI-Panel „Advanced settings“ und die
+Prüfliste für `mho954 verify`.
+
+Weil das Scope unbekannte Queries nicht beantwortet und nach etwa fünf davon hängt, gilt:
+- **Schreiben** geht immer. Fehler landen in der Fehlerqueue und werden gemeldet.
+- **Lesen** einer Gruppe, Dekoder-Tabellen, FFT-Peaks, Math-Spuren im Live-Bild und das DVM gibt
+  es erst, wenn die Queries mit `mho954 verify <gruppe>` am Gerät bestätigt wurden. Das Ergebnis
+  steht in `docs/verified-commands.json` und wird beim nächsten Build einkompiliert.
+- `verify` sendet jede Query einzeln, danach `*IDN?`. Nach drei unbeantworteten Queries hört es
+  auf und bittet um einen Neustart des Scopes; danach `mho954 verify --reset-budget`.
+- Der Simulator lässt ungeprüfte Queries zu, damit sich alles ohne Gerät testen lässt.
+  Mit `MHO954_SIM=strict` verhält er sich wie das Gerät.
 
 ## Bekannte Eigenheiten des MHO954
 

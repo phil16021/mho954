@@ -119,7 +119,24 @@ Utility → About.
 Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigger`/`acquire`/`timebase`
 (`:CHANn:UNIT?/VERN?/INV?`, `:TRIG:HOLD?/SWE?`, `:ACQ:AVER?/SRAT?` usw.) und alle 14 `:LAN`-Abfragen.
 
+## Dekoder und Math (Guide-Format, noch nicht am Gerät geprüft)
+
+- `:BUS<n>:DATA?` liefert laut Guide `#9…PARALLEL\nTime,Data,\n-2.47us,0,\n…`. Ob die Blocklänge
+  den Protokollnamen mitzählt, geht aus dem Beispiel nicht hervor. Der Treiber liest deshalb bis
+  zum USBTMC-Nachrichtenende (`Scpi::query_block_message`) und parst den ganzen Text.
+- `:BUS<n>:THReshold? <Leitung>` (TX, SCL, SDA, CLK, MISO, CAN, LIN, PAL) gehört als „keyed“
+  Parameter zur jeweiligen Dekodergruppe. RX/CS/PALCLK fehlen bewusst: Der Guide erlaubt sie nur
+  bei aktiver Quelle, und eine unbeantwortete Query kostet Budget.
+- `:BUS<n>:PAR:WIDT/BITX/SOUR` gelten nur bei `BUS USER` und fehlen deshalb in der Gruppe.
+- `:MATH<n>:FFT:SEARch:RES?` liefert mehrere Zeilen (`1,2.50000MHz,-24.98dBV`). Gelesen wird mit
+  `Scpi::query_lines` bis zum Nachrichtenende.
+- Math-Kanäle lassen sich nur mit `:WAV:MODE NORM` lesen. FFT-Ergebnisse kommen nicht ins
+  Zeit-Live-Bild.
+- Druckfehler im Guide: `:BUS <n>:PAR:END` → `:BUS<n>:PAR:END`, `:MATH<n>:MATH<n>:WAVetype`
+  (nicht verwendet).
+
 ## Offene Punkte
 
-- Neue Subsysteme (Trigger-Typen, Messstatistik, Dekoder, Math, Cursor, Display, Speichern, LA)
-  einzeln mit `mho954 verify` prüfen (Budget: 3 ungeprüfte Queries pro Einschaltzyklus).
+- Mit `mho954 verify` prüfen (Budget: 3 ungeprüfte Queries pro Einschaltzyklus):
+  `bus`, `bus.*`, `bus.data`, `math`, `math.fft`, `math.filter`, `math.peaks`, `dvm.value`
+  (bei eingeschaltetem DVM).
