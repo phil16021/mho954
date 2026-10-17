@@ -41,6 +41,7 @@ pub struct Shared {
     pub bode_running: bool,
     /// Hardware modules (`None` until loaded).
     pub modules: Option<mho_driver::Modules>,
+    pub options: Option<Vec<mho_driver::OptionInfo>>,
     pub commands: Option<Vec<mho_driver::ops::CommandInfo>>,
     /// Last read value set: `(readout id, values)`.
     pub readout_values: Option<(String, mho_driver::params::ParamMap)>,
@@ -48,6 +49,8 @@ pub struct Shared {
     pub scope_peaks: Option<(u8, Vec<mho_dsp::ScopePeak>)>,
     pub live_error: Option<String>,
     pub ws_connected: bool,
+    /// Long operation in progress (RAW download, Bode sweep).
+    pub progress: Option<mho_service::Progress>,
     pub busy: usize,
     /// `(message, is_error)`, newest last.
     pub log: VecDeque<(String, bool)>,
@@ -158,6 +161,9 @@ impl Client {
                                     }
                                     LiveEvent::Measurements(m) => sh.measurements = Some(m),
                                     LiveEvent::Error(e) => sh.live_error = Some(e),
+                                    LiveEvent::Progress(p) => {
+                                        sh.progress = (p.total > 0).then_some(p)
+                                    }
                                 }
                             }
                             this.ctx.request_repaint();

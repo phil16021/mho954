@@ -13,6 +13,7 @@ egui_plot.workspace = true
 mho-driver.workspace = true
 mho-dsp.workspace = true
 mho-service.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true

@@ -1997,6 +1997,7 @@ dependencies = [
  "mho-driver",
  "mho-dsp",
  "mho-service",
+ "serde",
  "serde_json",
  "tokio",
  "tracing",

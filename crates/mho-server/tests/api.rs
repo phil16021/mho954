@@ -1119,3 +1119,35 @@ async fn logic_analyzer_and_bode() {
     assert!(text_of(&r).contains("phase_deg"));
     shutdown.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_events_for_raw_downloads() {
+    let (url, shutdown) = start(false).await;
+    let api = RemoteBackend::new(&url);
+    let mut rx = api.stream().await.unwrap();
+    api.action(mho_driver::Action::Stop).await.unwrap();
+    let api2 = RemoteBackend::new(&url);
+    let download = tokio::spawn(async move { api2.waveform("CHAN2".into(), WaveMode::Raw).await });
+    let (mut running, mut finished) = (false, false);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while !finished && tokio::time::Instant::now() < deadline {
+        if let Ok(Some(LiveEvent::Progress(p))) =
+            tokio::time::timeout(Duration::from_secs(2), rx.recv()).await
+        {
+            assert!(p.label.contains("RAW CHAN2"), "{p:?}");
+            if p.total > 0 {
+                assert!(p.done <= p.total);
+                running = true;
+            } else {
+                finished = true;
+            }
+        }
+    }
+    let w = download.await.unwrap().unwrap();
+    assert_eq!(w.raw.len(), 10_000);
+    assert!(
+        running && finished,
+        "running {running}, finished {finished}"
+    );
+    shutdown.cancel();
+}

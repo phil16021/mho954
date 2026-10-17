@@ -172,6 +172,10 @@ claude mcp add --transport http mho954 http://127.0.0.1:8954/mcp
 claude mcp add mho954 -- mho954 mcp
 ```
 
+Die GUI merkt sich ihre Ansichtseinstellungen (FFT, Dekoder, Bode-Formular, …) in
+`~/.config/mho954/gui.json`. Lange Vorgänge wie RAW-Abruf und Bode-Sweep zeigen einen
+Fortschrittsbalken; der WebSocket sendet dafür `{"type":"progress",…}`.
+
 Die GUI weicht auf einen freien Port aus, wenn 8954 belegt ist. `gui --sim` nutzt immer einen
 freien Port, damit die CLI nicht versehentlich den Simulator steuert.
 

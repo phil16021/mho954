@@ -143,6 +143,7 @@ impl RemoteBackend {
                     Ok(Message::Text(t)) => match serde_json::from_str::<WsText>(&t) {
                         Ok(WsText::Measurements(m)) => LiveEvent::Measurements(Arc::new(m)),
                         Ok(WsText::Error { message }) => LiveEvent::Error(message),
+                        Ok(WsText::Progress(p)) => LiveEvent::Progress(p),
                         Err(e) => {
                             debug!("ignoring ws text: {e}");
                             continue;

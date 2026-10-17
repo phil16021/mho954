@@ -12,6 +12,6 @@ mod remote;
 
 pub use api::*;
 pub use device::{Device, Opener};
-pub use live::{Frame, LiveConfig, LiveEvent, MeasureSnapshot, MeasureSpec};
+pub use live::{Frame, LiveConfig, LiveEvent, MeasureSnapshot, MeasureSpec, Progress};
 pub use local::LocalBackend;
 pub use remote::RemoteBackend;

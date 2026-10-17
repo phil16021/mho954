@@ -29,6 +29,7 @@ async fn stream(mut socket: WebSocket, s: AppState) {
     let mut frames = hub.subscribe_frames();
     let mut meas = hub.subscribe_measurements();
     let mut errors = hub.subscribe_errors();
+    let mut progress = hub.subscribe_progress();
     frames.mark_changed();
     meas.mark_changed();
     let mut ping = tokio::time::interval(PING_INTERVAL);
@@ -57,6 +58,14 @@ async fn stream(mut socket: WebSocket, s: AppState) {
                 let e = errors.borrow_and_update().clone();
                 match e {
                     Some(message) => text(&WsText::Error { message }),
+                    None => continue,
+                }
+            }
+            r = progress.changed() => {
+                if r.is_err() { break; }
+                let p = progress.borrow_and_update().clone();
+                match p {
+                    Some(p) => text(&WsText::Progress(p)),
                     None => continue,
                 }
             }

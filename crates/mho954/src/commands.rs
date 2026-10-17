@@ -572,10 +572,11 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
             }
             _ => {
                 for c in api.commands().await? {
-                    let arg = c
-                        .path_extensions
-                        .map(|e| format!(" <C:/|D:/name.{}>", e.join("|")))
-                        .unwrap_or_default();
+                    let arg = match (c.path_extensions, c.index) {
+                        (Some(e), _) => format!(" <C:/|D:/name.{}>", e.join("|")),
+                        (None, Some((a, b))) => format!(" <{a}..{b}>"),
+                        (None, None) => String::new(),
+                    };
                     let confirm = if c.confirm { " (needs --yes)" } else { "" };
                     println!("{:<16} {}{arg}{confirm}", c.id, c.title);
                 }

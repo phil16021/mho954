@@ -15,6 +15,7 @@ pub struct ToolsPanel {
     readout: String,
     command: String,
     path: String,
+    index: u8,
     confirm: bool,
 }
 
@@ -160,6 +161,13 @@ impl ToolsPanel {
                 );
             });
         }
+        if let Some((lo, hi)) = cmd.index {
+            self.index = self.index.clamp(lo, hi);
+            ui.horizontal(|ui| {
+                ui.label("number");
+                ui.add(egui::DragValue::new(&mut self.index).range(lo..=hi));
+            });
+        }
         ui.horizontal(|ui| {
             if cmd.confirm {
                 ui.checkbox(
@@ -173,7 +181,11 @@ impl ToolsPanel {
             {
                 let id = cmd.id.clone();
                 let request = CommandRequest {
-                    path: cmd.path_extensions.as_ref().map(|_| self.path.clone()),
+                    path: match (&cmd.path_extensions, cmd.index) {
+                        (Some(_), _) => Some(self.path.clone()),
+                        (None, Some(_)) => Some(self.index.to_string()),
+                        (None, None) => None,
+                    },
                     confirm: self.confirm,
                 };
                 self.confirm = false;

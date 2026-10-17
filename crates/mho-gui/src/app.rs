@@ -10,6 +10,7 @@ use mho_dsp::{Measurements, Window, format_si};
 use mho_service::{Frame, LiveConfig, MeasureSpec, ScopeApi, StatsRequest};
 
 use crate::bode::{BodePanel, bode_plot};
+use crate::prefs::{self, Prefs};
 use crate::settings::SettingsPanel;
 use crate::state::{Client, Shared};
 use crate::tools::ToolsPanel;
@@ -113,7 +114,12 @@ pub struct ScopeApp {
     tools: ToolsPanel,
     bode: BodePanel,
     show_bode: bool,
+    /// Preferences as last written, and when.
+    prefs_saved: Prefs,
+    prefs_saved_at: std::time::Instant,
     modules_requested: bool,
+    options_requested: bool,
+    setup_path: String,
     groups_requested: bool,
     /// Forces the settings section open on the next frame.
     settings_open: Option<bool>,
@@ -141,32 +147,41 @@ impl ScopeApp {
         capture_dir: PathBuf,
     ) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
+        let p = prefs::load();
         ScopeApp {
+            prefs_saved: p.clone(),
+            prefs_saved_at: std::time::Instant::now(),
             client: Client::new(&url, token, rt, cc.egui_ctx.clone()),
             capture_dir,
-            y_mode: YMode::Divisions,
-            show_fft: false,
-            show_decoder: false,
+            y_mode: if p.volts_axis {
+                YMode::Volts
+            } else {
+                YMode::Divisions
+            },
+            show_fft: p.show_fft,
+            show_decoder: p.show_decoder,
             math_requested: Default::default(),
-            peaks_math: 1,
-            decoder_bus: 1,
-            fft_source: "CHAN1".into(),
-            fft_window: Window::Hann,
+            peaks_math: p.peaks_math.clamp(1, 4),
+            decoder_bus: p.decoder_bus.clamp(1, 4),
+            fft_source: p.fft_source,
+            fft_window: p.fft_window,
             cursor_a: None,
             cursor_b: None,
             offset_edit: [None; 4],
             tb_offset_edit: None,
             trig_level_edit: None,
-            new_meas_item: "VRMS".into(),
-            new_meas_source: "CHAN1".into(),
-            raw_source: "CHAN1".into(),
+            new_meas_item: p.meas_item,
+            new_meas_source: p.meas_source,
+            raw_source: p.raw_source,
             last_x_range: None,
             net_form: NetForm::default(),
             settings: SettingsPanel::default(),
             tools: ToolsPanel::default(),
-            bode: BodePanel::default(),
+            bode: p.bode,
             show_bode: false,
             modules_requested: false,
+            options_requested: false,
+            setup_path: String::new(),
             groups_requested: false,
             settings_open: None,
         }
@@ -189,12 +204,14 @@ impl ScopeApp {
             bode: sh.bode.clone(),
             bode_running: sh.bode_running,
             modules: sh.modules,
+            options: sh.options.clone(),
             commands: sh.commands.clone(),
             readout_values: sh.readout_values.clone(),
             decode: sh.decode.clone(),
             measurements: sh.measurements.clone(),
             live_error: sh.live_error.clone(),
             ws_connected: sh.ws_connected,
+            progress: sh.progress.clone(),
             busy: sh.busy,
             log: sh.log.iter().cloned().collect(),
         }
@@ -389,6 +406,13 @@ impl ScopeApp {
             }
             if s.busy > 0 {
                 ui.spinner();
+            }
+            if let Some(p) = &s.progress {
+                ui.add(
+                    egui::ProgressBar::new(p.done as f32 / p.total.max(1) as f32)
+                        .desired_width(180.0)
+                        .text(format!("{} {}/{}", p.label, p.done, p.total)),
+                );
             }
             if let Some(e) = &s.live_error {
                 ui.label(RichText::new(e).color(Color32::LIGHT_RED));
@@ -695,6 +719,19 @@ impl ScopeApp {
             });
 
         ui.separator();
+        let system = egui::CollapsingHeader::new(RichText::new("System").strong())
+            .id_salt("system")
+            .show(ui, |ui| self.system_controls(ui, s));
+        if system.body_returned.is_some() && !self.options_requested {
+            self.options_requested = true;
+            self.client.op(
+                "options",
+                |api| async move { api.options().await },
+                |sh: &mut Shared, o: Vec<OptionInfo>| sh.options = Some(o),
+            );
+        }
+
+        ui.separator();
         for (msg, err) in &s.log {
             ui.label(RichText::new(msg).small().color(if *err {
                 Color32::LIGHT_RED
@@ -901,7 +938,7 @@ impl ScopeApp {
                 self.open_settings("bus", Some(self.decoder_bus), false);
             }
             if ui
-                .button("Logic → VCD")
+                .button("Logic (VCD)")
                 .on_hover_text(
                     "capture D0..D15 through this bus (parallel decoding) and save a VCD file",
                 )
@@ -956,6 +993,80 @@ impl ScopeApp {
                     ));
                 }
             });
+    }
+
+    fn system_controls(&mut self, ui: &mut egui::Ui, s: &Snapshot) {
+        ui.label(RichText::new("Setup").strong());
+        if ui
+            .button("Save to file")
+            .on_hover_text("scope setup blob, restorable with Load or `mho954 restore`")
+            .clicked()
+        {
+            let path = self.capture_dir.join(format!(
+                "mho954-setup-{}.bin",
+                chrono::Local::now().format("%Y%m%d-%H%M%S")
+            ));
+            let dir = self.capture_dir.clone();
+            self.setup_path = path.display().to_string();
+            self.client.op(
+                "save setup",
+                |api| async move { api.setup_save().await },
+                move |sh: &mut Shared, blob: Vec<u8>| match std::fs::create_dir_all(&dir)
+                    .and_then(|_| std::fs::write(&path, blob))
+                {
+                    Ok(()) => sh.log(format!("setup saved to {}", path.display()), false),
+                    Err(e) => sh.log(format!("saving setup: {e}"), true),
+                },
+            );
+        }
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.setup_path)
+                    .desired_width(200.0)
+                    .hint_text("setup file"),
+            );
+            if ui.button("Load").clicked() {
+                match std::fs::read(&self.setup_path) {
+                    Ok(blob) => self.client.op(
+                        "load setup",
+                        move |api| async move { api.setup_load(blob).await },
+                        |sh: &mut Shared, ()| {
+                            sh.log("setup loaded", false);
+                            sh.status_dirty = true;
+                        },
+                    ),
+                    Err(e) => {
+                        let msg = format!("{}: {e}", self.setup_path);
+                        self.client.lock().log(msg, true);
+                    }
+                }
+            }
+        });
+        ui.separator();
+        ui.label(RichText::new("Options").strong());
+        match &s.options {
+            None => {
+                ui.label("loading…");
+            }
+            Some(opts) => {
+                egui::Grid::new("options").striped(true).show(ui, |ui| {
+                    for o in opts {
+                        ui.label(&o.name).on_hover_text(&o.description);
+                        ui.label(if o.active {
+                            RichText::new("active").color(Color32::LIGHT_GREEN)
+                        } else {
+                            RichText::new("—").weak()
+                        });
+                        ui.end_row();
+                    }
+                });
+                ui.label(
+                    RichText::new("install a purchased license: mho954 options install '<key>'")
+                        .small()
+                        .weak(),
+                );
+            }
+        }
     }
 
     fn load_network(&self) {
@@ -1599,6 +1710,32 @@ impl ScopeApp {
         });
     }
 
+    fn prefs(&self) -> Prefs {
+        Prefs {
+            volts_axis: self.y_mode == YMode::Volts,
+            show_fft: self.show_fft,
+            fft_source: self.fft_source.clone(),
+            fft_window: self.fft_window,
+            show_decoder: self.show_decoder,
+            decoder_bus: self.decoder_bus,
+            peaks_math: self.peaks_math,
+            meas_item: self.new_meas_item.clone(),
+            meas_source: self.new_meas_source.clone(),
+            raw_source: self.raw_source.clone(),
+            bode: self.bode.clone(),
+        }
+    }
+
+    /// Writes changed preferences, at most every two seconds (and on exit).
+    fn persist(&mut self, force: bool) {
+        let p = self.prefs();
+        if p != self.prefs_saved && (force || self.prefs_saved_at.elapsed().as_secs() >= 2) {
+            prefs::save(&p);
+            self.prefs_saved = p;
+            self.prefs_saved_at = std::time::Instant::now();
+        }
+    }
+
     /// Reads scale/offset of displayed math traces (for the division view).
     fn track_math_scale(&mut self, s: &Snapshot) {
         let Some(frame) = &s.frame else { return };
@@ -1750,11 +1887,13 @@ struct Snapshot {
     bode: Option<Vec<mho_driver::BodePoint>>,
     bode_running: bool,
     modules: Option<mho_driver::Modules>,
+    options: Option<Vec<OptionInfo>>,
     commands: Option<Vec<mho_driver::ops::CommandInfo>>,
     readout_values: Option<(String, ParamMap)>,
     measurements: Option<Arc<mho_service::MeasureSnapshot>>,
     live_error: Option<String>,
     ws_connected: bool,
+    progress: Option<mho_service::Progress>,
     busy: usize,
     log: Vec<(String, bool)>,
 }
@@ -1780,6 +1919,7 @@ impl eframe::App for ScopeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let s = self.snapshot();
         self.track_math_scale(&s);
+        self.persist(false);
         let local: Vec<(String, Measurements)> = s
             .frame
             .as_ref()
@@ -1839,6 +1979,10 @@ impl eframe::App for ScopeApp {
                 self.fft_plot(ui, f, &s);
             }
         });
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.persist(true);
     }
 }
 

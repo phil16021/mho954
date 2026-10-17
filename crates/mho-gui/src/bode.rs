@@ -9,6 +9,8 @@ use mho_service::ScopeApi;
 use crate::app::parse_si;
 use crate::state::{Client, Shared};
 
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct BodePanel {
     start: String,
     stop: String,

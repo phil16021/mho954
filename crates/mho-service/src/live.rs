@@ -108,6 +108,17 @@ pub enum LiveEvent {
     Frame(Arc<Frame>),
     Measurements(Arc<MeasureSnapshot>),
     Error(String),
+    /// Progress of a long operation (`total == 0`: finished).
+    Progress(Progress),
+}
+
+/// Progress of a long operation such as a RAW download or a Bode sweep.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Progress {
+    pub label: String,
+    pub done: u64,
+    /// 0 once the operation has finished.
+    pub total: u64,
 }
 
 /// Text messages on the WebSocket (frames travel as binary messages).
@@ -116,6 +127,7 @@ pub enum LiveEvent {
 pub enum WsText {
     Measurements(MeasureSnapshot),
     Error { message: String },
+    Progress(Progress),
 }
 
 pub fn now_ms() -> u64 {
@@ -138,6 +150,7 @@ pub struct LiveHub {
     pub(crate) measurements: watch::Sender<Option<Arc<MeasureSnapshot>>>,
     pub(crate) errors: watch::Sender<Option<String>>,
     pub(crate) config: watch::Sender<LiveConfig>,
+    pub(crate) progress: watch::Sender<Option<Progress>>,
 }
 
 impl LiveHub {
@@ -147,6 +160,7 @@ impl LiveHub {
             measurements: watch::channel(None).0,
             errors: watch::channel(None).0,
             config: watch::channel(config).0,
+            progress: watch::channel(None).0,
         }
     }
 
@@ -160,6 +174,38 @@ impl LiveHub {
 
     pub fn subscribe_errors(&self) -> watch::Receiver<Option<String>> {
         self.errors.subscribe()
+    }
+
+    pub fn subscribe_progress(&self) -> watch::Receiver<Option<Progress>> {
+        self.progress.subscribe()
+    }
+
+    /// Progress callback for device jobs, rate-limited to ~10 updates per second.
+    pub fn progress_reporter(&self, label: &str) -> Arc<dyn Fn(usize, usize) + Send + Sync> {
+        let tx = self.progress.clone();
+        let label = label.to_string();
+        let last = std::sync::Mutex::new(None::<std::time::Instant>);
+        Arc::new(move |done, total| {
+            let mut last = last.lock().unwrap();
+            let due = done >= total || last.is_none_or(|t| t.elapsed().as_millis() >= 100);
+            if due {
+                *last = Some(std::time::Instant::now());
+                tx.send_replace(Some(Progress {
+                    label: label.clone(),
+                    done: done as u64,
+                    total: total as u64,
+                }));
+            }
+        })
+    }
+
+    /// Marks the current long operation as finished.
+    pub fn progress_done(&self, label: &str) {
+        self.progress.send_replace(Some(Progress {
+            label: label.to_string(),
+            done: 0,
+            total: 0,
+        }));
     }
 
     pub fn config(&self) -> LiveConfig {

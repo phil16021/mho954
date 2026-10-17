@@ -142,7 +142,14 @@ impl ScopeApi for LocalBackend {
 
     async fn waveform(&self, source: String, mode: WaveMode) -> ApiResult<Waveform> {
         match mode {
-            WaveMode::Raw => self.raw_waveform(source, Arc::new(|_, _| {})).await,
+            WaveMode::Raw => {
+                let label = format!("RAW {source}");
+                let r = self
+                    .raw_waveform(source, self.hub.progress_reporter(&label))
+                    .await;
+                self.hub.progress_done(&label);
+                r
+            }
             _ => {
                 self.device
                     .call(move |s| s.screen_waveform(&source, None))
@@ -252,9 +259,13 @@ impl ScopeApi for LocalBackend {
         request: mho_driver::BodeRequest,
     ) -> ApiResult<Vec<mho_driver::BodePoint>> {
         request.validate().map_err(ApiError::from)?;
-        self.device
-            .call_mut(move |s| s.bode_sweep(&request, &mut |_, _| {}))
-            .await
+        let progress = self.hub.progress_reporter("Bode sweep");
+        let r = self
+            .device
+            .call_mut(move |s| s.bode_sweep(&request, &mut |a, b| progress(a, b)))
+            .await;
+        self.hub.progress_done("Bode sweep");
+        r
     }
 
     async fn modules(&self) -> ApiResult<Modules> {
