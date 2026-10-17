@@ -88,12 +88,35 @@ async fn openapi_json() -> impl IntoResponse {
 }
 
 async fn docs() -> Html<&'static str> {
-    // RapiDoc renders the OpenAPI document; loaded from a CDN, nothing bundled.
+    // Self-contained: renders the OpenAPI document without loading third-party scripts into
+    // the API's origin.
     Html(
         r#"<!doctype html><html><head><meta charset="utf-8"><title>mho954 API</title>
-<script type="module" src="https://unpkg.com/rapidoc@9.3.8/dist/rapidoc-min.js"></script></head>
-<body><rapi-doc spec-url="/api/v1/openapi.json" theme="dark" render-style="read"
- show-header="false" allow-try="true"></rapi-doc></body></html>"#,
+<style>body{font:14px system-ui,sans-serif;margin:2em;background:#111;color:#ddd}
+h1{font-size:20px}h2{font-size:15px;margin:1.4em 0 .3em}code{color:#9cf}
+.m{display:inline-block;width:4em;font-weight:bold}.get{color:#6c6}.put{color:#fc6}.post{color:#f96}
+p{margin:.2em 0 .2em 4.5em;color:#aaa}a{color:#9cf}</style></head>
+<body><h1>mho954 API</h1><p style="margin-left:0">OpenAPI: <a href="/api/v1/openapi.json">/api/v1/openapi.json</a>
+· live stream: <code>ws://…/api/v1/stream</code> · MCP: <code>/mcp</code></p><div id="ops"></div>
+<script>
+fetch('/api/v1/openapi.json').then(r=>r.json()).then(doc=>{
+  const out=document.getElementById('ops');
+  for(const [path,ops] of Object.entries(doc.paths)){
+    for(const [m,op] of Object.entries(ops)){
+      const d=document.createElement('div');
+      const h=document.createElement('h2');
+      const s=document.createElement('span');s.className='m '+m;s.textContent=m.toUpperCase();
+      const c=document.createElement('code');c.textContent=path;
+      h.append(s,c);d.append(h);
+      const txt=[op.summary,op.description].filter(Boolean).join(' — ');
+      if(txt){const p=document.createElement('p');p.textContent=txt;d.append(p);}
+      const params=(op.parameters||[]).map(x=>x.name+(x.required?'':'?')).join(', ');
+      if(params){const p=document.createElement('p');p.textContent='params: '+params;d.append(p);}
+      out.append(d);
+    }
+  }
+});
+</script></body></html>"#,
     )
 }
 

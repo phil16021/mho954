@@ -253,11 +253,26 @@ impl McpScope {
         if !valid {
             return Err(ApiError::invalid("save_as must be a plain file name like capture1.csv"));
         }
+        const MAX_POINTS: usize = 200_000_000;
+        if w.raw.len() > MAX_POINTS {
+            return Err(ApiError::invalid(format!("record too large to save via MCP ({} points)", w.raw.len())));
+        }
         let io = |e: std::io::Error| ApiError::new(mho_service::ErrorKind::Internal, e.to_string());
         std::fs::create_dir_all(&self.capture_dir).map_err(io)?;
         let path = self.capture_dir.join(name);
+        // Never overwrite (and never follow a planted symlink): create_new fails if anything
+        // exists at the path.
+        let create = |p: &std::path::Path| {
+            std::fs::OpenOptions::new().write(true).create_new(true).open(p).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    ApiError::invalid(format!("{} already exists; choose another name", p.display()))
+                } else {
+                    io(e)
+                }
+            })
+        };
         if name.ends_with(".csv") {
-            let file = std::fs::File::create(&path).map_err(io)?;
+            let file = create(&path)?;
             mho_dsp::export::write_csv(
                 std::io::BufWriter::new(file),
                 w.preamble.time(0),
@@ -266,9 +281,13 @@ impl McpScope {
             )
             .map_err(io)?;
         } else if name.ends_with(".npy") {
-            mho_dsp::export::write_npy(&path, &w.raw).map_err(io)?;
+            let meta_path = path.with_extension("json");
+            let mut npy = create(&path)?;
+            let mut meta_file = create(&meta_path)?;
+            use std::io::Write;
+            npy.write_all(&mho_dsp::export::npy_bytes(&w.raw).map_err(io)?).map_err(io)?;
             let meta = serde_json::json!({ "source": w.source, "preamble": w.preamble });
-            std::fs::write(path.with_extension("json"), serde_json::to_vec_pretty(&meta).unwrap()).map_err(io)?;
+            meta_file.write_all(&serde_json::to_vec_pretty(&meta).unwrap()).map_err(io)?;
         } else {
             return Err(ApiError::invalid("save_as must end in .csv or .npy"));
         }

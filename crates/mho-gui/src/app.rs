@@ -88,10 +88,16 @@ struct NetForm {
 }
 
 impl ScopeApp {
-    pub fn new(cc: &eframe::CreationContext<'_>, url: String, rt: tokio::runtime::Handle, capture_dir: PathBuf) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        url: String,
+        token: Option<String>,
+        rt: tokio::runtime::Handle,
+        capture_dir: PathBuf,
+    ) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::dark());
         ScopeApp {
-            client: Client::new(&url, rt, cc.egui_ctx.clone()),
+            client: Client::new(&url, token, rt, cc.egui_ctx.clone()),
             capture_dir,
             y_mode: YMode::Divisions,
             show_fft: false,

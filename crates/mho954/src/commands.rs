@@ -154,6 +154,8 @@ fn daemon_url(cli: &Cli, cfg: &Config) -> String {
     cli.url.clone().unwrap_or_else(|| cfg.url())
 }
 
+/// `true` if something answers at the daemon URL — also when it rejects us (wrong token),
+/// because then the device is owned by that daemon and must not be opened directly.
 async fn daemon_running(cli: &Cli, cfg: &Config) -> bool {
     RemoteBackend::probe(&daemon_url(cli, cfg), Duration::from_millis(400)).await
 }
@@ -163,7 +165,7 @@ async fn backend(cli: &Cli, cfg: &Config) -> anyhow::Result<Backend> {
     let explicit = cli.direct || cli.connection.is_some();
     if !explicit && daemon_running(cli, cfg).await {
         info!("using daemon at {}", daemon_url(cli, cfg));
-        return Ok(Backend::Remote(RemoteBackend::new(&daemon_url(cli, cfg))));
+        return Ok(Backend::Remote(RemoteBackend::with_token(&daemon_url(cli, cfg), cfg.api_token.clone())));
     }
     let mut live = cfg.live.clone();
     live.enabled = false;
@@ -411,10 +413,12 @@ async fn serve(cli: &Cli, cfg: Config, bind: Option<std::net::SocketAddr>, allow
         bail!("a daemon is already running at {}", cfg.url());
     }
     let backend = LocalBackend::start(connection(&cfg)?, allow_raw || cfg.allow_raw_scpi, cfg.live.clone());
-    let opts = ServerOptions { bind: bind.unwrap_or(cfg.bind), capture_dir: cfg.capture_dir.clone() };
-    if !opts.bind.ip().is_loopback() {
-        tracing::warn!("listening on {} without authentication — anyone on the network can control the scope", opts.bind);
-    }
+    let opts = ServerOptions {
+        bind: bind.unwrap_or(cfg.bind),
+        capture_dir: cfg.capture_dir.clone(),
+        api_token: cfg.api_token.clone(),
+    };
+    opts.validate()?;
     let shutdown = CancellationToken::new();
     let s2 = shutdown.clone();
     tokio::spawn(async move {
@@ -432,7 +436,7 @@ async fn mcp_stdio(cli: &Cli, cfg: &Config) -> anyhow::Result<()> {
     let explicit = cli.direct || cli.connection.is_some();
     let (api, local): (Arc<dyn ScopeApi>, Option<LocalBackend>) =
         if !explicit && daemon_running(cli, cfg).await {
-            (Arc::new(RemoteBackend::new(&daemon_url(cli, cfg))), None)
+            (Arc::new(RemoteBackend::with_token(&daemon_url(cli, cfg), cfg.api_token.clone())), None)
         } else {
             let mut live = cfg.live.clone();
             live.enabled = false;
@@ -473,7 +477,8 @@ pub fn gui(cli: &Cli, cfg: Config, sim: bool) -> anyhow::Result<()> {
         if !addr.ip().is_loopback() {
             tracing::warn!("embedded server listens on {addr} — reachable from the network");
         }
-        let opts = ServerOptions { bind: addr, capture_dir: cfg.capture_dir.clone() };
+        let opts = ServerOptions { bind: addr, capture_dir: cfg.capture_dir.clone(), api_token: cfg.api_token.clone() };
+        opts.validate()?;
         let shutdown = CancellationToken::new();
         let app = mho_server::router(backend.clone(), &opts, shutdown.clone());
         rt.spawn(async move {
@@ -490,7 +495,7 @@ pub fn gui(cli: &Cli, cfg: Config, sim: bool) -> anyhow::Result<()> {
         local = Some(backend);
         format!("http://{addr}")
     };
-    let r = mho_gui::run(url, rt.handle().clone(), cfg.capture_dir.clone());
+    let r = mho_gui::run(url, cfg.api_token.clone(), rt.handle().clone(), cfg.capture_dir.clone());
     if let Some(b) = local {
         rt.block_on(b.shutdown());
     }

@@ -9,10 +9,18 @@ use mho_service::{LiveConfig, LiveEvent, LocalBackend, MeasureRequest, RemoteBac
 use tokio_util::sync::CancellationToken;
 
 async fn start(allow_raw: bool) -> (String, CancellationToken) {
+    start_with(allow_raw, None).await
+}
+
+async fn start_with(allow_raw: bool, api_token: Option<&str>) -> (String, CancellationToken) {
     let backend = LocalBackend::start(Connection::Sim, allow_raw, LiveConfig::default());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let opts = ServerOptions { bind: addr, capture_dir: std::env::temp_dir().join("mho954-test-captures") };
+    let opts = ServerOptions {
+        bind: addr,
+        capture_dir: std::env::temp_dir().join("mho954-test-captures"),
+        api_token: api_token.map(str::to_string),
+    };
     let shutdown = CancellationToken::new();
     let app = mho_server::router(backend, &opts, shutdown.clone());
     let s = shutdown.clone();
@@ -168,4 +176,51 @@ async fn mcp_initialize_and_call_tool() {
     .unwrap();
     assert!(call.contains("frequency") && call.contains("\"isError\":false"), "{call}");
     shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn browser_requests_are_refused() {
+    let (url, shutdown) = start(true).await;
+    let client = reqwest::Client::new();
+    // DNS rebinding: a foreign Host name pointing at 127.0.0.1.
+    let r = client.get(format!("{url}/api/v1/info")).header("host", "evil.example").send().await.unwrap();
+    assert_eq!(r.status(), 403);
+    // Cross-site request from a web page.
+    let r = client
+        .put(format!("{url}/api/v1/channels/1"))
+        .header("origin", "https://evil.example")
+        .json(&serde_json::json!({ "scale": 1.0 }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 403);
+    // Local tools (no Origin) still work.
+    let r = client.get(format!("{url}/api/v1/info")).send().await.unwrap();
+    assert!(r.status().is_success());
+    let r = client.get(format!("{url}/docs")).send().await.unwrap();
+    let html = r.text().await.unwrap();
+    assert!(!html.contains("unpkg") && html.contains("openapi.json"));
+    shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn token_is_enforced() {
+    let (url, shutdown) = start_with(false, Some("s3cret")).await;
+    let err = RemoteBackend::new(&url).info().await.unwrap_err();
+    assert_eq!(err.kind, mho_service::ErrorKind::Forbidden);
+    let ok = RemoteBackend::with_token(&url, Some("s3cret".into())).info().await.unwrap();
+    assert!(ok.connected);
+    let mut rx = RemoteBackend::with_token(&url, Some("s3cret".into())).stream().await.unwrap();
+    assert!(tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().is_some());
+    assert!(RemoteBackend::new(&url).stream().await.is_err());
+    assert!(RemoteBackend::probe(&url, Duration::from_secs(1)).await, "a refusing daemon still owns the scope");
+    shutdown.cancel();
+}
+
+#[test]
+fn network_bind_requires_token() {
+    let opts = ServerOptions { bind: "0.0.0.0:8954".parse().unwrap(), capture_dir: ".".into(), api_token: None };
+    assert!(opts.validate().is_err());
+    let opts = ServerOptions { api_token: Some("x".into()), ..opts };
+    assert!(opts.validate().is_ok());
 }

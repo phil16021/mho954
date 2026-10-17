@@ -9,7 +9,7 @@ pub use app::ScopeApp;
 
 /// Runs the GUI on the current (main) thread. `url` points at a running server; `rt` drives
 /// the network tasks.
-pub fn run(url: String, rt: tokio::runtime::Handle, capture_dir: PathBuf) -> anyhow::Result<()> {
+pub fn run(url: String, token: Option<String>, rt: tokio::runtime::Handle, capture_dir: PathBuf) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("MHO954")
@@ -21,7 +21,7 @@ pub fn run(url: String, rt: tokio::runtime::Handle, capture_dir: PathBuf) -> any
     eframe::run_native(
         "mho954",
         options,
-        Box::new(move |cc| Ok(Box::new(ScopeApp::new(cc, url, rt, capture_dir)))),
+        Box::new(move |cc| Ok(Box::new(ScopeApp::new(cc, url, token, rt, capture_dir)))),
     )
     .map_err(|e| anyhow::anyhow!("GUI failed: {e} (under xrdp try LIBGL_ALWAYS_SOFTWARE=1)"))
 }

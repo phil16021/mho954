@@ -17,6 +17,8 @@ pub struct Config {
     pub bind: SocketAddr,
     /// Allow arbitrary SCPI via REST/MCP.
     pub allow_raw_scpi: bool,
+    /// Bearer token for the API; required when `bind` is not a loopback address.
+    pub api_token: Option<String>,
     pub capture_dir: PathBuf,
     pub backup_dir: PathBuf,
     /// Newest firmware you know of (Rigol website); `fw status` compares against it.
@@ -31,6 +33,7 @@ impl Default for Config {
             connection: "usb".into(),
             bind: "127.0.0.1:8954".parse().unwrap(),
             allow_raw_scpi: false,
+            api_token: None,
             capture_dir: home.join("mho954-captures"),
             backup_dir: home.join("mho954-backups"),
             latest_firmware: "00.01.00.00.26".into(),

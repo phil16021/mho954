@@ -47,9 +47,9 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(url: &str, rt: tokio::runtime::Handle, ctx: egui::Context) -> Self {
+    pub fn new(url: &str, token: Option<String>, rt: tokio::runtime::Handle, ctx: egui::Context) -> Self {
         let c = Client {
-            api: Arc::new(RemoteBackend::new(url)),
+            api: Arc::new(RemoteBackend::with_token(url, token)),
             shared: Arc::new(Mutex::new(Shared { status_dirty: true, ..Default::default() })),
             rt,
             ctx,

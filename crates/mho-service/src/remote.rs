@@ -20,32 +20,50 @@ use crate::live::{LiveConfig, LiveEvent, WsText, decode_frame};
 pub struct RemoteBackend {
     base: String,
     client: reqwest::Client,
+    token: Option<String>,
 }
 
 impl RemoteBackend {
     /// `base` like `http://127.0.0.1:8954`.
     pub fn new(base: &str) -> Self {
+        Self::with_token(base, None)
+    }
+
+    /// Client that sends `Authorization: Bearer <token>` (needed for daemons on the network).
+    pub fn with_token(base: &str, token: Option<String>) -> Self {
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(2))
             .timeout(Duration::from_secs(600))
             .build()
             .expect("reqwest client");
-        RemoteBackend { base: base.trim_end_matches('/').to_string(), client }
+        RemoteBackend {
+            base: base.trim_end_matches('/').to_string(),
+            client,
+            token: token.filter(|t| !t.is_empty()),
+        }
     }
 
     pub fn base(&self) -> &str {
         &self.base
     }
 
-    /// Returns `true` if a daemon answers at `base` within `timeout`.
+    /// Returns `true` if an mho954 server answers at `base` within `timeout`, including one
+    /// that refuses the request (401/403): it still owns the device.
     pub async fn probe(base: &str, timeout: Duration) -> bool {
         let url = format!("{}/api/v1/info", base.trim_end_matches('/'));
         let Ok(client) = reqwest::Client::builder().timeout(timeout).build() else { return false };
-        matches!(client.get(url).send().await, Ok(r) if r.status().is_success())
+        match client.get(url).send().await {
+            Ok(r) => r.status().is_success() || matches!(r.status().as_u16(), 401 | 403),
+            Err(_) => false,
+        }
     }
 
     fn req(&self, method: Method, path: &str) -> RequestBuilder {
-        self.client.request(method, format!("{}/api/v1{path}", self.base))
+        let rb = self.client.request(method, format!("{}/api/v1{path}", self.base));
+        match &self.token {
+            Some(t) => rb.bearer_auth(t),
+            None => rb,
+        }
     }
 
     async fn check(resp: Result<Response, reqwest::Error>) -> ApiResult<Response> {
@@ -87,7 +105,16 @@ impl RemoteBackend {
     /// Subscribes to the live WebSocket. The channel closes when the connection drops.
     pub async fn stream(&self) -> ApiResult<mpsc::Receiver<LiveEvent>> {
         let url = format!("{}/api/v1/stream", self.base.replacen("http", "ws", 1));
-        let (ws, _) = tokio_tungstenite::connect_async(&url)
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let mut request = url
+            .as_str()
+            .into_client_request()
+            .map_err(|e| ApiError::invalid(format!("websocket {url}: {e}")))?;
+        if let Some(t) = &self.token {
+            let value = format!("Bearer {t}").parse().map_err(|_| ApiError::invalid("invalid API token"))?;
+            request.headers_mut().insert("authorization", value);
+        }
+        let (ws, _) = tokio_tungstenite::connect_async(request)
             .await
             .map_err(|e| ApiError::unavailable(format!("websocket {url}: {e}")))?;
         let (tx, rx) = mpsc::channel(8);
