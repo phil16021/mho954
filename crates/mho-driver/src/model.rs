@@ -283,6 +283,12 @@ pub struct Waveform {
 }
 
 impl Waveform {
+    /// `false` if the scope delivered no real data: it reports channels without an acquired
+    /// signal as all-0xFFFF records.
+    pub fn has_data(&self) -> bool {
+        !self.raw.is_empty() && !self.raw.iter().all(|&r| r == u16::MAX)
+    }
+
     pub fn volts(&self) -> Vec<f64> {
         self.raw.iter().map(|&r| self.preamble.volts(r)).collect()
     }
@@ -291,7 +297,11 @@ impl Waveform {
         (0..self.raw.len()).map(|i| self.preamble.time(i)).collect()
     }
 
+    /// Local measurements; all-zero (`samples == 0`) if the record holds no data.
     pub fn analyze(&self) -> mho_dsp::Measurements {
+        if !self.has_data() {
+            return mho_dsp::Measurements::default();
+        }
         mho_dsp::analyze(&self.volts(), self.preamble.x_increment)
     }
 }

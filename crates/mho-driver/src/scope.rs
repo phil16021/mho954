@@ -105,6 +105,8 @@ pub struct Scope {
     raw_blocked: bool,
     /// `:MEAS:ITEM?` commands already issued; the first query of an item often returns 9.9E37.
     measured: HashSet<String>,
+    /// Last full state per channel (for hidden channels in [`Self::status`]).
+    chan_cache: [Option<ChannelState>; CHANNELS as usize],
 }
 
 /// Maximum RAW record accepted (500 Mpts with the RLU-05 option).
@@ -153,6 +155,7 @@ impl Scope {
             raw_chunk_points: 250_000,
             raw_blocked: false,
             measured: HashSet::new(),
+            chan_cache: Default::default(),
         })
     }
 
@@ -206,16 +209,29 @@ impl Scope {
 
     // ---- status -------------------------------------------------------------------------
 
+    /// Complete state. Hidden channels are reported from the last known state (queried once),
+    /// which roughly halves the ~60 queries a full read needs (≈25 ms each over USB/IP).
     pub fn status(&mut self) -> Result<ScopeStatus> {
-        let channels = (1..=CHANNELS)
-            .map(|n| self.channel(n))
-            .collect::<Result<Vec<_>>>()?;
+        let mut channels = Vec::with_capacity(CHANNELS as usize);
+        for n in 1..=CHANNELS {
+            let displayed = self.channel_displayed(n)?;
+            let cached = self.chan_cache[(n - 1) as usize].clone();
+            let state = match (displayed, cached) {
+                (false, Some(mut c)) => {
+                    c.display = false;
+                    c
+                }
+                _ => self.channel(n)?,
+            };
+            channels.push(state);
+        }
+        let trigger_status = self.trigger_status()?;
         Ok(ScopeStatus {
             idn: self.idn.clone(),
-            trigger_status: self.trigger_status()?,
+            trigger: self.trigger_with_status(trigger_status.clone())?,
+            trigger_status,
             channels,
             timebase: self.timebase()?,
-            trigger: self.trigger()?,
             acquire: self.acquire()?,
         })
     }
@@ -257,7 +273,7 @@ impl Scope {
     pub fn channel(&mut self, n: u8) -> Result<ChannelState> {
         Self::check_channel(n)?;
         let p = format!(":CHAN{n}");
-        Ok(ChannelState {
+        let state = ChannelState {
             channel: n,
             display: self.scpi.query_bool(&format!("{p}:DISP?"))?,
             scale: self.scpi.query_f64(&format!("{p}:SCAL?"))?,
@@ -269,7 +285,9 @@ impl Scope {
             invert: self.scpi.query_bool(&format!("{p}:INV?"))?,
             vernier: self.scpi.query_bool(&format!("{p}:VERN?"))?,
             unit: self.scpi.query(&format!("{p}:UNIT?"))?,
-        })
+        };
+        self.chan_cache[(n - 1) as usize] = Some(state.clone());
+        Ok(state)
     }
 
     pub fn channel_displayed(&mut self, n: u8) -> Result<bool> {
@@ -350,10 +368,15 @@ impl Scope {
     // ---- trigger ------------------------------------------------------------------------
 
     pub fn trigger(&mut self) -> Result<TriggerState> {
+        let status = self.trigger_status()?;
+        self.trigger_with_status(status)
+    }
+
+    fn trigger_with_status(&mut self, status: String) -> Result<TriggerState> {
         Ok(TriggerState {
             mode: self.scpi.query(":TRIG:MODE?")?,
             sweep: TriggerSweep::from_scpi(&self.scpi.query(":TRIG:SWE?")?)?,
-            status: self.trigger_status()?,
+            status,
             coupling: self.scpi.query(":TRIG:COUP?")?,
             holdoff: self.scpi.query_f64(":TRIG:HOLD?")?,
             edge_source: self.scpi.query(":TRIG:EDGE:SOUR?")?,

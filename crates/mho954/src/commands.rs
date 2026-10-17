@@ -348,7 +348,14 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
         } => {
             if local {
                 let w = api.waveform(source, WaveMode::Normal).await?;
-                print_local(&w.source, &w.analyze());
+                if w.has_data() {
+                    print_local(&w.source, &w.analyze());
+                } else {
+                    println!(
+                        "{}: no data (the scope reports all samples as 0xFFFF)",
+                        w.source
+                    );
+                }
             } else {
                 let items = if items.is_empty() {
                     vec!["VPP".into(), "FREQ".into(), "VRMS".into()]

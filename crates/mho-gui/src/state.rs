@@ -12,7 +12,10 @@ use mho_service::{
 };
 
 const LOG_LINES: usize = 8;
-const STATUS_INTERVAL: Duration = Duration::from_secs(5);
+/// Full status costs ~40 queries (≈1 s of bus time), so it is refreshed rarely; changes made
+/// through this GUI update it directly, and a changed set of displayed channels triggers a
+/// refresh early.
+const STATUS_INTERVAL: Duration = Duration::from_secs(15);
 
 #[derive(Default)]
 pub struct Shared {
@@ -112,6 +115,19 @@ impl Client {
                                 let mut sh = this.lock();
                                 match ev {
                                     LiveEvent::Frame(f) => {
+                                        let shown: Vec<&str> =
+                                            f.traces.iter().map(|t| t.source.as_str()).collect();
+                                        let known = sh.status.as_ref().map(|st| {
+                                            st.channels
+                                                .iter()
+                                                .filter(|c| c.display)
+                                                .map(|c| format!("CHAN{}", c.channel))
+                                                .collect::<Vec<_>>()
+                                        });
+                                        if known.is_some_and(|k| k != shown) {
+                                            // Channels switched on the front panel.
+                                            sh.status_dirty = true;
+                                        }
                                         sh.frame = Some(f);
                                         sh.live_error = None;
                                     }

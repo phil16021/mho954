@@ -192,9 +192,7 @@ impl ScopeApi for LocalBackend {
     }
 
     async fn set_live_config(&self, config: LiveConfig) -> ApiResult<LiveConfig> {
-        if !(config.max_fps > 0.0 && config.stopped_fps > 0.0) {
-            return Err(ApiError::invalid("frame rates must be > 0"));
-        }
+        config.validate().map_err(ApiError::invalid)?;
         self.hub.set_config(config);
         Ok(self.hub.config())
     }

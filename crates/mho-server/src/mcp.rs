@@ -27,6 +27,15 @@ impl McpScope {
     }
 }
 
+/// Runs CPU-heavy work off the async workers.
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+) -> Result<T, ApiError> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| ApiError::new(mho_service::ErrorKind::Internal, e.to_string()))?
+}
+
 fn ok_json<T: Serialize>(v: &T) -> ToolResult {
     let text = serde_json::to_string_pretty(v)
         .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
@@ -105,6 +114,8 @@ struct WaveformSummary {
     sample_interval_s: f64,
     t_start_s: f64,
     t_end_s: f64,
+    /// `false`: the scope delivered no data for this channel (all samples 0xFFFF).
+    has_data: bool,
     measurements: mho_dsp::Measurements,
     /// `[time_s, volts]` pairs (min/max decimated).
     samples: Vec<[f64; 2]>,
@@ -188,9 +199,13 @@ impl McpScope {
     )]
     async fn analyze_waveform(&self, Parameters(p): Parameters<SourceArg>) -> ToolResult {
         let w = try_api!(self.api.waveform(p.source, WaveMode::Normal).await);
-        ok_json(
-            &serde_json::json!({ "source": w.source, "points": w.raw.len(), "measurements": w.analyze() }),
-        )
+        ok_json(&serde_json::json!({
+            "source": w.source,
+            "points": w.raw.len(),
+            "has_data": w.has_data(),
+            "note": if w.has_data() { "" } else { "the scope reports no data for this channel (all samples 0xFFFF)" },
+            "measurements": w.analyze(),
+        }))
     }
 
     #[tool(
@@ -204,27 +219,34 @@ impl McpScope {
             WaveMode::Normal
         };
         let w = try_api!(self.api.waveform(p.source, mode).await);
-        let volts = w.volts();
-        let saved_to = match &p.save_as {
-            Some(name) => Some(try_api!(self.save(name, &w, &volts))),
-            None => None,
-        };
-        let max = p.max_points.unwrap_or(200).clamp(10, 2000);
-        let buckets = mho_dsp::minmax_decimate(&volts, max / 2);
-        let samples = mho_dsp::decimate::minmax_polyline(&buckets)
-            .into_iter()
-            .map(|(i, v)| [w.preamble.time(i), v])
-            .collect();
-        ok_json(&WaveformSummary {
-            source: w.source.clone(),
-            points: w.raw.len(),
-            sample_interval_s: w.preamble.x_increment,
-            t_start_s: w.preamble.time(0),
-            t_end_s: w.preamble.time(w.raw.len().saturating_sub(1)),
-            measurements: mho_dsp::analyze(&volts, w.preamble.x_increment),
-            samples,
-            saved_to,
+        // Conversion, decimation and file output can be heavy for RAW records.
+        let this = self.clone();
+        let summary = blocking(move || {
+            let volts = w.volts();
+            let saved_to = match &p.save_as {
+                Some(name) => Some(this.save(name, &w, &volts)?),
+                None => None,
+            };
+            let max = p.max_points.unwrap_or(200).clamp(10, 2000);
+            let buckets = mho_dsp::minmax_decimate(&volts, max / 2);
+            let samples = mho_dsp::decimate::minmax_polyline(&buckets)
+                .into_iter()
+                .map(|(i, v)| [w.preamble.time(i), v])
+                .collect();
+            Ok(WaveformSummary {
+                source: w.source.clone(),
+                points: w.raw.len(),
+                sample_interval_s: w.preamble.x_increment,
+                t_start_s: w.preamble.time(0),
+                t_end_s: w.preamble.time(w.raw.len().saturating_sub(1)),
+                has_data: w.has_data(),
+                measurements: w.analyze(),
+                samples,
+                saved_to,
+            })
         })
+        .await;
+        ok_json(&try_api!(summary))
     }
 
     #[tool(
@@ -238,17 +260,21 @@ impl McpScope {
             WaveMode::Normal
         };
         let w = try_api!(self.api.waveform(p.source, mode).await);
-        let spec = mho_dsp::spectrum(
-            &w.volts(),
-            w.preamble.x_increment,
-            p.window.unwrap_or_default(),
-        );
-        ok_json(&serde_json::json!({
-            "source": w.source,
-            "bin_spacing_hz": spec.df,
-            "max_frequency_hz": spec.df * spec.dbv.len() as f64,
-            "peaks": spec.peaks(p.count.unwrap_or(5).clamp(1, 50)),
-        }))
+        let result = blocking(move || {
+            let spec = mho_dsp::spectrum(
+                &w.volts(),
+                w.preamble.x_increment,
+                p.window.unwrap_or_default(),
+            );
+            Ok(serde_json::json!({
+                "source": w.source,
+                "bin_spacing_hz": spec.df,
+                "max_frequency_hz": spec.df * spec.dbv.len() as f64,
+                "peaks": spec.peaks(p.count.unwrap_or(5).clamp(1, 50)),
+            }))
+        })
+        .await;
+        ok_json(&try_api!(result))
     }
 
     #[tool(description = "Capture the scope's screen as a PNG image.")]

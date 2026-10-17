@@ -38,6 +38,31 @@ pub struct LiveConfig {
     pub status_every: u32,
 }
 
+impl LiveConfig {
+    /// Rejects settings that would overload the scope or the loop.
+    pub fn validate(&self) -> Result<(), String> {
+        if !(self.max_fps > 0.0 && self.max_fps <= 100.0) {
+            return Err("max_fps must be in (0, 100]".into());
+        }
+        if !(self.stopped_fps > 0.0 && self.stopped_fps <= self.max_fps) {
+            return Err("stopped_fps must be in (0, max_fps]".into());
+        }
+        if self.measure_interval_ms < 200 {
+            return Err("measure_interval_ms must be ≥ 200".into());
+        }
+        if self.preamble_refresh_ms < 100 {
+            return Err("preamble_refresh_ms must be ≥ 100".into());
+        }
+        if self.status_every == 0 {
+            return Err("status_every must be ≥ 1".into());
+        }
+        if self.measurements.len() > 10 {
+            return Err("at most 10 live measurements".into());
+        }
+        Ok(())
+    }
+}
+
 impl Default for LiveConfig {
     fn default() -> Self {
         LiveConfig {
@@ -100,9 +125,16 @@ pub fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// A frame together with its wire encoding (encoded once, shared by all clients).
+#[derive(Debug)]
+pub struct EncodedFrame {
+    pub frame: Frame,
+    pub bytes: bytes::Bytes,
+}
+
 #[derive(Clone)]
 pub struct LiveHub {
-    pub(crate) frames: watch::Sender<Option<Arc<Frame>>>,
+    pub(crate) frames: watch::Sender<Option<Arc<EncodedFrame>>>,
     pub(crate) measurements: watch::Sender<Option<Arc<MeasureSnapshot>>>,
     pub(crate) errors: watch::Sender<Option<String>>,
     pub(crate) config: watch::Sender<LiveConfig>,
@@ -118,7 +150,7 @@ impl LiveHub {
         }
     }
 
-    pub fn subscribe_frames(&self) -> watch::Receiver<Option<Arc<Frame>>> {
+    pub fn subscribe_frames(&self) -> watch::Receiver<Option<Arc<EncodedFrame>>> {
         self.frames.subscribe()
     }
 
@@ -232,7 +264,9 @@ pub(crate) async fn run_loop(
                     fps,
                     traces,
                 };
-                hub.frames.send_replace(Some(Arc::new(frame)));
+                let bytes = bytes::Bytes::from(encode_frame(&frame));
+                hub.frames
+                    .send_replace(Some(Arc::new(EncodedFrame { frame, bytes })));
                 if hub.errors.borrow().is_some() {
                     hub.errors.send_replace(None);
                 }

@@ -44,6 +44,16 @@ impl IntoResponse for HttpError {
 
 type HttpResult<T> = Result<T, HttpError>;
 
+/// Runs CPU-heavy work (FFT, format conversion of large records) off the async workers.
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+) -> HttpResult<T> {
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| ApiError::new(ErrorKind::Internal, e.to_string()))?
+        .map_err(Into::into)
+}
+
 pub fn routes() -> Router {
     Router::new()
         .route("/info", get(info))
@@ -277,6 +287,8 @@ struct SourceQuery {
 #[derive(Serialize, ToSchema)]
 struct LocalMeasurements {
     source: String,
+    /// `false`: the scope delivered no data for this channel (all samples 0xFFFF).
+    has_data: bool,
     #[serde(flatten)]
     values: Measurements,
 }
@@ -289,6 +301,7 @@ async fn measure_local(
 ) -> HttpResult<Json<LocalMeasurements>> {
     let w = s.backend.waveform(q.source, WaveMode::Normal).await?;
     Ok(Json(LocalMeasurements {
+        has_data: w.has_data(),
         values: w.analyze(),
         source: w.source,
     }))
@@ -331,14 +344,18 @@ async fn fft(
         WaveMode::Normal
     };
     let w = s.backend.waveform(q.source, mode).await?;
-    let spec = mho_dsp::spectrum(&w.volts(), w.preamble.x_increment, q.window);
-    Ok(Json(FftResponse {
-        source: w.source,
-        df: spec.df,
-        bins: spec.dbv.len(),
-        peaks: spec.peaks(q.peaks.unwrap_or(5).min(100)),
-        dbv: q.full.then_some(spec.dbv),
-    }))
+    let resp = blocking(move || {
+        let spec = mho_dsp::spectrum(&w.volts(), w.preamble.x_increment, q.window);
+        Ok(FftResponse {
+            source: w.source,
+            df: spec.df,
+            bins: spec.dbv.len(),
+            peaks: spec.peaks(q.peaks.unwrap_or(5).min(100)),
+            dbv: q.full.then_some(spec.dbv),
+        })
+    })
+    .await?;
+    Ok(Json(resp))
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -358,56 +375,66 @@ async fn waveform(
     Query(q): Query<WaveformQuery>,
 ) -> HttpResult<Response> {
     let mode = WaveMode::from_scpi(q.mode.as_deref().unwrap_or("norm")).map_err(ApiError::from)?;
-    let w = s.backend.waveform(source, mode).await?;
     let format = q.format.as_deref().unwrap_or("json").to_ascii_lowercase();
-    Ok(match format.as_str() {
-        "json" => Json(w).into_response(),
-        "csv" => {
-            let volts = w.volts();
-            let mut out = Vec::new();
-            mho_dsp::export::write_csv(
-                &mut out,
-                w.preamble.time(0),
-                w.preamble.x_increment,
-                &[mho_dsp::export::CsvColumn {
-                    name: &w.source,
-                    volts: &volts,
-                }],
-            )
-            .map_err(|e| ApiError::new(ErrorKind::Internal, e.to_string()))?;
-            ([(header::CONTENT_TYPE, "text/csv")], out).into_response()
-        }
-        "npy" => {
-            let bytes = mho_dsp::export::npy_bytes(&w.raw)
+    if !matches!(format.as_str(), "json" | "csv" | "npy" | "bin") {
+        return Err(ApiError::invalid(format!("unknown format {format:?}")).into());
+    }
+    let w = s.backend.waveform(source, mode).await?;
+    blocking(move || {
+        Ok(match format.as_str() {
+            "json" => {
+                let body = serde_json::to_vec(&w)
+                    .map_err(|e| ApiError::new(ErrorKind::Internal, e.to_string()))?;
+                ([(header::CONTENT_TYPE, "application/json")], body).into_response()
+            }
+            "csv" => {
+                let volts = w.volts();
+                let mut out = Vec::new();
+                mho_dsp::export::write_csv(
+                    &mut out,
+                    w.preamble.time(0),
+                    w.preamble.x_increment,
+                    &[mho_dsp::export::CsvColumn {
+                        name: &w.source,
+                        volts: &volts,
+                    }],
+                )
                 .map_err(|e| ApiError::new(ErrorKind::Internal, e.to_string()))?;
-            (
-                [
-                    (header::CONTENT_TYPE, "application/octet-stream".to_string()),
-                    (
-                        header::HeaderName::from_static("x-preamble"),
-                        w.preamble.to_scpi(),
-                    ),
-                ],
-                bytes,
-            )
-                .into_response()
-        }
-        "bin" => {
-            let frame = Frame {
-                seq: 0,
-                timestamp_ms: mho_service::live::now_ms(),
-                trigger_status: String::new(),
-                fps: 0.0,
-                traces: vec![w],
-            };
-            (
-                [(header::CONTENT_TYPE, "application/octet-stream")],
-                encode_frame(&frame),
-            )
-                .into_response()
-        }
-        other => return Err(ApiError::invalid(format!("unknown format {other:?}")).into()),
+                ([(header::CONTENT_TYPE, "text/csv")], out).into_response()
+            }
+            "npy" => {
+                let bytes = mho_dsp::export::npy_bytes(&w.raw)
+                    .map_err(|e| ApiError::new(ErrorKind::Internal, e.to_string()))?;
+                (
+                    [
+                        (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+                        (
+                            header::HeaderName::from_static("x-preamble"),
+                            w.preamble.to_scpi(),
+                        ),
+                    ],
+                    bytes,
+                )
+                    .into_response()
+            }
+            "bin" => {
+                let frame = Frame {
+                    seq: 0,
+                    timestamp_ms: mho_service::live::now_ms(),
+                    trigger_status: String::new(),
+                    fps: 0.0,
+                    traces: vec![w],
+                };
+                (
+                    [(header::CONTENT_TYPE, "application/octet-stream")],
+                    encode_frame(&frame),
+                )
+                    .into_response()
+            }
+            _ => unreachable!("format checked above"),
+        })
     })
+    .await
 }
 
 #[utoipa::path(get, path = "/api/v1/screenshot.png", responses((status = 200, content_type = "image/png", body = Vec<u8>)))]

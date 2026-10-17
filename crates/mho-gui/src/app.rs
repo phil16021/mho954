@@ -895,7 +895,7 @@ impl ScopeApp {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Scope:").strong());
             if let (Some(m), Some(live)) = (&s.measurements, &s.live) {
-                for (i, v) in m.values.iter().enumerate() {
+                for v in &m.values {
                     let txt = format!("{} {} = {}", v.source, v.item, opt(v.value, &v.unit));
                     ui.label(
                         RichText::new(txt)
@@ -903,9 +903,14 @@ impl ScopeApp {
                             .color(channel_color(&v.source)),
                     );
                     if ui.small_button("x").on_hover_text("remove").clicked() {
+                        // Values may skip invalid specs, so match by item and source, not index.
                         let mut cfg = live.clone();
-                        if i < cfg.measurements.len() {
-                            cfg.measurements.remove(i);
+                        let pos = cfg.measurements.iter().position(|spec| {
+                            find_item(&spec.item).is_ok_and(|it| it.long == v.item)
+                                && normalize_source(&spec.source).is_ok_and(|s| s == v.source)
+                        });
+                        if let Some(pos) = pos {
+                            cfg.measurements.remove(pos);
                         }
                         self.set_live(cfg);
                     }
@@ -1038,7 +1043,7 @@ impl ScopeApp {
                     pui.set_auto_bounds([false, true]);
                 }
             }
-            for w in traces {
+            for w in traces.iter().filter(|w| w.has_data()) {
                 let cs = chan_state(&w.source);
                 let pts: PlotPoints = (0..w.raw.len())
                     .map(|i| {
@@ -1127,7 +1132,7 @@ impl ScopeApp {
             for (name, c) in [("A", self.cursor_a), ("B", self.cursor_b)] {
                 if let Some(t) = c {
                     ui.label(RichText::new(format!("{name}: {}", format_si(t, "s"))).strong());
-                    for w in &frame.traces {
+                    for w in frame.traces.iter().filter(|w| w.has_data()) {
                         if let Some(v) = value_at(w, t) {
                             ui.label(
                                 RichText::new(format!("{} {}", w.source, format_si(v, "V")))
@@ -1148,7 +1153,7 @@ impl ScopeApp {
                     ))
                     .strong(),
                 );
-                for w in &frame.traces {
+                for w in frame.traces.iter().filter(|w| w.has_data()) {
                     if let (Some(va), Some(vb)) = (value_at(w, a), value_at(w, b)) {
                         ui.label(
                             RichText::new(format!("Δ{} {}", w.source, format_si(vb - va, "V")))
@@ -1163,7 +1168,7 @@ impl ScopeApp {
     fn fft_plot(&mut self, ui: &mut egui::Ui, frame: &Frame) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("FFT").strong());
-            for w in &frame.traces {
+            for w in frame.traces.iter().filter(|w| w.has_data()) {
                 ui.selectable_value(
                     &mut self.fft_source,
                     w.source.clone(),
@@ -1183,8 +1188,9 @@ impl ScopeApp {
         let Some(w) = frame
             .traces
             .iter()
+            .filter(|t| t.has_data())
             .find(|t| t.source == self.fft_source)
-            .or(frame.traces.first())
+            .or(frame.traces.iter().find(|t| t.has_data()))
         else {
             return;
         };
@@ -1255,18 +1261,7 @@ impl eframe::App for ScopeApp {
             .map(|f| {
                 f.traces
                     .iter()
-                    .map(|t| {
-                        // The MHO954 returns 0xFFFF for every point of channels it has no data for.
-                        let invalid = t.raw.iter().all(|&r| r == u16::MAX);
-                        (
-                            t.source.clone(),
-                            if invalid {
-                                Measurements::default()
-                            } else {
-                                t.analyze()
-                            },
-                        )
-                    })
+                    .map(|t| (t.source.clone(), t.analyze()))
                     .collect()
             })
             .unwrap_or_default();

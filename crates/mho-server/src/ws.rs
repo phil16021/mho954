@@ -5,10 +5,16 @@ use axum::extract::State;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::response::Response;
 use axum::routing::get;
-use mho_service::live::{WsText, encode_frame};
+use mho_service::live::WsText;
+use std::time::Duration;
 use tracing::debug;
 
 use crate::AppState;
+
+/// A client that cannot take a message within this time is disconnected, so a stalled client
+/// does not keep the live loop polling the scope.
+const SEND_TIMEOUT: Duration = Duration::from_secs(5);
+const PING_INTERVAL: Duration = Duration::from_secs(15);
 
 pub fn routes() -> axum::Router<AppState> {
     axum::Router::new().route("/stream", get(upgrade))
@@ -25,6 +31,8 @@ async fn stream(mut socket: WebSocket, s: AppState) {
     let mut errors = hub.subscribe_errors();
     frames.mark_changed();
     meas.mark_changed();
+    let mut ping = tokio::time::interval(PING_INTERVAL);
+    ping.tick().await;
 
     loop {
         let msg = tokio::select! {
@@ -32,7 +40,7 @@ async fn stream(mut socket: WebSocket, s: AppState) {
                 if r.is_err() { break; }
                 let frame = frames.borrow_and_update().clone();
                 match frame {
-                    Some(f) => Message::Binary(encode_frame(&f).into()),
+                    Some(f) => Message::Binary(f.bytes.clone()),
                     None => continue,
                 }
             }
@@ -52,13 +60,19 @@ async fn stream(mut socket: WebSocket, s: AppState) {
                     None => continue,
                 }
             }
+            _ = ping.tick() => Message::Ping(Vec::new().into()),
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
                 Some(Ok(_)) => continue,
             },
         };
-        if socket.send(msg).await.is_err() {
-            break;
+        match tokio::time::timeout(SEND_TIMEOUT, socket.send(msg)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => break,
+            Err(_) => {
+                debug!("websocket client too slow, disconnecting");
+                break;
+            }
         }
     }
     debug!("websocket client disconnected");
