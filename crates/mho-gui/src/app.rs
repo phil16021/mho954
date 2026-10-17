@@ -637,6 +637,11 @@ impl ScopeApp {
             ui.end_row();
             for (src, m) in local {
                 ui.label(RichText::new(src).color(channel_color(src)).strong());
+                if m.samples == 0 {
+                    ui.label(RichText::new("no data (scope reports a constant full-scale code)").weak());
+                    ui.end_row();
+                    continue;
+                }
                 for v in [
                     format_si(m.vpp, "V"),
                     format_si(m.vmax, "V"),
@@ -868,6 +873,8 @@ impl ScopeApp {
         let pts: PlotPoints = spec.dbv.iter().enumerate().skip(1).map(|(k, &d)| [spec.frequency(k), d]).collect();
         let peaks = spec.peaks(3);
         Plot::new("fft")
+            .include_y(-140.0)
+            .include_y(10.0)
             .x_axis_formatter(|m, _| format_si(m.value, "Hz"))
             .y_axis_formatter(|m, _| format!("{:.0} dBV", m.value))
             .show(ui, |pui| {
@@ -919,7 +926,16 @@ impl eframe::App for ScopeApp {
         let local: Vec<(String, Measurements)> = s
             .frame
             .as_ref()
-            .map(|f| f.traces.iter().map(|t| (t.source.clone(), t.analyze())).collect())
+            .map(|f| {
+                f.traces
+                    .iter()
+                    .map(|t| {
+                        // The MHO954 returns 0xFFFF for every point of channels it has no data for.
+                        let invalid = t.raw.iter().all(|&r| r == u16::MAX);
+                        (t.source.clone(), if invalid { Measurements::default() } else { t.analyze() })
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
 
         egui::Panel::top("header").show(ui, |ui| self.header(ui, &s));
