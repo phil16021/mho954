@@ -139,4 +139,12 @@ Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigg
 
 - Mit `mho954 verify` prüfen (Budget: 3 ungeprüfte Queries pro Einschaltzyklus):
   `bus`, `bus.*`, `bus.data`, `math`, `math.fft`, `math.filter`, `math.peaks`, `dvm.value`
-  (bei eingeschaltetem DVM).
+  (bei eingeschaltetem DVM), `autoset`, `acquire.extra`, `channel`, `timebase.extra`, `display`,
+  `cursor*`, `save`, `histogram`, `mask`, `search`, `record`.
+- Ablesewerte (`ops.rs`) haben eine Wächter-Abfrage (z. B. `:CURS:MODE?` = MAN). Angenommen,
+  nicht belegt: Außerhalb des Modus antwortet das Scope nicht. `verify` schaltet den Modus
+  deshalb vorher ein und danach wieder aus.
+- Pfade für `:SAVE:*`/`:LOAD:*`: `C:/` oder `D:/`, Dateiname ≤ 26 Zeichen (Guide 3.21). Erlaubt
+  sind nur Buchstaben, Ziffern, `_ - . /`, damit kein `;` einen zweiten Befehl einschleusen kann.
+- Nicht umgesetzt: `:REFerence` (Parameter mit Referenznummer als erstem Argument),
+  `:NAVigate`, `:SAVe:SMB` (Netzlaufwerk mit Passwort), `*TST?` (Laufzeit länger als der Timeout).

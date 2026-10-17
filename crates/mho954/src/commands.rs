@@ -537,6 +537,50 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 }
             }
         }
+        Command::Read { id, list } => match (id, list) {
+            (Some(id), false) => {
+                for (k, v) in api.readout(id).await? {
+                    println!("{k:<22} {}", show_value(&v));
+                }
+            }
+            _ => {
+                for r in api.readouts().await? {
+                    let names: Vec<&str> = r.items.iter().map(|(n, _)| n.as_str()).collect();
+                    println!(
+                        "{:<14} {}{}  [{}]",
+                        r.id,
+                        r.title,
+                        if r.verified { "" } else { " (unverified)" },
+                        names.join(", ")
+                    );
+                }
+            }
+        },
+        Command::Do {
+            id,
+            path,
+            list,
+            yes,
+        } => match (id, list) {
+            (Some(id), false) => {
+                api.run_command(
+                    id.clone(),
+                    mho_service::CommandRequest { path, confirm: yes },
+                )
+                .await?;
+                println!("{id}: done");
+            }
+            _ => {
+                for c in api.commands().await? {
+                    let arg = c
+                        .path_extensions
+                        .map(|e| format!(" <C:/|D:/name.{}>", e.join("|")))
+                        .unwrap_or_default();
+                    let confirm = if c.confirm { " (needs --yes)" } else { "" };
+                    println!("{:<16} {}{arg}{confirm}", c.id, c.title);
+                }
+            }
+        },
         Command::Peaks { math } => {
             let peaks = api.fft_peaks(math).await?;
             if peaks.is_empty() {

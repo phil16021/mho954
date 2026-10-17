@@ -10,6 +10,7 @@ use mho_dsp::{Measurements, Window, format_si};
 use mho_service::{Frame, LiveConfig, MeasureSpec, ScopeApi, StatsRequest};
 
 use crate::settings::SettingsPanel;
+use crate::tools::ToolsPanel;
 use crate::state::{Client, Shared};
 
 /// Rigol channel colours.
@@ -108,6 +109,7 @@ pub struct ScopeApp {
     last_x_range: Option<(f64, f64)>,
     net_form: NetForm,
     settings: SettingsPanel,
+    tools: ToolsPanel,
     groups_requested: bool,
     /// Forces the settings section open on the next frame.
     settings_open: Option<bool>,
@@ -157,6 +159,7 @@ impl ScopeApp {
             last_x_range: None,
             net_form: NetForm::default(),
             settings: SettingsPanel::default(),
+            tools: ToolsPanel::default(),
             groups_requested: false,
             settings_open: None,
         }
@@ -175,6 +178,9 @@ impl ScopeApp {
             stats: sh.stats.clone(),
             math_scale: sh.math_scale.clone(),
             scope_peaks: sh.scope_peaks.clone(),
+            readouts: sh.readouts.clone(),
+            commands: sh.commands.clone(),
+            readout_values: sh.readout_values.clone(),
             decode: sh.decode.clone(),
             measurements: sh.measurements.clone(),
             live_error: sh.live_error.clone(),
@@ -630,6 +636,22 @@ impl ScopeApp {
             });
         if settings.body_returned.is_some() {
             self.load_groups();
+        }
+
+        ui.separator();
+        let tools = egui::CollapsingHeader::new(RichText::new("Readouts & commands").strong())
+            .id_salt("scope_tools")
+            .show(ui, |ui| {
+                self.tools.ui(
+                    ui,
+                    &self.client,
+                    s.readouts.as_deref(),
+                    s.commands.as_deref(),
+                    s.readout_values.as_ref(),
+                );
+            });
+        if tools.body_returned.is_some() {
+            self.tools.load(&self.client);
         }
 
         ui.separator();
@@ -1659,6 +1681,9 @@ struct Snapshot {
     decode: Option<(u8, Arc<DecodeTable>)>,
     math_scale: std::collections::HashMap<String, (f64, f64)>,
     scope_peaks: Option<(u8, Vec<mho_dsp::ScopePeak>)>,
+    readouts: Option<Vec<mho_driver::ops::ReadoutInfo>>,
+    commands: Option<Vec<mho_driver::ops::CommandInfo>>,
+    readout_values: Option<(String, ParamMap)>,
     measurements: Option<Arc<mho_service::MeasureSnapshot>>,
     live_error: Option<String>,
     ws_connected: bool,

@@ -178,6 +178,25 @@ pub fn candidates() -> Vec<Candidate> {
             });
         }
     }
+    // Readouts: switch the mode on, read, restore.
+    for r in crate::ops::READOUTS {
+        let cmd = |command: &str, note: &str| Candidate {
+            group: r.id.into(),
+            command: command.into(),
+            kind: Kind::Command,
+            note: note.into(),
+        };
+        out.extend(r.setup.iter().map(|c| cmd(c, "enable the mode")));
+        for q in crate::ops::readout_queries(r) {
+            out.push(Candidate {
+                group: r.id.into(),
+                command: q,
+                kind: Kind::Query,
+                note: r.title.into(),
+            });
+        }
+        out.extend(r.restore.iter().map(|c| cmd(c, "restore")));
+    }
     out
 }
 

@@ -687,6 +687,36 @@ impl SimTransport {
             self.respond(r);
             return true;
         }
+        if let Some(item) = crate::ops::READOUTS
+            .iter()
+            .flat_map(|r| r.items.iter().map(move |i| (r, i)))
+            .find(|(_, i)| i.query.trim_end_matches('?') == hdr)
+        {
+            let (r, item) = item;
+            if let Some((q, expect)) = r.guard {
+                let key = q.trim_end_matches('?');
+                let v = self.params.get(key).cloned().unwrap_or_else(|| {
+                    Self::param_spec(key)
+                        .map(|s| Self::param_default(&s))
+                        .unwrap_or_default()
+                });
+                if !crate::ops::guard_ok(&v, expect) {
+                    // Like the scope outside the matching mode (assumed): no answer.
+                    return false;
+                }
+            }
+            let answer = match item.kind {
+                crate::ops::ReadKind::Real { unit: "Hz" } => "1.000000E3".to_string(),
+                crate::ops::ReadKind::Real { .. } => "1.000000E-3".to_string(),
+                crate::ops::ReadKind::Int => "1".to_string(),
+                crate::ops::ReadKind::Text => "SIM".to_string(),
+                crate::ops::ReadKind::KeyValues => {
+                    "[Sum:5.6khits,Peaks:14hits,Max:3.9us,Min:-4us,Bin width:20ns]".to_string()
+                }
+            };
+            self.respond(answer);
+            return true;
+        }
         if let Some(m) = hdr
             .strip_prefix(":MATH")
             .and_then(|r| r.strip_suffix(":FFT:SEAR:RES"))
@@ -949,7 +979,14 @@ impl SimTransport {
                 self.frozen_at = self.started.elapsed().as_secs_f64();
             }
             ":AUT" | ":CLE" | ":TFOR" | "*CLS" => {}
-            "*RST" => *s = SimState::default(),
+            "*RST" => {
+                *s = SimState::default();
+                self.params.clear();
+            }
+            // One-shot commands of `ops::COMMANDS` (save/load on the scope, resets, recording).
+            h if crate::ops::COMMANDS
+                .iter()
+                .any(|c| c.command.split_whitespace().next() == Some(h)) => {}
             ":TIM:SCAL" => s.tim_scale = num()?.clamp(1e-9, 1000.0),
             ":TIM:OFFS" => s.tim_offset = num()?,
             ":TIM:MODE" => s.tim_mode = args.to_ascii_uppercase(),

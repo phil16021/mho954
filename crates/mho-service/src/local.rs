@@ -214,6 +214,35 @@ impl ScopeApi for LocalBackend {
         self.device.call(move |s| s.fft_peaks(math)).await
     }
 
+    async fn readouts(&self) -> ApiResult<Vec<mho_driver::ops::ReadoutInfo>> {
+        let trusted = self
+            .device
+            .call(|s| Ok(s.trusts_unverified()))
+            .await
+            .unwrap_or(false);
+        Ok(mho_driver::ops::READOUTS
+            .iter()
+            .map(|r| mho_driver::ops::describe_readout(r, trusted))
+            .collect())
+    }
+
+    async fn readout(&self, id: String) -> ApiResult<mho_driver::params::ParamMap> {
+        self.device.call(move |s| s.readout(&id)).await
+    }
+
+    async fn commands(&self) -> ApiResult<Vec<mho_driver::ops::CommandInfo>> {
+        Ok(mho_driver::ops::COMMANDS
+            .iter()
+            .map(mho_driver::ops::describe_command)
+            .collect())
+    }
+
+    async fn run_command(&self, id: String, request: CommandRequest) -> ApiResult<()> {
+        self.device
+            .call_mut(move |s| s.run_command(&id, request.path.as_deref(), request.confirm))
+            .await
+    }
+
     async fn modules(&self) -> ApiResult<Modules> {
         if let Some(m) = *self.modules.lock().unwrap() {
             return Ok(m);

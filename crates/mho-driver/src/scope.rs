@@ -647,6 +647,76 @@ impl Scope {
         Ok(mho_dsp::parse_decode_table(&String::from_utf8_lossy(&data)))
     }
 
+    /// Reads a set of values (cursor readings, mask/search/histogram results). The guard
+    /// query is checked first: outside the matching mode the scope would not answer.
+    pub fn readout(&mut self, id: &str) -> Result<ParamMap> {
+        let r = crate::ops::find_readout(id)?;
+        if !self.trust_unverified && !crate::ops::readout_verified(r) {
+            return Err(DriverError::Unsupported(format!(
+                "readout {} has not been verified on this instrument yet (run `mho954 verify {}`)",
+                r.id, r.id
+            )));
+        }
+        if let Some((q, expect)) = r.guard {
+            let a = self.scpi.query(q)?;
+            if !crate::ops::guard_ok(&a, expect) {
+                return Err(DriverError::State(format!(
+                    "{}: needs {} {expect} (is {a}); {}",
+                    r.id,
+                    q.trim_end_matches('?'),
+                    r.title
+                )));
+            }
+        }
+        let mut out = ParamMap::new();
+        for item in r.items {
+            let a = self.scpi.query(item.query)?;
+            out.extend(crate::ops::decode_item(item, &a)?);
+        }
+        Ok(out)
+    }
+
+    /// Runs a one-shot command (save/load on the scope, resets, recording). `arg` is the
+    /// file path for save/load; destructive commands need `confirm`.
+    pub fn run_command(&mut self, id: &str, arg: Option<&str>, confirm: bool) -> Result<()> {
+        let c = crate::ops::find_command(id)?;
+        if c.confirm && !confirm {
+            return Err(DriverError::Invalid(format!(
+                "{} must be confirmed explicitly ({})",
+                c.id, c.title
+            )));
+        }
+        let line = match (c.arg, arg) {
+            (crate::ops::CommandArg::None, None) => c.command.to_string(),
+            (crate::ops::CommandArg::None, Some(_)) => {
+                return Err(DriverError::Invalid(format!("{} takes no argument", c.id)));
+            }
+            (crate::ops::CommandArg::Path { extensions }, Some(p)) => {
+                format!(
+                    "{} {}",
+                    c.command,
+                    crate::ops::validate_path(p, extensions)?
+                )
+            }
+            (crate::ops::CommandArg::Path { extensions }, None) => {
+                return Err(DriverError::Invalid(format!(
+                    "{} needs a path like D:/name.{}",
+                    c.id, extensions[0]
+                )));
+            }
+        };
+        self.drain_errors()?;
+        self.scpi.write(&line)?;
+        if c.id == "reset" {
+            // Settings changed wholesale: forget everything cached.
+            self.wav = WavSettings::default();
+            self.chan_cache = Default::default();
+            self.measured.clear();
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        self.check_errors()
+    }
+
     /// Peak table of the FFT on math channel `n` (FFT operator and peak search must be on).
     pub fn fft_peaks(&mut self, n: u8) -> Result<Vec<mho_dsp::ScopePeak>> {
         if !(1..=4).contains(&n) {

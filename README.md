@@ -84,6 +84,10 @@ mho954 decode 1                            # Dekoder-Ereignistabelle (--csv, -o 
 mho954 set math -n 1 --activate operator=mult source1=CHAN1 source2=CHAN2
 mho954 set math.fft -n 2 --activate source=CHAN2 peak_search=true peaks=5
 mho954 peaks 2                             # Peak-Tabelle der Scope-FFT
+mho954 set cursor.manual --activate ax=-100u bx=300u && mho954 read cursor.manual
+mho954 read --list                         # Ablesewerte: Cursor, Maske, Suche, Histogramm
+mho954 do save.setup D:/bench1.stp         # Datei auf dem Scope (C:/ intern, D:/ USB-Stick)
+mho954 do --list                           # Befehle; `do reset --yes` = *RST (Werkseinstellungen)
 mho954 verify --list                       # Befehle einzeln am Gerät prüfen (siehe unten)
 ```
 
@@ -133,6 +137,8 @@ bevor das Gerät freigegeben wird.
 | GET | `/api/v1/counter`, `/api/v1/dvm`, `/api/v1/modules` | Zähler, Voltmeter, LA/AFG-Hardware |
 | GET | `/api/v1/bus/{n}/data?format=json\|csv` | Dekoder-Ereignistabelle |
 | GET | `/api/v1/math/{n}/peaks` | Peak-Tabelle der Scope-FFT |
+| GET | `/api/v1/readouts`, `/api/v1/readouts/{id}` | Ablesewerte (Cursor, Maske, Suche, Histogramm, Speicherstatus) |
+| GET/POST | `/api/v1/commands`, `/api/v1/commands/{id}` `{"path","confirm"}` | Speichern/Laden auf dem Scope, Resets, Record; `reset` nur mit `confirm` |
 | POST | `/api/v1/scpi` | Raw-SCPI (nur mit `--allow-raw-scpi`) |
 | WS | `/api/v1/stream` | Live-Frames (binär) + Messwerte (JSON) |
 
@@ -179,6 +185,7 @@ freien Port, damit die CLI nicht versehentlich den Simulator steuert.
 | `read_counter`, `read_dvm` | Frequenzzähler, Voltmeter |
 | `decode_bus` | Dekoder-Ereignisse |
 | `scope_fft_peaks` | Peak-Tabelle der Scope-FFT |
+| `read_values`, `run_scope_command` | Ablesewerte; Speichern/Laden/Resets (`reset` erst nach Rückfrage) |
 | `screenshot` | Bild als MCP-Image |
 | `list_options` | Optionen |
 | `get_network`, `configure_network` | LAN-Einstellungen (Änderungen nur nach Rückfrage) |
@@ -221,8 +228,10 @@ measurements = [{ item = "VPP", source = "CHAN1" }, { item = "FREQ", source = "C
 
 ## Einstellungsgruppen und Verifikation
 
-Trigger-Typen, Mess-Setup, Zähler, Voltmeter, die Dekoder `bus.*` (1–4) und die Math-Kanäle
-`math*` (1–4) beschreibt eine Tabelle in `crates/mho-driver/src/params.rs`. Daraus entstehen
+Trigger-Typen, Mess-Setup, Zähler, Voltmeter, die Dekoder `bus.*` (1–4), die Math-Kanäle
+`math*` (1–4), Kanal- und Zeitbasis-Extras (Label, Deskew, Zoom, Roll, XY), Autoset, Display,
+Cursor, Speichern, Histogramm, Maskentest, Suche und Record beschreibt eine Tabelle in
+`crates/mho-driver/src/params.rs`. Ablesewerte und einmalige Befehle stehen in `ops.rs`. Daraus entstehen
 Validierung, CLI (`groups/get/set`), REST, MCP, das GUI-Panel „Advanced settings“ und die
 Prüfliste für `mho954 verify`.
 

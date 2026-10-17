@@ -286,6 +286,26 @@ impl ScopeApi for RemoteBackend {
         self.get(&format!("/math/{math}/peaks")).await
     }
 
+    async fn readouts(&self) -> ApiResult<Vec<mho_driver::ops::ReadoutInfo>> {
+        self.get("/readouts").await
+    }
+
+    async fn readout(&self, id: String) -> ApiResult<mho_driver::params::ParamMap> {
+        self.get(&format!("/readouts/{id}")).await
+    }
+
+    async fn commands(&self) -> ApiResult<Vec<mho_driver::ops::CommandInfo>> {
+        self.get("/commands").await
+    }
+
+    async fn run_command(&self, id: String, request: CommandRequest) -> ApiResult<()> {
+        self.empty(
+            self.req(Method::POST, &format!("/commands/{id}"))
+                .json(&request),
+        )
+        .await
+    }
+
     async fn modules(&self) -> ApiResult<Modules> {
         self.get("/modules").await
     }

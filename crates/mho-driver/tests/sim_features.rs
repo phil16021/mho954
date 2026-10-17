@@ -96,3 +96,50 @@ fn math_channel_and_fft_peaks() {
     assert_eq!(s.displayed_math().unwrap(), [2]);
     assert!(s.scpi().query("*IDN?").unwrap().contains("MHO954"));
 }
+
+#[test]
+fn readouts_need_their_mode_and_commands_validate() {
+    let mut s = Scope::open(&Connection::Sim).unwrap();
+    // cursor off → refused before any value query
+    assert!(matches!(
+        s.readout("cursor.manual"),
+        Err(DriverError::State(_))
+    ));
+    s.group_set("cursor.manual", None, &ParamMap::new(), true)
+        .unwrap();
+    let v = s.readout("cursor.manual").unwrap();
+    assert_eq!(v.len(), 7);
+    assert!(matches!(v["inv_dx"], ParamValue::Real(_)));
+    let mut on = ParamMap::new();
+    on.insert("enable".into(), ParamValue::Bool(true));
+    s.group_set("histogram", None, &on, false).unwrap();
+    let h = s.readout("histogram").unwrap();
+    assert_eq!(h["statistics.bin_width"], ParamValue::Text("20ns".into()));
+    assert_eq!(s.readout("save").unwrap()["done"], ParamValue::Int(1));
+    assert!(matches!(s.readout("nope"), Err(DriverError::Invalid(_))));
+
+    s.run_command("save.setup", Some("D:/bench1.stp"), false)
+        .unwrap();
+    s.run_command("mask.reset", None, false).unwrap();
+    for (id, arg) in [
+        ("save.setup", None),
+        ("save.setup", Some("E:/x.stp")),
+        ("save.setup", Some("D:/x.png")),
+        ("mask.reset", Some("D:/x.pf")),
+        ("reset", None),
+        ("nope", None),
+    ] {
+        assert!(
+            matches!(s.run_command(id, arg, false), Err(DriverError::Invalid(_))),
+            "{id} {arg:?}"
+        );
+    }
+    // confirmed reset restores the defaults
+    let mut ch = ParamMap::new();
+    ch.insert("label".into(), ParamValue::Text("probe".into()));
+    s.group_set("channel", Some(2), &ch, false).unwrap();
+    s.run_command("reset", None, true).unwrap();
+    let c2 = s.group_get("channel", Some(2), false).unwrap();
+    assert_ne!(c2["label"], ParamValue::Text("probe".into()));
+    assert!(s.scpi().query("*IDN?").unwrap().contains("MHO954"));
+}

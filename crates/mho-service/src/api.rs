@@ -111,6 +111,16 @@ pub struct StatsRequest {
     pub source2: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct CommandRequest {
+    /// File path on the scope for save/load commands, e.g. `D:/bench1.stp`.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Required for destructive commands (`reset`).
+    #[serde(default)]
+    pub confirm: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct ScpiRequest {
     pub command: String,
@@ -160,6 +170,13 @@ pub trait ScopeApi: Send + Sync + 'static {
     async fn decode_bus(&self, bus: u8) -> ApiResult<mho_dsp::DecodeTable>;
     /// Peak table of the scope's FFT on math channel `math` (1..4).
     async fn fft_peaks(&self, math: u8) -> ApiResult<Vec<mho_dsp::ScopePeak>>;
+    /// Catalogue of read-only value sets (cursor values, mask/search/histogram results).
+    async fn readouts(&self) -> ApiResult<Vec<mho_driver::ops::ReadoutInfo>>;
+    /// Reads one value set (its mode must be active, e.g. cursor mode MANual).
+    async fn readout(&self, id: String) -> ApiResult<ParamMap>;
+    /// Catalogue of one-shot commands (save/load on the scope, resets, recording).
+    async fn commands(&self) -> ApiResult<Vec<mho_driver::ops::CommandInfo>>;
+    async fn run_command(&self, id: String, request: CommandRequest) -> ApiResult<()>;
     /// Hardware modules (logic analyzer, function generator).
     async fn modules(&self) -> ApiResult<mho_driver::Modules>;
     /// Catalogue of table-driven settings groups (trigger types, decoders, …).

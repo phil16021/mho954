@@ -924,6 +924,96 @@ async fn protocol_decoder() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn readouts_and_commands() {
+    let (url, shutdown) = start(false).await;
+    let v1 = format!("{url}/api/v1");
+    let c = reqwest::Client::new();
+    let list: serde_json::Value = get(&format!("{v1}/readouts")).await.json().await.unwrap();
+    assert!(list.as_array().unwrap().iter().any(|r| r["id"] == "mask"));
+    assert_eq!(get(&format!("{v1}/readouts/mask")).await.status(), 409);
+    assert_eq!(get(&format!("{v1}/readouts/bogus")).await.status(), 400);
+    c.put(format!("{v1}/groups/mask?activate=true"))
+        .json(&serde_json::json!({"x": 0.5}))
+        .send()
+        .await
+        .unwrap();
+    let m: serde_json::Value = get(&format!("{v1}/readouts/mask"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(m["total"], 1, "{m}");
+
+    let cmds: serde_json::Value = get(&format!("{v1}/commands")).await.json().await.unwrap();
+    let reset = cmds
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "reset")
+        .unwrap();
+    assert_eq!(reset["confirm"], true);
+    let post = |id: &str, body: serde_json::Value| {
+        c.post(format!("{v1}/commands/{id}")).json(&body).send()
+    };
+    assert_eq!(
+        post("mask.reset", serde_json::json!({}))
+            .await
+            .unwrap()
+            .status(),
+        204
+    );
+    assert_eq!(
+        post("save.setup", serde_json::json!({"path": "D:/a.stp"}))
+            .await
+            .unwrap()
+            .status(),
+        204
+    );
+    assert_eq!(
+        post("save.setup", serde_json::json!({"path": "/etc/x.stp"}))
+            .await
+            .unwrap()
+            .status(),
+        400
+    );
+    assert_eq!(
+        post("reset", serde_json::json!({})).await.unwrap().status(),
+        400
+    );
+    // no body at all is fine for argument-less commands
+    let r = c
+        .post(format!("{v1}/commands/display.clear"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 204);
+
+    let api = RemoteBackend::new(&url);
+    assert!(api.readouts().await.unwrap().len() >= 5);
+    api.run_command("record.stop".into(), Default::default())
+        .await
+        .unwrap();
+
+    let mut m = Mcp::connect(&url).await;
+    let r = m
+        .call("read_values", serde_json::json!({"id": "mask"}))
+        .await;
+    assert_eq!(r["isError"], false, "{r}");
+    let r = m
+        .call("run_scope_command", serde_json::json!({"id": "reset"}))
+        .await;
+    assert_eq!(r["isError"], true, "{r}");
+    let r = m
+        .call(
+            "run_scope_command",
+            serde_json::json!({"id": "save.image", "path": "D:/shot.png"}),
+        )
+        .await;
+    assert_eq!(r["isError"], false, "{r}");
+    shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn mcp_settings_tools() {
     let (url, shutdown) = start(false).await;
     let mut m = Mcp::connect(&url).await;

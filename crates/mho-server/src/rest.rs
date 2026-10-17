@@ -84,6 +84,10 @@ pub fn routes() -> Router {
         .route("/dvm", get(dvm))
         .route("/bus/{n}/data", get(bus_data))
         .route("/math/{n}/peaks", get(math_peaks))
+        .route("/readouts", get(readouts))
+        .route("/readouts/{id}", get(readout))
+        .route("/commands", get(commands))
+        .route("/commands/{id}", post(run_command))
         .route("/groups", get(groups))
         .route("/groups/{id}", get(group_get).put(group_set))
         .route("/openapi.json", get(openapi_json))
@@ -138,7 +142,11 @@ pub fn doc_routes() -> Router {
         counter,
         dvm,
         bus_data,
-        math_peaks
+        math_peaks,
+        readouts,
+        readout,
+        commands,
+        run_command
     ),
     components(schemas(ApiError, ErrorKind))
 )]
@@ -650,6 +658,44 @@ async fn math_peaks(
     Path(n): Path<u8>,
 ) -> HttpResult<Json<Vec<mho_dsp::ScopePeak>>> {
     Ok(Json(s.backend.fft_peaks(n).await?))
+}
+
+/// Read-only value sets: cursor values, mask/search/histogram results, save status.
+#[utoipa::path(get, path = "/api/v1/readouts",
+    responses((status = 200, body = Vec<mho_driver::ops::ReadoutInfo>)))]
+async fn readouts(
+    State(s): State<AppState>,
+) -> HttpResult<Json<Vec<mho_driver::ops::ReadoutInfo>>> {
+    Ok(Json(s.backend.readouts().await?))
+}
+
+/// Reads a value set (409 if its mode is not active, e.g. cursor mode MANual).
+#[utoipa::path(get, path = "/api/v1/readouts/{id}", params(("id" = String, Path)),
+    responses((status = 200, body = ParamMap)))]
+async fn readout(State(s): State<AppState>, Path(id): Path<String>) -> HttpResult<Json<ParamMap>> {
+    Ok(Json(s.backend.readout(id).await?))
+}
+
+/// One-shot commands: save/load files on the scope, resets, recording.
+#[utoipa::path(get, path = "/api/v1/commands",
+    responses((status = 200, body = Vec<mho_driver::ops::CommandInfo>)))]
+async fn commands(
+    State(s): State<AppState>,
+) -> HttpResult<Json<Vec<mho_driver::ops::CommandInfo>>> {
+    Ok(Json(s.backend.commands().await?))
+}
+
+/// Runs a one-shot command; `reset` needs `"confirm": true`.
+#[utoipa::path(post, path = "/api/v1/commands/{id}", params(("id" = String, Path)),
+    request_body = mho_service::CommandRequest, responses((status = 204)))]
+async fn run_command(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    body: Option<Json<mho_service::CommandRequest>>,
+) -> HttpResult<StatusCode> {
+    let request = body.map(|Json(b)| b).unwrap_or_default();
+    s.backend.run_command(id, request).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Digital voltmeter reading (enable it via group `dvm`).

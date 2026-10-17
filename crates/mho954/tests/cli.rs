@@ -225,3 +225,22 @@ fn decoder_needs_setup() {
         "{groups}"
     );
 }
+
+#[test]
+fn readouts_and_commands() {
+    let d = tempfile::tempdir().unwrap();
+    let list = stdout(cli(d.path()).args(["do", "--list"]));
+    assert!(
+        list.contains("save.setup") && list.contains("needs --yes"),
+        "{list}"
+    );
+    let reads = stdout(cli(d.path()).args(["read", "--list"]));
+    assert!(reads.contains("cursor.manual"), "{reads}");
+    let done = stdout(cli(d.path()).args(["do", "save.setup", "D:/bench.stp"]));
+    assert!(done.contains("done"), "{done}");
+    let err = stderr_of_failure(cli(d.path()).args(["do", "reset"]));
+    assert!(err.contains("confirmed"), "{err}");
+    let err = stderr_of_failure(cli(d.path()).args(["do", "save.setup", "../x.stp"]));
+    assert!(err.contains("C:/"), "{err}");
+    assert!(stdout(cli(d.path()).args(["do", "reset", "--yes"])).contains("done"));
+}

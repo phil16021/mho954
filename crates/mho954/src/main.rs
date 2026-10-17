@@ -152,6 +152,24 @@ pub enum Command {
     },
     /// Digital voltmeter reading (configure with `set dvm enable=true ...`).
     Dvm,
+    /// Read a value set: cursor.manual, cursor.track, mask, search, histogram, save.
+    Read {
+        id: Option<String>,
+        /// List the value sets.
+        #[arg(long)]
+        list: bool,
+    },
+    /// Run a one-shot command (save/load on the scope, resets, recording); `--list` shows them.
+    Do {
+        id: Option<String>,
+        /// File on the scope for save/load, e.g. D:/bench1.stp.
+        path: Option<String>,
+        #[arg(long)]
+        list: bool,
+        /// Confirm destructive commands (reset).
+        #[arg(long)]
+        yes: bool,
+    },
     /// Peak table of the scope's FFT on math channel 1..4 (`set math.fft --activate peak_search=true`).
     Peaks { math: u8 },
     /// Decoded events of protocol decoder 1..4 (set it up with `set bus.rs232 --activate ...`).

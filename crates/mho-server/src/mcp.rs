@@ -117,6 +117,24 @@ pub struct DecodeArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReadoutArg {
+    /// cursor.manual | cursor.track | mask | search | histogram | save
+    pub id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CommandArgs {
+    /// Command id, see the tool description.
+    pub id: String,
+    /// File on the scope for save/load: C:/ (internal) or D:/ (USB stick), e.g. D:/bench1.stp.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Required for `reset`; only set it after the user explicitly agreed.
+    #[serde(default)]
+    pub confirm: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct MathArg {
     /// Math channel 1..4.
     pub math: u8,
@@ -439,6 +457,39 @@ impl McpScope {
     )]
     async fn scope_fft_peaks(&self, Parameters(p): Parameters<MathArg>) -> ToolResult {
         ok_json(&try_api!(self.api.fft_peaks(p.math).await))
+    }
+
+    #[tool(
+        description = "Read a set of values from the scope: cursor.manual / cursor.track (cursor \
+        positions and deltas; set group `cursor.manual`/`cursor.track` with activate=true first), mask \
+        (pass/fail counts; group `mask`), search (number of found events; group `search`), histogram \
+        (statistics; group `histogram`), save (1 = last save finished)."
+    )]
+    async fn read_values(&self, Parameters(p): Parameters<ReadoutArg>) -> ToolResult {
+        ok_json(&try_api!(self.api.readout(p.id).await))
+    }
+
+    #[tool(
+        description = "Run a one-shot command on the scope. Files on the scope (path C:/… internal or \
+        D:/… USB stick, name ≤ 26 characters): save.setup (.stp), save.waveform (.csv/.bin/.wfm), \
+        save.memory (.bin/.csv), save.image (.png/.bmp/.jpg), save.mask (.pf), load.setup (.stp), \
+        load.mask (.pf), histogram.save (.csv). Without path: display.clear, mask.create, mask.reset, \
+        histogram.reset, record.start, record.stop, record.play, record.pause. reset (*RST, factory \
+        defaults) changes every setting: ask the user first and pass confirm=true only after they agreed."
+    )]
+    async fn run_scope_command(&self, Parameters(p): Parameters<CommandArgs>) -> ToolResult {
+        try_api!(
+            self.api
+                .run_command(
+                    p.id.clone(),
+                    mho_service::CommandRequest {
+                        path: p.path,
+                        confirm: p.confirm,
+                    },
+                )
+                .await
+        );
+        ok_json(&serde_json::json!({ "done": p.id }))
     }
 
     #[tool(description = "Read the digital voltmeter (enable/configure it with group `dvm`).")]
