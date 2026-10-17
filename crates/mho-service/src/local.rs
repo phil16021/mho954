@@ -152,6 +152,14 @@ impl ScopeApi for LocalBackend {
         Ok(ScpiResponse { response })
     }
 
+    async fn network(&self) -> ApiResult<NetworkState> {
+        self.device.call(|s| s.network()).await
+    }
+
+    async fn set_network(&self, update: NetworkUpdate) -> ApiResult<NetworkState> {
+        self.device.call(move |s| s.set_network(&update)).await
+    }
+
     async fn live_config(&self) -> ApiResult<LiveConfig> {
         Ok(self.hub.config())
     }

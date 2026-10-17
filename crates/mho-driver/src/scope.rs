@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use mho_scpi::{Scpi, TcpTransport, Transport, UsbTmcTransport};
+use mho_scpi::{Scpi, TcpTransport, Transport, UsbTmcTransport, UsbTmcUserTransport};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
@@ -17,6 +17,8 @@ use crate::sim::SimTransport;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Connection {
+    /// USBTMC in user space (nusb); robust over USB/IP. `serial = None` picks the first scope.
+    Usb { serial: Option<String> },
     /// Linux `usbtmc` kernel driver; `path = None` auto-detects the device node.
     Usbtmc { path: Option<PathBuf> },
     /// Raw SCPI socket, `host` or `host:port` (default port 5555).
@@ -27,20 +29,27 @@ pub enum Connection {
 
 impl Default for Connection {
     fn default() -> Self {
-        Connection::Usbtmc { path: None }
+        Connection::Usb { serial: None }
     }
 }
 
 impl std::str::FromStr for Connection {
     type Err = DriverError;
 
-    /// `usbtmc`, `usbtmc:/dev/usbtmc0`, `/dev/usbtmc0`, `tcp:192.168.1.20[:5555]`, `sim`.
+    /// `usb`, `usb:SERIAL`, `usbtmc`, `usbtmc:/dev/usbtmc0`, `/dev/usbtmc0`,
+    /// `tcp:192.168.1.20[:5555]`, `sim`.
     fn from_str(s: &str) -> Result<Self> {
         let s = s.trim();
         if s.eq_ignore_ascii_case("sim") {
             return Ok(Connection::Sim);
         }
-        if s.eq_ignore_ascii_case("usbtmc") || s.eq_ignore_ascii_case("usb") {
+        if s.eq_ignore_ascii_case("usb") {
+            return Ok(Connection::Usb { serial: None });
+        }
+        if let Some(serial) = s.strip_prefix("usb:") {
+            return Ok(Connection::Usb { serial: Some(serial.into()) });
+        }
+        if s.eq_ignore_ascii_case("usbtmc") {
             return Ok(Connection::Usbtmc { path: None });
         }
         if let Some(p) = s.strip_prefix("usbtmc:") {
@@ -52,13 +61,17 @@ impl std::str::FromStr for Connection {
         if let Some(a) = s.strip_prefix("tcp:") {
             return Ok(Connection::Tcp { addr: a.into() });
         }
-        Err(DriverError::Invalid(format!("unknown connection {s:?} (usbtmc[:path] | tcp:host[:port] | sim)")))
+        Err(DriverError::Invalid(format!(
+            "unknown connection {s:?} (usb[:serial] | usbtmc[:path] | tcp:host[:port] | sim)"
+        )))
     }
 }
 
 impl std::fmt::Display for Connection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Connection::Usb { serial: None } => write!(f, "usb"),
+            Connection::Usb { serial: Some(s) } => write!(f, "usb:{s}"),
             Connection::Usbtmc { path: None } => write!(f, "usbtmc"),
             Connection::Usbtmc { path: Some(p) } => write!(f, "usbtmc:{}", p.display()),
             Connection::Tcp { addr } => write!(f, "tcp:{addr}"),
@@ -86,6 +99,7 @@ pub struct Scope {
 impl Scope {
     pub fn open(conn: &Connection) -> Result<Scope> {
         let transport: Box<dyn Transport> = match conn {
+            Connection::Usb { serial } => Box::new(UsbTmcUserTransport::open(serial.as_deref())?),
             Connection::Usbtmc { path: Some(p) } => Box::new(UsbTmcTransport::open(p)?),
             Connection::Usbtmc { path: None } => Box::new(UsbTmcTransport::open_first()?),
             Connection::Tcp { addr } => Box::new(TcpTransport::connect(addr)?),
@@ -96,9 +110,16 @@ impl Scope {
 
     pub fn from_transport(transport: Box<dyn Transport>) -> Result<Scope> {
         let mut scpi = Scpi::new(transport);
-        // A previous session may have left an unread response behind.
-        scpi.recover();
-        let idn = Idn::parse(&scpi.query("*IDN?")?)?;
+        // No unconditional device clear: over USB/IP it is suspected of desynchronising the
+        // bulk pipes. A failed first query has already triggered a clear; retry once.
+        let idn = match scpi.query("*IDN?") {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("first *IDN? failed ({e}), retrying");
+                scpi.query("*IDN?")?
+            }
+        };
+        let idn = Idn::parse(&idn)?;
         info!(model = %idn.model, serial = %idn.serial, firmware = %idn.firmware, via = %scpi.describe(), "connected");
         if !idn.model.starts_with("MHO") && !idn.model.starts_with("DHO") {
             tracing::warn!(model = %idn.model, "not an MHO/DHO scope; commands may not match");
@@ -494,6 +515,96 @@ impl Scope {
         self.scpi.write(&format!(":SYST:OPT:INST {key}"))?;
         self.scpi.with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
         self.check_errors()
+    }
+
+    // ---- network (RJ45) -----------------------------------------------------------------
+
+    pub fn network(&mut self) -> Result<NetworkState> {
+        let s = &mut self.scpi;
+        Ok(NetworkState {
+            status: s.query(":LAN:STAT?")?,
+            dhcp: s.query_bool(":LAN:DHCP?")?,
+            auto_ip: s.query_bool(":LAN:AUT?")?,
+            manual: s.query_bool(":LAN:MAN?")?,
+            ip: s.query(":LAN:IPAD?")?,
+            mask: s.query(":LAN:SMAS?")?,
+            gateway: s.query(":LAN:GAT?")?,
+            dns: s.query(":LAN:DNS?")?,
+            mac: s.query(":LAN:MAC?")?,
+            dhcp_server: s.query(":LAN:DSER?")?,
+            mdns: s.query_bool(":LAN:MDNS?")?,
+            hostname: s.query(":LAN:HOST:NAME?")?,
+            description: s.query(":LAN:DESC?")?,
+            visa: s.query(":LAN:VISA?")?,
+        })
+    }
+
+    /// Changes the LAN configuration and sends `:LAN:APPLy`. When connected over LAN, the
+    /// connection may drop if the address changes.
+    pub fn set_network(&mut self, u: &NetworkUpdate) -> Result<NetworkState> {
+        let label = |name: &str, v: &str| -> Result<String> {
+            let v = v.trim();
+            if v.is_empty() || v.len() > 64 || !v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
+                return Err(DriverError::Invalid(format!("{name}: use 1-64 letters, digits, '-', '_', '.'")));
+            }
+            Ok(v.to_string())
+        };
+        // Validate everything before sending anything.
+        let ip = u.ip.as_deref().map(|v| validate_ipv4(v, false)).transpose()?;
+        let mask = u.mask.as_deref().map(|v| validate_ipv4(v, true)).transpose()?;
+        let gateway = u.gateway.as_deref().map(|v| validate_ipv4(v, false)).transpose()?;
+        let dns = u.dns.as_deref().map(|v| validate_ipv4(v, false)).transpose()?;
+        let hostname = u.hostname.as_deref().map(|v| label("hostname", v)).transpose()?;
+        let description = u.description.as_deref().map(|v| label("description", v)).transpose()?;
+        if u.mode.is_none() && (ip.is_some() || mask.is_some() || gateway.is_some() || dns.is_some()) && !self.scpi.query_bool(":LAN:MAN?")? {
+            return Err(DriverError::Invalid("ip/mask/gateway/dns need mode Static".into()));
+        }
+
+        let s = &mut self.scpi;
+        // Order matters: the three modes may never be off at the same time.
+        match u.mode {
+            Some(IpMode::Dhcp) => {
+                s.write(":LAN:DHCP ON")?;
+                s.write(":LAN:MAN OFF")?;
+            }
+            Some(IpMode::AutoIp) => {
+                s.write(":LAN:AUT ON")?;
+                s.write(":LAN:DHCP OFF")?;
+                s.write(":LAN:MAN OFF")?;
+            }
+            Some(IpMode::Static) => {
+                s.write(":LAN:MAN ON")?;
+                s.write(":LAN:DHCP OFF")?;
+                s.write(":LAN:AUT OFF")?;
+            }
+            None => {}
+        }
+        if let Some(v) = &ip {
+            s.write(&format!(":LAN:IPAD {v}"))?;
+        }
+        if let Some(v) = &mask {
+            s.write(&format!(":LAN:SMAS {v}"))?;
+        }
+        if let Some(v) = &gateway {
+            s.write(&format!(":LAN:GAT {v}"))?;
+        }
+        if let Some(v) = &dns {
+            s.write(&format!(":LAN:DNS {v}"))?;
+        }
+        if let Some(v) = u.mdns {
+            s.write(&format!(":LAN:MDNS {}", on_off(v)))?;
+        }
+        if let Some(v) = &hostname {
+            s.write(&format!(":LAN:HOST:NAME {v}"))?;
+        }
+        if let Some(v) = &description {
+            s.write(&format!(":LAN:DESC {v}"))?;
+        }
+        self.check_errors()?;
+        self.scpi.write(":LAN:APPL")?;
+        self.scpi.with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
+        self.check_errors()?;
+        self.network()
     }
 
     // ---- raw SCPI -----------------------------------------------------------------------

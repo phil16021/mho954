@@ -72,6 +72,18 @@ FRPHase FFPHase ACRMs.
 | `:SYST:OPT:UNIN` | entfernt alle offiziellen Optionen, danach Neustart | Guide |
 | `*OPT?`, `:SYST:OPT?` | existieren nicht (keine Antwort) | Gerät |
 
+## Netzwerk
+
+| Befehl | Hinweis | Quelle |
+|---|---|---|
+| `:LAN:DHCP`, `:LAN:AUToip`, `:LAN:MANual` | Bool; nie alle drei aus; Priorität DHCP > Auto-IP > statisch | Guide |
+| `:LAN:IPADdress`, `:LAN:SMASk`, `:LAN:GATeway`, `:LAN:DNS` | nur bei statischer IP (DHCP und Auto-IP aus); erstes Oktett 0–223 außer 127 | Guide |
+| `:LAN:MAC?`, `:LAN:DSERver?`, `:LAN:VISA? [USB\|LXI\|SOCKet]` | nur Abfrage | Guide |
+| `:LAN:STATus?` | `UNLINK`, `CONNECTED`, `INIT`, `IPCONFLICT`, `BUSY`, `CONFIGURED`, `DHCPFAILED`, `INVALIDIP`, `IPLOSE` | Guide, Gerät (`UNLINK`) |
+| `:LAN:MDNS`, `:LAN:HOST:NAME`, `:LAN:DESCription` | mDNS standardmäßig aus | Guide |
+| `:LAN:APPLy` | übernimmt alle `:LAN`-Änderungen | Guide |
+| WLAN | **keine SCPI-Befehle** im Guide (Feb. 2026); WLAN per USB-Dongle wird am Gerät eingerichtet | Guide |
+
 ## Firmware
 
 Es gibt keinen SCPI-Befehl zum Firmware-Update (Guide durchsucht). Das Update läuft über eine

@@ -57,11 +57,18 @@ mho954 single && mho954 capture -s 1 --raw -o cap.npy   # voller Speicher, + cap
 mho954 scpi ':ACQ:SRAT?'                   # einzelner Befehl
 mho954 scpi                                # interaktive Konsole
 mho954 backup                              # IDN, Status, Optionen, Setup-Blob, Screenshot
+mho954 net                                 # LAN-Einstellungen (RJ45)
+mho954 net set --static --ip 192.168.1.50 --mask 255.255.255.0 --gateway 192.168.1.1
+mho954 net set --dhcp --mdns true --hostname mho954
 mho954 bench                               # Latenz/Durchsatz (ohne laufenden Daemon)
 mho954 probe -o report.json                # SCPI-Dialekt prüfen
 ```
 
-`-c sim`, `-c /dev/usbtmc0` oder `-c tcp:192.168.1.20` wählen die Verbindung explizit.
+`-c usb` (Standard, USBTMC im Userspace), `-c usbtmc` (Kernel-Treiber), `-c tcp:192.168.1.20`
+(LAN/WLAN, Port 5555) oder `-c sim` wählen die Verbindung explizit.
+
+**WLAN:** Für den WLAN-Dongle gibt es laut Programming Guide keine SCPI-Befehle. Das WLAN wird am
+Scope eingerichtet. Mit der WLAN-IP des Scopes funktioniert danach `-c tcp:<IP>` ganz normal.
 
 ## Daemon, REST und WebSocket
 
@@ -85,6 +92,7 @@ Eine systemd-User-Unit liegt in `contrib/mho954.service`.
 | GET/POST | `/api/v1/options`, `/api/v1/options/install` | Optionen, gekaufte Lizenz installieren |
 | GET/PUT | `/api/v1/setup` | Setup-Blob sichern/laden |
 | GET/PUT | `/api/v1/live` | Live-Loop: fps, Messliste |
+| GET/PUT | `/api/v1/network` | LAN (RJ45): DHCP/Auto-IP/statisch, IP, Maske, Gateway, DNS, mDNS, Hostname |
 | WS | `/api/v1/stream` | Live-Frames (binär) + Messwerte (JSON) |
 
 Doku: <http://127.0.0.1:8954/docs>, OpenAPI: `/api/v1/openapi.json`.
@@ -119,6 +127,7 @@ Verfügbare Tools:
 | `fft_peaks` | Spektrum-Peaks |
 | `screenshot` | Bild als MCP-Image |
 | `list_options` | Optionen |
+| `get_network`, `configure_network` | LAN-Einstellungen (Änderungen nur nach Rückfrage) |
 | `raw_scpi` | nur mit `allow_raw_scpi` |
 
 ## Konfiguration

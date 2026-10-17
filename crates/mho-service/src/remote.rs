@@ -202,6 +202,14 @@ impl ScopeApi for RemoteBackend {
         self.send(Method::POST, "/scpi", &request).await
     }
 
+    async fn network(&self) -> ApiResult<NetworkState> {
+        self.get("/network").await
+    }
+
+    async fn set_network(&self, update: NetworkUpdate) -> ApiResult<NetworkState> {
+        self.send(Method::PUT, "/network", &update).await
+    }
+
     async fn live_config(&self) -> ApiResult<LiveConfig> {
         self.get("/live").await
     }

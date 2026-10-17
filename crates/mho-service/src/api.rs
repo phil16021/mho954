@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use mho_driver::{
     AcquireState, AcquireUpdate, Action, ChannelState, ChannelUpdate, DriverError, Idn, Measurement,
-    OptionInfo, ScopeStatus, TimebaseState, TimebaseUpdate, TriggerState, TriggerUpdate, WaveMode, Waveform,
+    NetworkState, NetworkUpdate, OptionInfo, ScopeStatus, TimebaseState, TimebaseUpdate, TriggerState, TriggerUpdate, WaveMode, Waveform,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -121,6 +121,8 @@ pub trait ScopeApi: Send + Sync + 'static {
     async fn setup_save(&self) -> ApiResult<Vec<u8>>;
     async fn setup_load(&self, blob: Vec<u8>) -> ApiResult<()>;
     async fn scpi(&self, request: ScpiRequest) -> ApiResult<ScpiResponse>;
+    async fn network(&self) -> ApiResult<NetworkState>;
+    async fn set_network(&self, update: NetworkUpdate) -> ApiResult<NetworkState>;
     async fn live_config(&self) -> ApiResult<LiveConfig>;
     async fn set_live_config(&self, config: LiveConfig) -> ApiResult<LiveConfig>;
 }

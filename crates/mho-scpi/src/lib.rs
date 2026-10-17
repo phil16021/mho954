@@ -11,6 +11,7 @@ mod scpi;
 mod tcp;
 mod transport;
 mod usbtmc;
+mod usbtmc_user;
 
 pub use block::{BlockHeader, parse_block_header};
 pub use error::{Result, ScpiError};
@@ -18,3 +19,4 @@ pub use scpi::Scpi;
 pub use tcp::TcpTransport;
 pub use transport::{ReadChunk, Transport};
 pub use usbtmc::{MAX_READ as USBTMC_MAX_READ, UsbTmcTransport, find_usbtmc_devices};
+pub use usbtmc_user::{UsbDeviceInfo, UsbTmcUserTransport, list_usb_devices};

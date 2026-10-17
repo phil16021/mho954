@@ -19,6 +19,7 @@ pub struct Shared {
     pub status: Option<ScopeStatus>,
     pub info: Option<ServiceInfo>,
     pub live: Option<LiveConfig>,
+    pub network: Option<mho_driver::NetworkState>,
     pub live_error: Option<String>,
     pub ws_connected: bool,
     pub busy: usize,

@@ -71,6 +71,20 @@ pub struct ScopeApp {
     new_meas_source: String,
     raw_source: String,
     last_x_range: Option<(f64, f64)>,
+    net_form: NetForm,
+}
+
+/// Editable copy of the LAN settings.
+#[derive(Default)]
+struct NetForm {
+    loaded: bool,
+    mode: Option<IpMode>,
+    ip: String,
+    mask: String,
+    gateway: String,
+    dns: String,
+    hostname: String,
+    mdns: bool,
 }
 
 impl ScopeApp {
@@ -92,6 +106,7 @@ impl ScopeApp {
             new_meas_source: "CHAN1".into(),
             raw_source: "CHAN1".into(),
             last_x_range: None,
+            net_form: NetForm::default(),
         }
     }
 
@@ -102,6 +117,7 @@ impl ScopeApp {
             status: sh.status.clone(),
             info: sh.info.clone(),
             live: sh.live.clone(),
+            network: sh.network.clone(),
             measurements: sh.measurements.clone(),
             live_error: sh.live_error.clone(),
             ws_connected: sh.ws_connected,
@@ -439,9 +455,102 @@ impl ScopeApp {
         }
 
         ui.separator();
+        egui::CollapsingHeader::new(RichText::new("Network (RJ45)").strong()).default_open(false).show(ui, |ui| {
+            self.network_controls(ui, s);
+        });
+
+        ui.separator();
         for (msg, err) in &s.log {
             ui.label(RichText::new(msg).small().color(if *err { Color32::LIGHT_RED } else { Color32::GRAY }));
         }
+    }
+
+    fn load_network(&self) {
+        self.client.op(
+            "network",
+            |api| async move { api.network().await },
+            |sh: &mut Shared, n: NetworkState| sh.network = Some(n),
+        );
+    }
+
+    fn network_controls(&mut self, ui: &mut egui::Ui, s: &Snapshot) {
+        let Some(n) = &s.network else {
+            if ui.button("Load LAN settings").clicked() {
+                self.load_network();
+            }
+            return;
+        };
+        let f = &mut self.net_form;
+        if !f.loaded {
+            *f = NetForm {
+                loaded: true,
+                mode: Some(if n.manual && !n.dhcp {
+                    IpMode::Static
+                } else if n.dhcp {
+                    IpMode::Dhcp
+                } else {
+                    IpMode::AutoIp
+                }),
+                ip: n.ip.clone(),
+                mask: n.mask.clone(),
+                gateway: n.gateway.clone(),
+                dns: n.dns.clone(),
+                hostname: n.hostname.clone(),
+                mdns: n.mdns,
+            };
+        }
+        let col = if n.status == "CONNECTED" || n.status == "CONFIGURED" { Color32::LIGHT_GREEN } else { Color32::GRAY };
+        ui.label(RichText::new(format!("{}  ·  MAC {}", n.status, n.mac)).color(col));
+        ui.horizontal(|ui| {
+            for (m, label) in [(IpMode::Dhcp, "DHCP"), (IpMode::AutoIp, "Auto-IP"), (IpMode::Static, "Static")] {
+                ui.selectable_value(&mut f.mode, Some(m), label);
+            }
+        });
+        let static_mode = f.mode == Some(IpMode::Static);
+        egui::Grid::new("netgrid").num_columns(2).show(ui, |ui| {
+            for (label, value) in
+                [("IP", &mut f.ip), ("Mask", &mut f.mask), ("Gateway", &mut f.gateway), ("DNS", &mut f.dns)]
+            {
+                ui.label(label);
+                ui.add_enabled(static_mode, egui::TextEdit::singleline(value).desired_width(130.0));
+                ui.end_row();
+            }
+            ui.label("Hostname");
+            ui.add(egui::TextEdit::singleline(&mut f.hostname).desired_width(130.0));
+            ui.end_row();
+        });
+        ui.checkbox(&mut f.mdns, "mDNS");
+        let (mut apply, mut reload) = (false, false);
+        ui.horizontal(|ui| {
+            apply = ui.button("Apply").on_hover_text("Sends the settings and :LAN:APPLy").clicked();
+            reload = ui.button("Reload").clicked();
+        });
+        if apply {
+            let u = NetworkUpdate {
+                mode: f.mode,
+                ip: static_mode.then(|| f.ip.clone()),
+                mask: static_mode.then(|| f.mask.clone()),
+                gateway: static_mode.then(|| f.gateway.clone()),
+                dns: static_mode.then(|| f.dns.clone()),
+                mdns: Some(f.mdns),
+                hostname: Some(f.hostname.clone()),
+                description: None,
+            };
+            self.client.op(
+                "LAN apply",
+                move |api| async move { api.set_network(u).await },
+                |sh: &mut Shared, n: NetworkState| {
+                    sh.log(format!("LAN applied: {} {}", n.status, n.ip), false);
+                    sh.network = Some(n);
+                },
+            );
+            self.net_form.loaded = false;
+        }
+        if reload {
+            self.net_form.loaded = false;
+            self.load_network();
+        }
+        ui.label(RichText::new("WLAN (USB dongle) has no SCPI interface; configure it on the scope.").small().weak());
     }
 
     fn channel_controls(&mut self, ui: &mut egui::Ui, c: &ChannelState) {
@@ -779,6 +888,7 @@ struct Snapshot {
     status: Option<ScopeStatus>,
     info: Option<mho_service::ServiceInfo>,
     live: Option<LiveConfig>,
+    network: Option<NetworkState>,
     measurements: Option<Arc<mho_service::MeasureSnapshot>>,
     live_error: Option<String>,
     ws_connected: bool,

@@ -15,7 +15,7 @@ pub struct Cli {
     /// Config file (default ~/.config/mho954/config.toml).
     #[arg(long, global = true, env = "MHO954_CONFIG")]
     config: Option<PathBuf>,
-    /// Scope connection: usbtmc | /dev/usbtmcN | tcp:HOST[:PORT] | sim. Implies --direct.
+    /// Scope connection: usb[:SERIAL] | usbtmc | /dev/usbtmcN | tcp:HOST[:PORT] | sim. Implies --direct.
     #[arg(short, long, global = true, env = "MHO954_CONNECTION")]
     connection: Option<String>,
     /// Daemon URL (default derived from `bind` in the config).
@@ -124,6 +124,11 @@ pub enum Command {
     },
     /// Restore a setup saved by `backup` (setup.bin).
     Restore { file: PathBuf },
+    /// LAN (RJ45) settings: show, or change with `net set ...` (WLAN has no SCPI interface).
+    Net {
+        #[command(subcommand)]
+        cmd: Option<commands::NetCmd>,
+    },
     /// Firmware information and update procedure.
     Fw {
         #[command(subcommand)]

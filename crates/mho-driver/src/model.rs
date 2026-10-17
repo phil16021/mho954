@@ -300,6 +300,67 @@ pub struct Measurement {
     pub unit: String,
 }
 
+scpi_enum!(
+    /// LAN address assignment.
+    IpMode { Dhcp => "DHCP", AutoIp => "AUTOIP" | "AUTO", Static => "STATIC" | "MANUAL" | "MAN" }
+);
+
+/// LAN (RJ45) configuration and state (`:LAN` subsystem).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct NetworkState {
+    /// `UNLINK`, `CONNECTED`, `INIT`, `IPCONFLICT`, `BUSY`, `CONFIGURED`, `DHCPFAILED`,
+    /// `INVALIDIP`, `IPLOSE`.
+    pub status: String,
+    pub dhcp: bool,
+    pub auto_ip: bool,
+    /// Static IP configuration enabled.
+    pub manual: bool,
+    pub ip: String,
+    pub mask: String,
+    pub gateway: String,
+    pub dns: String,
+    pub mac: String,
+    pub dhcp_server: String,
+    pub mdns: bool,
+    pub hostname: String,
+    pub description: String,
+    /// VISA resource string for LXI (VXI-11).
+    pub visa: String,
+}
+
+/// LAN changes; applied together with `:LAN:APPLy`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct NetworkUpdate {
+    /// `Dhcp`, `AutoIp` or `Static` (ip/mask/gateway/dns only take effect with `Static`).
+    pub mode: Option<IpMode>,
+    pub ip: Option<String>,
+    pub mask: Option<String>,
+    pub gateway: Option<String>,
+    pub dns: Option<String>,
+    pub mdns: Option<bool>,
+    pub hostname: Option<String>,
+    pub description: Option<String>,
+}
+
+/// Validates an IPv4 address as the scope accepts it: first octet 0–223 except 127
+/// (`mask = true`: plain dotted quad with contiguous one-bits).
+pub fn validate_ipv4(s: &str, mask: bool) -> Result<String> {
+    let invalid = || DriverError::Invalid(format!("invalid {} {s:?}", if mask { "subnet mask" } else { "IPv4 address" }));
+    let octets: Vec<u8> = s.trim().split('.').map(|p| p.parse::<u8>()).collect::<std::result::Result<_, _>>().map_err(|_| invalid())?;
+    if octets.len() != 4 {
+        return Err(invalid());
+    }
+    if mask {
+        let v = u32::from_be_bytes([octets[0], octets[1], octets[2], octets[3]]);
+        if v.leading_ones() + v.trailing_zeros() != 32 {
+            return Err(invalid());
+        }
+    } else if octets[0] > 223 || octets[0] == 127 {
+        return Err(invalid());
+    }
+    Ok(octets.iter().map(u8::to_string).collect::<Vec<_>>().join("."))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct OptionInfo {
     pub name: String,
@@ -367,6 +428,17 @@ mod tests {
         assert_eq!(normalize_source("d15").unwrap(), "D15");
         assert!(normalize_source("CHAN5").is_err());
         assert!(normalize_source("foo").is_err());
+    }
+
+    #[test]
+    fn ipv4_validation() {
+        assert_eq!(validate_ipv4(" 192.168.1.20 ", false).unwrap(), "192.168.1.20");
+        assert!(validate_ipv4("127.0.0.1", false).is_err());
+        assert!(validate_ipv4("224.0.0.1", false).is_err());
+        assert!(validate_ipv4("10.0.0", false).is_err());
+        assert!(validate_ipv4("10.0.0.1;*RST", false).is_err());
+        assert_eq!(validate_ipv4("255.255.255.0", true).unwrap(), "255.255.255.0");
+        assert!(validate_ipv4("255.0.255.0", true).is_err());
     }
 
     #[test]

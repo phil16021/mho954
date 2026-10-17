@@ -33,6 +33,37 @@ struct SimChannel {
 }
 
 #[derive(Debug, Clone)]
+struct SimLan {
+    dhcp: bool,
+    auto_ip: bool,
+    manual: bool,
+    ip: String,
+    mask: String,
+    gateway: String,
+    dns: String,
+    mdns: bool,
+    hostname: String,
+    description: String,
+}
+
+impl Default for SimLan {
+    fn default() -> Self {
+        SimLan {
+            dhcp: true,
+            auto_ip: true,
+            manual: false,
+            ip: "0.0.0.0".into(),
+            mask: "0.0.0.0".into(),
+            gateway: "0.0.0.0".into(),
+            dns: "0.0.0.0".into(),
+            mdns: false,
+            hostname: "MHO954".into(),
+            description: "MHO954".into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct SimState {
     ch: [SimChannel; 4],
     tim_scale: f64,
@@ -54,6 +85,9 @@ struct SimState {
     wav_word: bool,
     wav_start: usize,
     wav_stop: usize,
+    lan: SimLan,
+    /// Pending LAN settings, applied by `:LAN:APPLy`.
+    lan_pending: SimLan,
 }
 
 impl Default for SimState {
@@ -90,6 +124,8 @@ impl Default for SimState {
             wav_word: true,
             wav_start: 1,
             wav_stop: SCREEN_POINTS,
+            lan: SimLan::default(),
+            lan_pending: SimLan::default(),
         }
     }
 }
@@ -355,6 +391,20 @@ impl SimTransport {
                 None => "0,\"No error\"".into(),
             },
             ":SYST:VERS" => "3.0".into(),
+            ":LAN:STAT" => if self.state.lan.manual && self.state.lan.ip != "0.0.0.0" { "CONFIGURED" } else { "UNLINK" }.into(),
+            ":LAN:DHCP" => on(self.state.lan.dhcp),
+            ":LAN:AUT" => on(self.state.lan.auto_ip),
+            ":LAN:MAN" => on(self.state.lan.manual),
+            ":LAN:IPAD" => self.state.lan.ip.clone(),
+            ":LAN:SMAS" => self.state.lan.mask.clone(),
+            ":LAN:GAT" => self.state.lan.gateway.clone(),
+            ":LAN:DNS" => self.state.lan.dns.clone(),
+            ":LAN:MAC" => "00:19:AF:00:00:01".into(),
+            ":LAN:DSER" => "0.0.0.0".into(),
+            ":LAN:MDNS" => on(self.state.lan.mdns),
+            ":LAN:HOST:NAME" => self.state.lan.hostname.clone(),
+            ":LAN:DESC" => self.state.lan.description.clone(),
+            ":LAN:VISA" => format!("TCPIP0::{}::INSTR", self.state.lan.ip),
             ":SYST:OPT:VAL" | ":SYST:OPT:STAT" => {
                 if OPTIONS.iter().any(|o| o.token.eq_ignore_ascii_case(args)) {
                     "0".into()
@@ -484,6 +534,23 @@ impl SimTransport {
             ":WAV:FORM" => s.wav_word = args.eq_ignore_ascii_case("WORD"),
             ":WAV:STAR" => s.wav_start = num()? as usize,
             ":WAV:STOP" => s.wav_stop = num()? as usize,
+            ":LAN:DHCP" => s.lan_pending.dhcp = boolean()?,
+            ":LAN:AUT" => s.lan_pending.auto_ip = boolean()?,
+            ":LAN:MAN" => s.lan_pending.manual = boolean()?,
+            ":LAN:IPAD" => s.lan_pending.ip = args.to_string(),
+            ":LAN:SMAS" => s.lan_pending.mask = args.to_string(),
+            ":LAN:GAT" => s.lan_pending.gateway = args.to_string(),
+            ":LAN:DNS" => s.lan_pending.dns = args.to_string(),
+            ":LAN:MDNS" => s.lan_pending.mdns = boolean()?,
+            ":LAN:HOST:NAME" => s.lan_pending.hostname = args.to_string(),
+            ":LAN:DESC" => s.lan_pending.description = args.to_string(),
+            ":LAN:APPL" => {
+                let p = &s.lan_pending;
+                if !(p.dhcp || p.auto_ip || p.manual) {
+                    return Err("all IP configuration modes off".into());
+                }
+                s.lan = p.clone();
+            }
             ":SYST:SET" => {}
             ":SYST:OPT:INST" => return Err("invalid license key".into()),
             _ => return Err(format!("undefined header {hdr}")),
@@ -603,6 +670,14 @@ fn normalize_header(h: &str) -> String {
         ("CLEAR", "CLE"),
         ("TFORCE", "TFOR"),
         ("VERSION", "VERS"),
+        ("AUTOIP", "AUT"),
+        ("MANUAL", "MAN"),
+        ("IPADDRESS", "IPAD"),
+        ("SMASK", "SMAS"),
+        ("GATEWAY", "GAT"),
+        ("DSERVER", "DSER"),
+        ("DESCRIPTION", "DESC"),
+        ("APPLY", "APPL"),
     ];
     let u = h.to_ascii_uppercase();
     let lead = if u.starts_with(':') || u.starts_with('*') { "" } else { ":" };
@@ -729,6 +804,30 @@ mod tests {
         let mut s = scope();
         let png = s.screenshot().unwrap();
         assert!(png.starts_with(b"\x89PNG"));
+    }
+
+    #[test]
+    fn network_static_ip() {
+        use crate::{IpMode, NetworkUpdate};
+        let mut s = scope();
+        let n = s.network().unwrap();
+        assert!(n.dhcp && !n.manual);
+        let upd = NetworkUpdate {
+            mode: Some(IpMode::Static),
+            ip: Some("192.168.50.20".into()),
+            mask: Some("255.255.255.0".into()),
+            gateway: Some("192.168.50.1".into()),
+            hostname: Some("mho954-lab".into()),
+            ..Default::default()
+        };
+        let n = s.set_network(&upd).unwrap();
+        assert!(n.manual && !n.dhcp && !n.auto_ip);
+        assert_eq!(n.ip, "192.168.50.20");
+        assert_eq!(n.hostname, "mho954-lab");
+        let bad = NetworkUpdate { ip: Some("300.1.1.1".into()), ..Default::default() };
+        assert!(s.set_network(&bad).is_err());
+        let dhcp = s.set_network(&NetworkUpdate { mode: Some(IpMode::Dhcp), ..Default::default() }).unwrap();
+        assert!(dhcp.dhcp && !dhcp.manual);
     }
 
     #[test]

@@ -218,6 +218,19 @@ impl McpScope {
         Ok(CallToolResult::success(vec![ContentBlock::image(data, "image/png")]))
     }
 
+    #[tool(description = "Read the scope's LAN (RJ45) settings and link status: DHCP/Auto-IP/static mode, \
+        IP, mask, gateway, DNS, MAC, hostname, mDNS, VISA address.")]
+    async fn get_network(&self) -> ToolResult {
+        ok_json(&try_api!(self.api.network().await))
+    }
+
+    #[tool(description = "Change the scope's LAN (RJ45) settings and apply them. mode: Dhcp | AutoIp | Static; \
+        ip/mask/gateway/dns need Static. Ask the user before changing the network of their instrument; \
+        if the scope is controlled over LAN the connection may drop.")]
+    async fn configure_network(&self, Parameters(p): Parameters<NetworkUpdate>) -> ToolResult {
+        ok_json(&try_api!(self.api.set_network(p).await))
+    }
+
     #[tool(description = "List the scope's software options (bandwidth upgrades, memory, AFG, decoders) and whether each is active.")]
     async fn list_options(&self) -> ToolResult {
         ok_json(&try_api!(self.api.options().await))

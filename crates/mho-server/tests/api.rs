@@ -61,6 +61,24 @@ async fn rest_roundtrip() {
     let r = api.scpi(ScpiRequest { command: ":TIM:SCAL?".into(), timeout_ms: None }).await.unwrap();
     assert!(r.response.unwrap().contains("E-4"));
 
+    let net = api.network().await.unwrap();
+    assert_eq!(net.status, "UNLINK");
+    let net = api
+        .set_network(mho_driver::NetworkUpdate {
+            mode: Some(mho_driver::IpMode::Static),
+            ip: Some("192.168.1.50".into()),
+            mask: Some("255.255.255.0".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(net.ip, "192.168.1.50");
+    let err = api
+        .set_network(mho_driver::NetworkUpdate { gateway: Some("1.2.3".into()), ..Default::default() })
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, mho_service::ErrorKind::InvalidArgument);
+
     let setup = api.setup_save().await.unwrap();
     api.setup_load(setup).await.unwrap();
 

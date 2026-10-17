@@ -89,6 +89,42 @@ pub enum OptionsCmd {
 }
 
 #[derive(Subcommand)]
+pub enum NetCmd {
+    /// Show LAN settings and link status.
+    Show,
+    /// Change LAN settings (applied immediately with :LAN:APPLy).
+    Set(NetSetArgs),
+}
+
+#[derive(Args)]
+pub struct NetSetArgs {
+    /// Address assignment via DHCP.
+    #[arg(long, group = "mode")]
+    pub dhcp: bool,
+    /// Link-local Auto-IP (169.254.x.x).
+    #[arg(long, group = "mode")]
+    pub auto_ip: bool,
+    /// Static IP (use with --ip/--mask/--gateway/--dns).
+    #[arg(long = "static", group = "mode")]
+    pub static_ip: bool,
+    #[arg(long)]
+    pub ip: Option<String>,
+    #[arg(long)]
+    pub mask: Option<String>,
+    #[arg(long)]
+    pub gateway: Option<String>,
+    #[arg(long)]
+    pub dns: Option<String>,
+    /// Enable/disable mDNS (e.g. `--mdns true`).
+    #[arg(long)]
+    pub mdns: Option<bool>,
+    #[arg(long)]
+    pub hostname: Option<String>,
+    #[arg(long)]
+    pub description: Option<String>,
+}
+
+#[derive(Subcommand)]
 pub enum FwCmd {
     /// Installed firmware vs. the newest known version.
     Status,
@@ -305,6 +341,34 @@ pub async fn run(cli: Cli, cfg: Config) -> anyhow::Result<()> {
             println!("setup restored from {}", file.display());
         }
         Command::Fw { cmd: FwCmd::Status } => fw_status(api, &cfg).await?,
+        Command::Net { cmd } => match cmd.unwrap_or(NetCmd::Show) {
+            NetCmd::Show => print_network(&api.network().await?),
+            NetCmd::Set(a) => {
+                let mode = if a.dhcp {
+                    Some(IpMode::Dhcp)
+                } else if a.auto_ip {
+                    Some(IpMode::AutoIp)
+                } else if a.static_ip {
+                    Some(IpMode::Static)
+                } else {
+                    None
+                };
+                let u = NetworkUpdate {
+                    mode,
+                    ip: a.ip,
+                    mask: a.mask,
+                    gateway: a.gateway,
+                    dns: a.dns,
+                    mdns: a.mdns,
+                    hostname: a.hostname,
+                    description: a.description,
+                };
+                if u == NetworkUpdate::default() {
+                    bail!("nothing to change (see `mho954 net set --help`)");
+                }
+                print_network(&api.set_network(u).await?);
+            }
+        },
         Command::Serve { .. }
         | Command::Gui { .. }
         | Command::Mcp
@@ -397,6 +461,31 @@ fn print_channel(c: &ChannelState) {
         if c.impedance == Impedance::Fifty { "50Ω" } else { "1MΩ" },
         if c.invert { "  inverted" } else { "" }
     );
+}
+
+fn print_network(n: &NetworkState) {
+    let mode = if n.dhcp {
+        "DHCP"
+    } else if n.auto_ip {
+        "Auto-IP"
+    } else if n.manual {
+        "static"
+    } else {
+        "?"
+    };
+    println!("LAN status   {}", n.status);
+    println!("mode         {mode} (dhcp {}, auto-ip {}, static {})", n.dhcp, n.auto_ip, n.manual);
+    println!("ip / mask    {} / {}", n.ip, n.mask);
+    println!("gateway      {}", n.gateway);
+    println!("dns          {}", n.dns);
+    println!("dhcp server  {}", n.dhcp_server);
+    println!("mac          {}", n.mac);
+    println!("hostname     {}  (mDNS {})", n.hostname, if n.mdns { "on" } else { "off" });
+    println!("description  {}", n.description);
+    println!("visa         {}", n.visa);
+    if n.status == "UNLINK" {
+        println!("note: :LAN covers the RJ45 port only; a WLAN dongle's address is shown on the scope (Utility → IO).");
+    }
 }
 
 fn print_trigger(t: &TriggerState) {

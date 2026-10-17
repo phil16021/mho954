@@ -60,6 +60,7 @@ pub fn routes() -> Router {
         .route("/setup", get(setup_save).put(setup_load))
         .route("/scpi", post(scpi))
         .route("/live", get(live_get).put(live_put))
+        .route("/network", get(network).put(set_network))
         .route("/openapi.json", get(openapi_json))
 }
 
@@ -73,7 +74,8 @@ pub fn doc_routes() -> Router {
     paths(
         info, status, channel, set_channel, timebase, set_timebase, trigger, set_trigger, acquire,
         set_acquire, action, measure_get, measure_post, measure_items, measure_local, fft, waveform,
-        screenshot, options, install_option, setup_save, setup_load, scpi, live_get, live_put
+        screenshot, options, install_option, setup_save, setup_load, scpi, live_get, live_put,
+        network, set_network
     ),
     components(schemas(ApiError, ErrorKind))
 )]
@@ -333,4 +335,16 @@ async fn live_get(State(s): State<AppState>) -> HttpResult<Json<LiveConfig>> {
 #[utoipa::path(put, path = "/api/v1/live", request_body = LiveConfig, responses((status = 200, body = LiveConfig)))]
 async fn live_put(State(s): State<AppState>, Json(c): Json<LiveConfig>) -> HttpResult<Json<LiveConfig>> {
     Ok(Json(s.backend.set_live_config(c).await?))
+}
+
+/// LAN (RJ45) configuration. WLAN has no SCPI interface on the MHO900.
+#[utoipa::path(get, path = "/api/v1/network", responses((status = 200, body = NetworkState)))]
+async fn network(State(s): State<AppState>) -> HttpResult<Json<NetworkState>> {
+    Ok(Json(s.backend.network().await?))
+}
+
+/// Changes LAN settings and applies them (`:LAN:APPLy`).
+#[utoipa::path(put, path = "/api/v1/network", request_body = NetworkUpdate, responses((status = 200, body = NetworkState)))]
+async fn set_network(State(s): State<AppState>, Json(u): Json<NetworkUpdate>) -> HttpResult<Json<NetworkState>> {
+    Ok(Json(s.backend.set_network(u).await?))
 }

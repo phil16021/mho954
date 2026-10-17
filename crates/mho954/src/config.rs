@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// `usbtmc` (auto-detect), `/dev/usbtmc0`, `tcp:192.168.1.20[:5555]` or `sim`.
+    /// `usb` (user-space USBTMC, default), `usb:SERIAL`, `usbtmc` (kernel driver),
+    /// `/dev/usbtmc0`, `tcp:192.168.1.20[:5555]` or `sim`.
     pub connection: String,
     /// Address of `mho954 serve`. Loopback by default; the API has no authentication.
     pub bind: SocketAddr,
@@ -27,7 +28,7 @@ impl Default for Config {
     fn default() -> Self {
         let home = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()).unwrap_or_else(|| ".".into());
         Config {
-            connection: "usbtmc".into(),
+            connection: "usb".into(),
             bind: "127.0.0.1:8954".parse().unwrap(),
             allow_raw_scpi: false,
             capture_dir: home.join("mho954-captures"),
