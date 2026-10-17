@@ -888,6 +888,10 @@ async fn backup(api: &dyn ScopeApi, base: std::path::PathBuf) -> anyhow::Result<
     let status = api.status().await?;
     std::fs::write(dir.join("status.json"), serde_json::to_vec_pretty(&status)?)?;
     let options = api.options().await?;
+    let network = api.network().await?;
+    std::fs::write(dir.join("network.json"), serde_json::to_vec_pretty(&network)?)?;
+    let live = api.live_config().await?;
+    std::fs::write(dir.join("live.json"), serde_json::to_vec_pretty(&live)?)?;
     std::fs::write(
         dir.join("options.json"),
         serde_json::to_vec_pretty(&options)?,

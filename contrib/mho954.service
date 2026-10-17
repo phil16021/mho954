@@ -1,13 +1,17 @@
 # systemd user unit for the mho954 daemon (REST API, live WebSocket, MCP).
 #
+#   cargo install --path crates/mho954
 #   install -Dm644 contrib/mho954.service ~/.config/systemd/user/mho954.service
 #   systemctl --user daemon-reload && systemctl --user enable --now mho954
 #
-# The daemon reconnects automatically when the scope (re)appears on USB.
+# Prerequisites: the udev rule (contrib/install-udev.sh) and membership in group `dialout`.
+# The daemon listens on 127.0.0.1:8954 unless `bind` is changed in
+# ~/.config/mho954/config.toml (a non-loopback bind requires `api_token`).
+# SIGTERM (systemctl stop) finishes any transfer in flight and releases the scope.
+# It reconnects automatically when the scope (re)appears on USB.
 
 [Unit]
 Description=Rigol MHO954 control daemon (REST, WebSocket, MCP)
-After=network.target
 
 [Service]
 ExecStart=%h/.cargo/bin/mho954 serve

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=MHO954
+GenericName=Oscilloscope live view
+Comment=Rigol MHO954 live view and control
+Exec=mho954 gui
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Science;Electronics;
+# install: install -Dm644 contrib/mho954.desktop ~/.local/share/applications/mho954.desktop

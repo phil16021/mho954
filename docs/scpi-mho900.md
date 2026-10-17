@@ -6,30 +6,36 @@ MHO954 (Serie `MHO9X000000000`, `*IDN?`-Firmware `00.01.00`, USB über USB/IP vo
 
 ## Transport
 
+Standard ist eine eigene USBTMC-Implementierung im Userspace (`crates/mho-scpi/src/usbtmc_user.rs`,
+nusb). Der Kernel-Treiber `usbtmc` (`-c usbtmc`) bleibt als Alternative.
+
 | Thema | Befund | Quelle |
 |---|---|---|
-| USB | `1ab1:0452`, Kernel-Treiber `usbtmc`, `/dev/usbtmc0` bzw. udev-Symlink `/dev/usbtmc_MHO954` | Gerät |
-| Latenz | 24–37 ms pro Query, `:MEAS:ITEM?` ≈ 130 ms | Gerät |
-| Unbekannte Query | **keine Antwort**; danach antwortet das Scope auf nichts mehr, bis ein USBTMC Device Clear (INITIATE_CLEAR) kommt. Einzelne Fälle erholen sich damit zuverlässig; Einzelne Fälle erholen sich damit zuverlässig. **Nach rund fünf unbekannten Queries seit dem Einschalten hängt die Firmware dauerhaft**, auch wenn dazwischen gültige Queries und Clears liegen (Neustart nötig). Neue Befehle deshalb höchstens 3 pro Einschaltzyklus ungeprüft testen | Gerät |
-| Recovery | `CLEAR_OUT_HALT` + `CLEAR_IN_HALT` + `CLEAR` stellt den Betrieb wieder her | Gerät |
-| `ABORT_BULK_IN` | hängt unter USB/IP (`vhci_hcd`) im Kernel (`usb_kill_urb`, Prozess in D-State) → **nie verwenden** | Gerät |
+| USB | `1ab1:0452`; Kernel-Treiber `usbtmc` legt `/dev/usbtmc0` an (udev-Symlink `/dev/usbtmc_MHO954`). Der Userspace-Transport koppelt ihn ab und danach wieder an | Gerät |
+| Latenz | 24–37 ms pro Query, `:MEAS:ITEM?` 25–200 ms | Gerät |
+| Unbekannte Query | **keine Antwort**; danach antwortet das Scope auf nichts mehr, bis ein USBTMC Device Clear (INITIATE_CLEAR + CHECK_CLEAR_STATUS) kommt. Einzelne Fälle erholen sich damit zuverlässig. **Nach rund fünf unbekannten Queries seit dem Einschalten hängt die Firmware dauerhaft**, auch wenn dazwischen gültige Queries und Clears liegen (Neustart nötig). Neue Befehle höchstens 3 pro Einschaltzyklus ungeprüft testen | Gerät |
+| USBTMC-Padding | Das MHO954 sendet **keine** 4-Byte-Füllbytes nach dem Nutzdatenteil | Gerät |
+| Große Antworten | kommen in mehreren Transfers (EOM nur im letzten). Eine offene Nachricht wird vor dem nächsten Befehl bzw. vor einem Clear zu Ende gelesen | Gerät |
+| Clear mitten in einer Antwort | blockierte die USB-Schnittstelle des Scopes bis zum Neustart → wird nie gemacht | Gerät |
+| Abgebrochener Prozess | hinterlässt eine Antwort mit alter bTag in der Leitung. Der Userspace-Transport überspringt sie (`kill -9` während Screenshot/RAW: 5 von 5 erholt) | Gerät |
+| Kernel-Treiber `usbtmc` | Transfers > 4 KiB laufen über `usbtmc_generic_read`, das über USB/IP zu früh endet (Rest = „wrong MsgID“); mit `-c usbtmc` sind Reads daher auf 4080 Bytes begrenzt. `ABORT_BULK_IN` hängt im Kernel (D-State) → nie verwenden. Nach Desync („wrong bTag“) hilft nur ein Neustart | Gerät, Kernel-Quelltext |
 | `*OPC?` | liefert `1` (anders als bei DHO800/900, wo es immer `0` liefert) | Gerät |
 | `:SYST:VERS?` | `3.0` (SCPI-Version, nicht die Firmware) | Gerät, Guide |
 | LAN | `:LAN:STAT?` → `UNLINK`, `:LAN:IPAD?` → `0.0.0.0` (kein Kabel) | Gerät |
+| TCP | kein Device Clear im Raw-Socket-Protokoll → der Transport baut die Verbindung neu auf | Implementierung |
 
-| Desync „wrong bTag“ | Nach Probe + Bench (alle erfolgreich) bekam der nächste Prozess beim Öffnen die Antwort einer *früheren* Anfrage (`wrong bTag: 172 != 204`, Abstand konstant 32); jede neue Anfrage hing danach eine Antwort hinterher. Ein Read ohne Anfrage → Timeout, danach keine Antwort mehr (Neustart nötig). Ursache unbewiesen; Verdacht: Clear-Halt (`usb_clear_halt`) über USB/IP setzt die Data-Toggles auf dem Windows-Host nicht zurück | Gerät |
-
-## Messwerte am Gerät (USB/IP, 4080-Byte-Reads)
+## Messwerte am Gerät (USB/IP, Userspace-USBTMC, 64-KiB-Requests)
 
 | Vorgang | Zeit |
 |---|---|
-| `*IDN?` | 24,9 ms (23,4–27,3) |
-| Bildschirm-Wellenform 1 Kanal, Preamble gecacht | 28,2 ms → ≈ 35 fps |
-| `:MEAS:ITEM? VPP` | 24–130 ms |
-| Screenshot PNG 1024×600 (≈ 84 kB) | 240–320 ms (durch die PNG-Erzeugung im Scope begrenzt) |
+| `*IDN?` | 24,5 ms (22,8–25,8) |
+| Bildschirm-Wellenform 1 Kanal, Preamble gecacht | 28–32 ms → ≈ 30 fps |
+| `:MEAS:ITEM? VPP` | 25–200 ms |
+| Screenshot PNG 1024×600 (≈ 85–97 kB) | 240–390 ms (durch die PNG-Erzeugung im Scope begrenzt) |
 | RAW 10k Punkte | 0,2 s |
-| RAW 1M Punkte WORD (2 MB), User-Space-USBTMC, 64-KiB-Requests | 1,51 s ≈ 1,3 MB/s |
+| RAW 1M Punkte WORD (2 MB) | 1,51 s ≈ 1,3 MB/s |
 | Live-Ansicht (GUI) | 12 fps bei 2 Kanälen, 5,5 fps bei 4 Kanälen |
+| `/dev/usbtmc0` nach Prozessende wieder da | 9–16 ms |
 
 ## Wellenformen
 
@@ -38,6 +44,7 @@ MHO954 (Serie `MHO9X000000000`, `*IDN?`-Firmware `00.01.00`, USB über USB/IP vo
 | `:WAV:PRE?` | `1,0,1000,1,2.000000E-8,-1.000000E-5,0.000000,6.6667E-06,0,32768` bei 50 mV/div, 2 µs/div | Gerät |
 | Skalierung WORD | `yref = 32768`, `yinc = (V/div)/7500` → 7500 Codes/Division, 16-bit-Vollausschlag ≈ ±4,37 div | Gerät |
 | Formel | `V = (raw − yorigin − yreference) × yincrement`, `t = (i − xreference) × xincrement + xorigin` | Guide |
+| Kanäle ohne Daten | Ein eingeschalteter Kanal, für den das Scope nichts erfasst (am Testgerät CH1/CH4), liefert durchgehend `0xFFFF`, und das Scope zeichnet ihn nicht; Messungen ergeben `9.9E37` | Gerät |
 | NORMal | 1000 Punkte, `XINC = TimeScale/100` | Guide |
 | RAW | nur im STOP-Zustand; Bereich über `:WAV:STAR`/`:WAV:STOP`, jeder Block mit eigenem `#N`-Header | Guide |
 | Default-Format | `BYTE` (Treiber setzt immer `WORD`) | Guide |
@@ -94,9 +101,9 @@ Es gibt keinen SCPI-Befehl zum Firmware-Update (Guide durchsucht). Das Update l�
 `*IDN?` meldet die Version gekürzt (`00.01.00`); die vollständige Version steht unter
 Utility → About.
 
-## Offene Punkte (nach Wiederanbindung des Geräts prüfen)
+## Offene Punkte
 
-- Durchsatz bei RAW-Transfers über USB/IP (`mho954 bench` im STOP-Zustand).
-- 12-Bit-Ausrichtung im WORD: Das untere Nibble wird genutzt (Codes z. B. 39594..40710). Die Daten
-  sind also nicht einfach um 4 Bit links verschoben, die Preamble-Skalierung gilt direkt.
-- Screenshot und RAW-Abruf mit den 4080-Byte-Anforderungen erneut testen; Durchsatz messen.
+- Verifikation der bisher nur im Guide belegten Abfragen (`:CHANn:UNIT?/VERN?/INV?`,
+  `:TRIG:HOLD?/SWE?`, `:ACQ:AVER?/SRAT?`, `:LAN:DSER?/HOST:NAME?/MDNS?/DESC?/VISA?`, Options-Tokens)
+  und neuer Subsysteme mit `mho954 verify` (Budget: 3 ungeprüfte Queries pro Einschaltzyklus).
+- Compound-Queries (`;`) und `:WAV:SOUR D0` (Digitalkanäle) am Gerät prüfen.
