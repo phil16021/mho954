@@ -537,12 +537,17 @@ async fn mcp_stdio(cli: &Cli, cfg: &Config) -> anyhow::Result<()> {
         };
     let server = McpScope::new(api, cfg.capture_dir.clone());
     let service = server.serve(rmcp::transport::stdio()).await?;
-    tokio::select! {
-        r = service.waiting() => { r?; }
-        _ = shutdown_signal() => {}
-    }
+    let signalled = tokio::select! {
+        r = service.waiting() => { r?; false }
+        _ = shutdown_signal() => true,
+    };
     if let Some(b) = local {
         b.shutdown().await;
+    }
+    if signalled {
+        // Tokio's stdin reader blocks runtime shutdown until the client closes the pipe; the
+        // scope is already released, so exit right away.
+        std::process::exit(0);
     }
     Ok(())
 }
