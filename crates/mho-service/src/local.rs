@@ -20,7 +20,11 @@ pub struct LocalBackend {
 impl LocalBackend {
     /// Spawns the device thread and the live acquisition task (needs a Tokio runtime).
     pub fn start(connection: Connection, allow_raw_scpi: bool, live: LiveConfig) -> Self {
-        let device = Device::spawn(connection);
+        Self::with_device(Device::spawn(connection), allow_raw_scpi, live)
+    }
+
+    /// Backend on an existing device thread (see [`Device::spawn_with`]).
+    pub fn with_device(device: Device, allow_raw_scpi: bool, live: LiveConfig) -> Self {
         let hub = LiveHub::new(live);
         let live_stop = tokio_util::sync::CancellationToken::new();
         tokio::spawn(run_loop(device.clone(), hub.clone(), live_stop.clone()));

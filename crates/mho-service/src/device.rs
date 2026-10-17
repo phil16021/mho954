@@ -12,6 +12,9 @@ use crate::api::{ApiError, ApiResult, ErrorKind};
 
 type Job = Box<dyn FnOnce(&mut Slot) + Send>;
 
+/// Opens the scope for a connection.
+pub type Opener = Box<dyn Fn(&Connection) -> mho_driver::Result<Scope> + Send>;
+
 enum Msg {
     Job(Job),
     /// Drop the scope (finishing any reply in flight) and end the thread.
@@ -31,6 +34,7 @@ pub struct DeviceState {
 
 struct Slot {
     conn: Connection,
+    opener: Opener,
     scope: Option<Scope>,
     last_attempt: Option<Instant>,
     last_open_error: Option<String>,
@@ -54,7 +58,7 @@ impl Slot {
                 return Err(ApiError::unavailable(msg));
             }
             self.last_attempt = Some(Instant::now());
-            match Scope::open(&self.conn) {
+            match (self.opener)(&self.conn) {
                 Ok(scope) => {
                     let mut st = self.shared.lock().unwrap();
                     st.connected = true;
@@ -123,10 +127,17 @@ impl Device {
     /// Starts the device thread. The scope is opened lazily on the first job and reopened
     /// automatically after it disappears.
     pub fn spawn(connection: Connection) -> Device {
+        Self::spawn_with(connection, Box::new(Scope::open))
+    }
+
+    /// Like [`Self::spawn`] with a custom way to open the scope (tests inject faulty
+    /// transports this way).
+    pub fn spawn_with(connection: Connection, opener: Opener) -> Device {
         let (tx, mut rx) = mpsc::channel::<Msg>(QUEUE_DEPTH);
         let shared = Arc::new(Mutex::new(DeviceState::default()));
         let mut slot = Slot {
             conn: connection.clone(),
+            opener,
             scope: None,
             last_attempt: None,
             last_open_error: None,

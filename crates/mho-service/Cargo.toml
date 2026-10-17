@@ -22,3 +22,5 @@ tokio-util.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
 utoipa.workspace = true
+
+[dev-dependencies]
