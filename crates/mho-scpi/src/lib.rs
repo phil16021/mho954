@@ -17,4 +17,4 @@ pub use error::{Result, ScpiError};
 pub use scpi::Scpi;
 pub use tcp::TcpTransport;
 pub use transport::{ReadChunk, Transport};
-pub use usbtmc::{UsbTmcTransport, find_usbtmc_devices};
+pub use usbtmc::{MAX_READ as USBTMC_MAX_READ, UsbTmcTransport, find_usbtmc_devices};

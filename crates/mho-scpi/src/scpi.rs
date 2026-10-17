@@ -6,8 +6,8 @@ use crate::block::parse_block_header;
 use crate::error::{Result, ScpiError, is_timeout_io};
 use crate::transport::Transport;
 
-/// Default size of a single read request. Verified on the MHO954 over USB/IP: 1–64 KiB
-/// requests work, a 4 MiB request went unanswered and wedged the link.
+/// Default size of a single read request (transports may cap it further, see
+/// [`crate::USBTMC_MAX_READ`]).
 pub const DEFAULT_CHUNK: usize = 64 * 1024;
 
 /// SCPI session on top of a [`Transport`].
@@ -199,7 +199,7 @@ impl Scpi {
         self.rx_end = false;
     }
 
-    /// Reads up to `want` more bytes into the receive buffer.
+    /// Reads up to `want` more bytes into the receive buffer (the transport may return fewer).
     fn fill(&mut self, want: usize) -> Result<usize> {
         let old = self.rx.len();
         self.rx.resize(old + want.max(1), 0);

@@ -1,8 +1,14 @@
 //! Transport over the Linux `usbtmc` kernel driver (`/dev/usbtmcN`).
 //!
 //! The driver turns each `write()` into one DEV_DEP_MSG_OUT and each `read()` into a
-//! REQUEST_DEV_DEP_MSG_IN for at most `count` bytes. A read that returns fewer bytes than
-//! requested ended at the device's EOM, which is how [`ReadChunk::end`] is derived.
+//! REQUEST_DEV_DEP_MSG_IN for at most `count` bytes. The EOM bit of the answer is read back
+//! with `USBTMC_IOCTL_MSG_IN_ATTR`.
+//!
+//! Every read request is capped at [`MAX_READ`] so the device's answer fits into the driver's
+//! first 4 KiB bulk buffer. Larger transfers are continued by the driver's asynchronous
+//! `usbtmc_generic_read`, which over USB/IP returned early (24553 of 84109 screenshot bytes);
+//! the rest of the transfer then desynchronised the bulk pipe ("wrong MsgID") and the scope
+//! stopped answering until power-cycled.
 //!
 //! Only `USBTMC_IOCTL_CLEAR` and the halt-clear ioctls are used for recovery. The
 //! `ABORT_BULK_*` ioctls hang in `usb_kill_urb` when the device is attached via USB/IP
@@ -18,11 +24,16 @@ use crate::transport::{ReadChunk, Transport};
 
 const RIGOL_VID: &str = "1ab1";
 
+/// `USBTMC_BUFSIZE` (4096) minus the 12-byte header, minus 4 so the first URB is never
+/// completely full (a full URB makes the driver continue with `usbtmc_generic_read`).
+pub const MAX_READ: usize = 4096 - 12 - 4;
+
 mod ioctl {
     nix::ioctl_none!(clear, b'[', 2);
     nix::ioctl_none!(clear_out_halt, b'[', 6);
     nix::ioctl_none!(clear_in_halt, b'[', 7);
     nix::ioctl_write_ptr!(set_timeout, b'[', 10, u32);
+    nix::ioctl_read!(msg_in_attr, b'[', 24, u8);
 }
 
 pub struct UsbTmcTransport {
@@ -64,8 +75,18 @@ impl Transport for UsbTmcTransport {
     }
 
     fn read_some(&mut self, buf: &mut [u8]) -> io::Result<ReadChunk> {
-        let n = self.file.read(buf)?;
-        Ok(ReadChunk { n, end: n < buf.len() })
+        let len = buf.len().min(MAX_READ);
+        let n = self.file.read(&mut buf[..len])?;
+        if n == 0 {
+            // The driver returns 0 after rejecting a malformed bulk-in header.
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "usbtmc: empty read (protocol desync)"));
+        }
+        let mut attr = 0u8;
+        let end = match unsafe { ioctl::msg_in_attr(self.file.as_raw_fd(), &mut attr) } {
+            Ok(_) => attr & 1 != 0,
+            Err(_) => n < len,
+        };
+        Ok(ReadChunk { n, end })
     }
 
     fn clear(&mut self) -> io::Result<()> {

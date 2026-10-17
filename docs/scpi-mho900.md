@@ -28,7 +28,7 @@ MHO954 (Serie `MHO9X000000000`, `*IDN?`-Firmware `00.01.00`, USB über USB/IP vo
 | RAW | nur im STOP-Zustand; Bereich über `:WAV:STAR`/`:WAV:STOP`, jeder Block mit eigenem `#N`-Header | Guide |
 | Default-Format | `BYTE` (Treiber setzt immer `WORD`) | Guide |
 | `:WAV:DATA?` über USB/IP | funktioniert mit Leseanforderungen von 1–64 KiB (1000 Pkt. WORD in ~100 ms); eine 4-MiB-Anforderung blieb unbeantwortet | Gerät |
-| Große Antworten | kommen in mehreren USB-Transfers; ein kurzer Read ist **kein** Nachrichtenende (Screenshot: erster Read 24553 von 84109 Bytes) | Gerät |
+| Große Antworten | Transfers > 4 KiB holt der Kernel-Treiber mit `usbtmc_generic_read`; über USB/IP endet das zu früh (24553 von 84109 Bytes), der Rest landet als „wrong MsgID“ im nächsten Read → Scope hängt bis zum Neustart. **Lösung:** jede Leseanforderung ≤ 4080 Bytes, EOM per `USBTMC_IOCTL_MSG_IN_ATTR` | Gerät, Kernel-Quelltext |
 | Clear während Transfer | `CLEAR` mitten in einer laufenden Blockantwort hat die USB-Schnittstelle des Scopes blockiert (keine Antwort mehr, auch nach erneutem Clear) | Gerät |
 
 ## Kanäle / Erfassung / Trigger
@@ -73,4 +73,4 @@ Utility → About.
 - Durchsatz bei RAW-Transfers über USB/IP (`mho954 bench` im STOP-Zustand).
 - 12-Bit-Ausrichtung im WORD: Das untere Nibble wird genutzt (Codes z. B. 39594..40710). Die Daten
   sind also nicht einfach um 4 Bit links verschoben, die Preamble-Skalierung gilt direkt.
-- Screenshot mit dem korrigierten Blockleser erneut testen.
+- Screenshot und RAW-Abruf mit den 4080-Byte-Anforderungen erneut testen; Durchsatz messen.
