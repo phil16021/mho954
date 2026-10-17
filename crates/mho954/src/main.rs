@@ -170,6 +170,37 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
+    /// Digital channels D0..D15 through decoder `bus` (logic probe needed).
+    Logic {
+        #[arg(long, default_value_t = 4)]
+        bus: u8,
+        /// Write a VCD file (PulseView/sigrok, GTKWave) instead of printing.
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Software Bode sweep with the built-in function generator (AFG option).
+    Bode {
+        #[arg(long, default_value = "100")]
+        start: String,
+        #[arg(long, default_value = "1M")]
+        stop: String,
+        #[arg(long, default_value_t = 31)]
+        points: usize,
+        /// Channel at the DUT input.
+        #[arg(long, default_value_t = 1)]
+        dut_in: u8,
+        /// Channel at the DUT output.
+        #[arg(long, default_value_t = 2)]
+        dut_out: u8,
+        /// Generator amplitude in Vpp.
+        #[arg(long, default_value = "1")]
+        amplitude: String,
+        #[arg(long, default_value_t = 1)]
+        generator: u8,
+        /// Write CSV (frequency, gain_db, phase_deg).
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
     /// Peak table of the scope's FFT on math channel 1..4 (`set math.fft --activate peak_search=true`).
     Peaks { math: u8 },
     /// Decoded events of protocol decoder 1..4 (set it up with `set bus.rs232 --activate ...`).

@@ -88,6 +88,8 @@ mho954 set cursor.manual --activate ax=-100u bx=300u && mho954 read cursor.manua
 mho954 read --list                         # Ablesewerte: Cursor, Maske, Suche, Histogramm
 mho954 do save.setup D:/bench1.stp         # Datei auf dem Scope (C:/ intern, D:/ USB-Stick)
 mho954 do --list                           # Befehle; `do reset --yes` = *RST (Werkseinstellungen)
+mho954 logic --bus 4 -o capture.vcd        # D0..D15 (Logiktastkopf) als VCD für PulseView
+mho954 bode --start 100 --stop 1M --dut-in 1 --dut-out 2 -o bode.csv   # nur mit AFG-Option
 mho954 verify --list                       # Befehle einzeln am Gerät prüfen (siehe unten)
 ```
 
@@ -139,6 +141,8 @@ bevor das Gerät freigegeben wird.
 | GET | `/api/v1/math/{n}/peaks` | Peak-Tabelle der Scope-FFT |
 | GET | `/api/v1/readouts`, `/api/v1/readouts/{id}` | Ablesewerte (Cursor, Maske, Suche, Histogramm, Speicherstatus) |
 | GET/POST | `/api/v1/commands`, `/api/v1/commands/{id}` `{"path","confirm"}` | Speichern/Laden auf dem Scope, Resets, Record; `reset` nur mit `confirm` |
+| GET | `/api/v1/logic/{bus}?format=json\|vcd` | Digitalkanäle über den Parallel-Dekoder |
+| POST | `/api/v1/bode` `{start, stop, points, input, output, amplitude, generator}` | Software-Bode-Sweep (AFG-Option) |
 | POST | `/api/v1/scpi` | Raw-SCPI (nur mit `--allow-raw-scpi`) |
 | WS | `/api/v1/stream` | Live-Frames (binär) + Messwerte (JSON) |
 
@@ -186,6 +190,8 @@ freien Port, damit die CLI nicht versehentlich den Simulator steuert.
 | `decode_bus` | Dekoder-Ereignisse |
 | `scope_fft_peaks` | Peak-Tabelle der Scope-FFT |
 | `read_values`, `run_scope_command` | Ablesewerte; Speichern/Laden/Resets (`reset` erst nach Rückfrage) |
+| `logic_capture` | Digitalkanäle D0..D15 (optional als VCD gespeichert) |
+| `bode_sweep` | Frequenzgang mit dem eingebauten Generator |
 | `screenshot` | Bild als MCP-Image |
 | `list_options` | Optionen |
 | `get_network`, `configure_network` | LAN-Einstellungen (Änderungen nur nach Rückfrage) |
@@ -244,6 +250,20 @@ Weil das Scope unbekannte Queries nicht beantwortet und nach etwa fünf davon h�
   auf und bittet um einen Neustart des Scopes; danach `mho954 verify --reset-budget`.
 - Der Simulator lässt ungeprüfte Queries zu, damit sich alles ohne Gerät testen lässt.
   Mit `MHO954_SIM=strict` verhält er sich wie das Gerät.
+
+## Logikanalysator und Bode
+
+- **Digitalkanäle:** `:WAV:SOUR D0` lehnt das MHO954 ab. `logic` richtet deshalb einen Dekoder
+  als 16-Bit-Parallelbus ein (D15..D0, ohne Takt, ein Ereignis pro Änderung) und liest dessen
+  Ereignistabelle. Die Zeitauflösung entspricht der Abtastung des Dekoders. Die Bitreihenfolge
+  (D15 = MSB bei `D15D0`) ist am Gerät noch zu bestätigen. Schwellen und Kanäle stehen in den
+  Gruppen `la` und `la.channel`.
+- **Bode:** Die Bode-Funktion des Scopes liefert keine Messwerte über SCPI. `bode` misst selbst:
+  Generator auf Sinus, je Frequenz eine Einzelaufnahme, Amplitude und Phase beider Kanäle per
+  Einzel-DFT aus derselben Aufnahme, vertikale Skalierung automatisch. Danach werden Zeitbasis,
+  Skalen, Trigger und Run-Zustand wiederhergestellt, und der Generatorausgang wird abgeschaltet.
+  Das Test-Scope hat keinen Generator (`:SYST:MOD?` = `1,0,…`); die Funktion ist deshalb nur
+  im Simulator geprüft. Dort hängt ein RC-Tiefpass mit 10 kHz hinter GI (CH1 Eingang, CH2 Ausgang).
 
 ## Bekannte Eigenheiten des MHO954
 

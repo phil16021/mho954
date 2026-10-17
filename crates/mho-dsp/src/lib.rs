@@ -5,6 +5,7 @@ pub mod decimate;
 pub mod decode;
 pub mod export;
 pub mod fft;
+pub mod logic;
 pub mod measure;
 
 pub use decimate::{MinMax, minmax_decimate};
@@ -13,6 +14,7 @@ pub use decode::{
     parse_si_value,
 };
 pub use fft::{Spectrum, SpectrumPeak, Window, spectrum};
+pub use logic::{LogicEvent, parse_hex_value, tone, write_vcd};
 pub use measure::{Measurements, analyze};
 
 /// Formats `v` with an SI prefix, e.g. `format_si(1234.0, "Hz")` → `1.234 kHz`.

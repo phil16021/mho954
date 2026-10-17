@@ -244,3 +244,30 @@ fn readouts_and_commands() {
     assert!(err.contains("C:/"), "{err}");
     assert!(stdout(cli(d.path()).args(["do", "reset", "--yes"])).contains("done"));
 }
+
+#[test]
+fn logic_and_bode() {
+    let d = tempfile::tempdir().unwrap();
+    let vcd = d.path().join("cap.vcd");
+    let out = stdout(cli(d.path()).args(["logic", "--bus", "3", "-o"]).arg(&vcd));
+    assert!(out.contains("5 changes"), "{out}");
+    assert!(
+        std::fs::read_to_string(&vcd)
+            .unwrap()
+            .contains("$var wire 1")
+    );
+    let csv = d.path().join("bode.csv");
+    let out = stdout(
+        cli(d.path())
+            .args([
+                "bode", "--start", "1k", "--stop", "100k", "--points", "3", "-o",
+            ])
+            .arg(&csv),
+    );
+    assert!(out.contains("3 points"), "{out}");
+    let text = std::fs::read_to_string(&csv).unwrap();
+    assert!(
+        text.starts_with("frequency_hz,gain_db,phase_deg\n1000,"),
+        "{text}"
+    );
+}

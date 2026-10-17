@@ -180,7 +180,7 @@ impl Scope {
     }
 
     /// Discards stale entries in the error queue so they are not attributed to the next change.
-    fn drain_errors(&mut self) -> Result<()> {
+    pub(crate) fn drain_errors(&mut self) -> Result<()> {
         let old = self.scpi.errors()?;
         if !old.is_empty() {
             debug!(?old, "discarding stale error queue entries");
@@ -697,6 +697,21 @@ impl Scope {
                     c.command,
                     crate::ops::validate_path(p, extensions)?
                 )
+            }
+            (crate::ops::CommandArg::Index { min, max }, Some(a)) => match a.trim().parse::<u8>() {
+                Ok(i) if (min..=max).contains(&i) => format!("{} {i}", c.command),
+                _ => {
+                    return Err(DriverError::Invalid(format!(
+                        "{}: index {a:?} outside {min}..={max}",
+                        c.id
+                    )));
+                }
+            },
+            (crate::ops::CommandArg::Index { min, max }, None) => {
+                return Err(DriverError::Invalid(format!(
+                    "{} needs an index {min}..={max}",
+                    c.id
+                )));
             }
             (crate::ops::CommandArg::Path { extensions }, None) => {
                 return Err(DriverError::Invalid(format!(

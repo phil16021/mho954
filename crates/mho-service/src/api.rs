@@ -113,7 +113,8 @@ pub struct StatsRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct CommandRequest {
-    /// File path on the scope for save/load commands, e.g. `D:/bench1.stp`.
+    /// File path on the scope for save/load commands (e.g. `D:/bench1.stp`), or the index for
+    /// indexed commands (`ref.save`: 1..10).
     #[serde(default)]
     pub path: Option<String>,
     /// Required for destructive commands (`reset`).
@@ -177,6 +178,13 @@ pub trait ScopeApi: Send + Sync + 'static {
     /// Catalogue of one-shot commands (save/load on the scope, resets, recording).
     async fn commands(&self) -> ApiResult<Vec<mho_driver::ops::CommandInfo>>;
     async fn run_command(&self, id: String, request: CommandRequest) -> ApiResult<()>;
+    /// Digital channels D0..D15 through decoder `bus` (needs the logic probe).
+    async fn logic_capture(&self, bus: u8) -> ApiResult<mho_driver::LogicCapture>;
+    /// Software Bode sweep with the built-in function generator (AFG option).
+    async fn bode_sweep(
+        &self,
+        request: mho_driver::BodeRequest,
+    ) -> ApiResult<Vec<mho_driver::BodePoint>>;
     /// Hardware modules (logic analyzer, function generator).
     async fn modules(&self) -> ApiResult<mho_driver::Modules>;
     /// Catalogue of table-driven settings groups (trigger types, decoders, …).

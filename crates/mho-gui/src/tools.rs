@@ -80,7 +80,10 @@ impl ToolsPanel {
                 });
             let current = readouts.iter().find(|r| r.id == self.readout);
             if ui
-                .add_enabled(current.is_some_and(|r| r.verified), egui::Button::new("Read"))
+                .add_enabled(
+                    current.is_some_and(|r| r.verified),
+                    egui::Button::new("Read"),
+                )
                 .on_disabled_hover_text("not yet verified on this scope (mho954 verify)")
                 .clicked()
             {

@@ -1054,3 +1054,68 @@ async fn mcp_settings_tools() {
     assert_eq!(r["isError"], false);
     shutdown.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn logic_analyzer_and_bode() {
+    let (url, shutdown) = start(false).await;
+    let v1 = format!("{url}/api/v1");
+    let c = reqwest::Client::new();
+    let cap: serde_json::Value = get(&format!("{v1}/logic/2")).await.json().await.unwrap();
+    assert_eq!(cap["events"].as_array().unwrap().len(), 5, "{cap}");
+    let vcd = get(&format!("{v1}/logic/2?format=vcd"))
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(vcd.starts_with("$version mho954"), "{vcd}");
+    assert_eq!(get(&format!("{v1}/logic/2?format=bin")).await.status(), 400);
+    assert_eq!(get(&format!("{v1}/logic/7")).await.status(), 400);
+
+    let r = c
+        .post(format!("{v1}/bode"))
+        .json(&serde_json::json!({"start": 1e3, "stop": 1e5, "points": 3, "settle_ms": 0}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    let pts: serde_json::Value = r.json().await.unwrap();
+    assert!(
+        (pts[1]["gain_db"].as_f64().unwrap() + 3.0).abs() < 0.4,
+        "{pts}"
+    );
+    let bad = c
+        .post(format!("{v1}/bode"))
+        .json(&serde_json::json!({"start": 1e5, "stop": 1e3}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 400);
+
+    let mut m = Mcp::connect(&url).await;
+    let name = format!("logic-{}.vcd", std::process::id());
+    let r = m
+        .call(
+            "logic_capture",
+            serde_json::json!({"bus": 1, "save_as": name}),
+        )
+        .await;
+    assert_eq!(r["isError"], false, "{r}");
+    let saved = std::env::temp_dir()
+        .join("mho954-test-captures")
+        .join(&name);
+    assert!(
+        std::fs::read_to_string(&saved)
+            .unwrap()
+            .contains("$enddefinitions")
+    );
+    std::fs::remove_file(saved).unwrap();
+    let r = m
+        .call(
+            "bode_sweep",
+            serde_json::json!({"start": 1e3, "stop": 1e4, "points": 2, "settle_ms": 0}),
+        )
+        .await;
+    assert_eq!(r["isError"], false, "{r}");
+    assert!(text_of(&r).contains("phase_deg"));
+    shutdown.cancel();
+}

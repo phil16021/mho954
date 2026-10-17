@@ -146,5 +146,10 @@ Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigg
   deshalb vorher ein und danach wieder aus.
 - Pfade für `:SAVE:*`/`:LOAD:*`: `C:/` oder `D:/`, Dateiname ≤ 26 Zeichen (Guide 3.21). Erlaubt
   sind nur Buchstaben, Ziffern, `_ - . /`, damit kein `;` einen zweiten Befehl einschleusen kann.
-- Nicht umgesetzt: `:REFerence` (Parameter mit Referenznummer als erstem Argument),
-  `:NAVigate`, `:SAVe:SMB` (Netzlaufwerk mit Passwort), `*TST?` (Laufzeit länger als der Timeout).
+- Parameter mit vorangestelltem Index (`:LA:DIG:ENAB D3,ON`, `:REF:SOUR 2,CHAN1`,
+  `:BOD:VOLT ALL,0.5`) sind „prefixed“ in der Tabelle; Abfrage jeweils `…? <index>`.
+- `la`, `la.channel`, `reference`, `afg`, `afg.modulation`, `bode` mit `mho954 verify` prüfen.
+  `afg*` und `bode` sind auf dem Test-Scope ohne Generator nicht verfügbar und werden nicht
+  angeboten.
+- Nicht umgesetzt: `:NAVigate`, `:SAVe:SMB` (Netzlaufwerk mit Passwort), `*TST?` (Laufzeit
+  länger als der Timeout), `:SOURce<n>:LOAD:ARBitrary`.

@@ -1,6 +1,7 @@
 //! Live view: a thin eframe client of the `mho954` REST/WebSocket API.
 
 mod app;
+mod bode;
 mod settings;
 mod state;
 mod tools;

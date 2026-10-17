@@ -243,6 +243,20 @@ impl ScopeApi for LocalBackend {
             .await
     }
 
+    async fn logic_capture(&self, bus: u8) -> ApiResult<mho_driver::LogicCapture> {
+        self.device.call_mut(move |s| s.logic_capture(bus)).await
+    }
+
+    async fn bode_sweep(
+        &self,
+        request: mho_driver::BodeRequest,
+    ) -> ApiResult<Vec<mho_driver::BodePoint>> {
+        request.validate().map_err(ApiError::from)?;
+        self.device
+            .call_mut(move |s| s.bode_sweep(&request, &mut |_, _| {}))
+            .await
+    }
+
     async fn modules(&self) -> ApiResult<Modules> {
         if let Some(m) = *self.modules.lock().unwrap() {
             return Ok(m);

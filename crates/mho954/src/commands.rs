@@ -581,6 +581,71 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 }
             }
         },
+        Command::Logic { bus, output } => {
+            let cap = api.logic_capture(bus).await?;
+            if let Some(path) = output {
+                std::fs::write(&path, mho_dsp::write_vcd(&cap.events, &cap.lines))
+                    .with_context(|| format!("writing {}", path.display()))?;
+                println!("{} changes written to {}", cap.events.len(), path.display());
+            } else {
+                println!("{} changes (bit i = D<i>)", cap.events.len());
+                for e in &cap.events {
+                    println!(
+                        "{:>14}  {:016b}  0x{:04X}",
+                        format_si(e.time, "s"),
+                        e.value,
+                        e.value
+                    );
+                }
+            }
+        }
+        Command::Bode {
+            start,
+            stop,
+            points,
+            dut_in,
+            dut_out,
+            amplitude,
+            generator,
+            output,
+        } => {
+            let num = |s: &str, what: &str| -> anyhow::Result<f64> {
+                match parse_value(s) {
+                    mho_driver::params::ParamValue::Real(x) => Ok(x),
+                    mho_driver::params::ParamValue::Int(i) => Ok(i as f64),
+                    _ => anyhow::bail!("{what}: number expected, got {s:?}"),
+                }
+            };
+            let req = mho_driver::BodeRequest {
+                generator,
+                input: dut_in,
+                output: dut_out,
+                start: num(&start, "start")?,
+                stop: num(&stop, "stop")?,
+                points,
+                amplitude: num(&amplitude, "amplitude")?,
+                ..Default::default()
+            };
+            let pts = api.bode_sweep(req).await?;
+            let mut csv = String::from("frequency_hz,gain_db,phase_deg\n");
+            for p in &pts {
+                csv.push_str(&format!("{},{},{}\n", p.frequency, p.gain_db, p.phase_deg));
+            }
+            if let Some(path) = output {
+                std::fs::write(&path, csv)
+                    .with_context(|| format!("writing {}", path.display()))?;
+                println!("{} points written to {}", pts.len(), path.display());
+            } else {
+                for p in &pts {
+                    println!(
+                        "{:>12}  {:>8.2} dB  {:>8.1}°",
+                        format_si(p.frequency, "Hz"),
+                        p.gain_db,
+                        p.phase_deg
+                    );
+                }
+            }
+        }
         Command::Peaks { math } => {
             let peaks = api.fft_peaks(math).await?;
             if peaks.is_empty() {

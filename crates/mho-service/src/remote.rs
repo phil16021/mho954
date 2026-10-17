@@ -306,6 +306,17 @@ impl ScopeApi for RemoteBackend {
         .await
     }
 
+    async fn logic_capture(&self, bus: u8) -> ApiResult<mho_driver::LogicCapture> {
+        self.get(&format!("/logic/{bus}")).await
+    }
+
+    async fn bode_sweep(
+        &self,
+        request: mho_driver::BodeRequest,
+    ) -> ApiResult<Vec<mho_driver::BodePoint>> {
+        self.send(Method::POST, "/bode", &request).await
+    }
+
     async fn modules(&self) -> ApiResult<Modules> {
         self.get("/modules").await
     }

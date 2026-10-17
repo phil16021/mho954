@@ -3,6 +3,7 @@
 //! [`Scope`] wraps a [`mho_scpi::Scpi`] session with typed getters/setters; [`SimTransport`]
 //! emulates the instrument for development and tests without hardware.
 
+pub mod analysis;
 mod error;
 pub mod measure;
 pub mod model;
@@ -13,6 +14,7 @@ mod scope;
 pub mod sim;
 pub mod verify;
 
+pub use analysis::{BodePoint, BodeRequest, LogicCapture};
 pub use error::{DriverError, Result};
 pub use measure::{MEASURE_ITEMS, MeasureItem, find_item};
 pub use model::*;

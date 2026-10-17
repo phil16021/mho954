@@ -9,9 +9,10 @@ use mho_dsp::DecodeTable;
 use mho_dsp::{Measurements, Window, format_si};
 use mho_service::{Frame, LiveConfig, MeasureSpec, ScopeApi, StatsRequest};
 
+use crate::bode::{BodePanel, bode_plot};
 use crate::settings::SettingsPanel;
-use crate::tools::ToolsPanel;
 use crate::state::{Client, Shared};
+use crate::tools::ToolsPanel;
 
 /// Rigol channel colours.
 pub const CH_COLORS: [Color32; 4] = [
@@ -110,6 +111,9 @@ pub struct ScopeApp {
     net_form: NetForm,
     settings: SettingsPanel,
     tools: ToolsPanel,
+    bode: BodePanel,
+    show_bode: bool,
+    modules_requested: bool,
     groups_requested: bool,
     /// Forces the settings section open on the next frame.
     settings_open: Option<bool>,
@@ -160,6 +164,9 @@ impl ScopeApp {
             net_form: NetForm::default(),
             settings: SettingsPanel::default(),
             tools: ToolsPanel::default(),
+            bode: BodePanel::default(),
+            show_bode: false,
+            modules_requested: false,
             groups_requested: false,
             settings_open: None,
         }
@@ -179,6 +186,9 @@ impl ScopeApp {
             math_scale: sh.math_scale.clone(),
             scope_peaks: sh.scope_peaks.clone(),
             readouts: sh.readouts.clone(),
+            bode: sh.bode.clone(),
+            bode_running: sh.bode_running,
+            modules: sh.modules,
             commands: sh.commands.clone(),
             readout_values: sh.readout_values.clone(),
             decode: sh.decode.clone(),
@@ -655,6 +665,29 @@ impl ScopeApp {
         }
 
         ui.separator();
+        let bode = egui::CollapsingHeader::new(RichText::new("Bode sweep (AFG)").strong())
+            .id_salt("bode_sweep")
+            .show(ui, |ui| {
+                self.bode.ui(
+                    ui,
+                    &self.client,
+                    s.modules.map(|m| m.function_generator),
+                    s.bode_running,
+                );
+                if s.bode.is_some() {
+                    ui.checkbox(&mut self.show_bode, "show plot");
+                }
+            });
+        if bode.body_returned.is_some() && !self.modules_requested {
+            self.modules_requested = true;
+            self.client.op(
+                "modules",
+                |api| async move { api.modules().await },
+                |sh: &mut Shared, m: mho_driver::Modules| sh.modules = Some(m),
+            );
+        }
+
+        ui.separator();
         egui::CollapsingHeader::new(RichText::new("Network (RJ45)").strong())
             .default_open(false)
             .show(ui, |ui| {
@@ -810,6 +843,29 @@ impl ScopeApp {
         );
     }
 
+    fn capture_logic(&self) {
+        let bus = self.decoder_bus;
+        let path = self.capture_dir.join(format!(
+            "mho954-logic-{}.vcd",
+            chrono::Local::now().format("%Y%m%d-%H%M%S")
+        ));
+        let dir = self.capture_dir.clone();
+        self.client.op(
+            format!("logic via bus {bus}"),
+            move |api| async move { api.logic_capture(bus).await },
+            move |sh: &mut Shared, cap: mho_driver::LogicCapture| {
+                let vcd = mho_dsp::write_vcd(&cap.events, &cap.lines);
+                match std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, vcd)) {
+                    Ok(()) => sh.log(
+                        format!("{} changes saved to {}", cap.events.len(), path.display()),
+                        false,
+                    ),
+                    Err(e) => sh.log(format!("VCD export: {e}"), true),
+                }
+            },
+        );
+    }
+
     fn export_decoder(&self, bus: u8, table: &DecodeTable) {
         let path = self.capture_dir.join(format!(
             "mho954-bus{bus}-{}.csv",
@@ -843,6 +899,15 @@ impl ScopeApp {
                 .clicked()
             {
                 self.open_settings("bus", Some(self.decoder_bus), false);
+            }
+            if ui
+                .button("Logic → VCD")
+                .on_hover_text(
+                    "capture D0..D15 through this bus (parallel decoding) and save a VCD file",
+                )
+                .clicked()
+            {
+                self.capture_logic();
             }
             if let Some((bus, t)) = &s.decode {
                 if ui.button("CSV").clicked() {
@@ -1682,6 +1747,9 @@ struct Snapshot {
     math_scale: std::collections::HashMap<String, (f64, f64)>,
     scope_peaks: Option<(u8, Vec<mho_dsp::ScopePeak>)>,
     readouts: Option<Vec<mho_driver::ops::ReadoutInfo>>,
+    bode: Option<Vec<mho_driver::BodePoint>>,
+    bode_running: bool,
+    modules: Option<mho_driver::Modules>,
     commands: Option<Vec<mho_driver::ops::CommandInfo>>,
     readout_values: Option<(String, ParamMap)>,
     measurements: Option<Arc<mho_service::MeasureSnapshot>>,
@@ -1751,6 +1819,16 @@ impl eframe::App for ScopeApp {
                     self.decoder_panel(ui, &s);
                 }
             });
+        if self.show_bode
+            && let Some(pts) = &s.bode
+        {
+            let mut open = true;
+            egui::Window::new("Bode plot")
+                .open(&mut open)
+                .default_size([560.0, 420.0])
+                .show(ui.ctx(), |ui| bode_plot(ui, pts));
+            self.show_bode = open;
+        }
         egui::CentralPanel::default().show(ui, |ui| {
             let total = ui.available_height();
             let main_h = if self.show_fft { total * 0.62 } else { total };

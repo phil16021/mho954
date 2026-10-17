@@ -14,6 +14,18 @@ fn strict_simulator_refuses_unverified_queries() {
         s.group_get("bus.spi", Some(1), false),
         Err(DriverError::Unsupported(_))
     ));
+    // Without the AFG option the sweep is refused before anything is sent to the generator.
+    let mut noafg = Scope::from_transport(Box::new(SimTransport::with_options(
+        mho_driver::SimOptions {
+            afg: false,
+            ..Default::default()
+        },
+    )))
+    .unwrap();
+    assert!(matches!(
+        noafg.bode_sweep(&Default::default(), &mut |_, _| {}),
+        Err(DriverError::Unsupported(_))
+    ));
     // Writing is always allowed (errors land in the error queue).
     let mut v = ParamMap::new();
     v.insert("baud".into(), ParamValue::Int(115_200));
@@ -142,4 +154,54 @@ fn readouts_need_their_mode_and_commands_validate() {
     let c2 = s.group_get("channel", Some(2), false).unwrap();
     assert_ne!(c2["label"], ParamValue::Text("probe".into()));
     assert!(s.scpi().query("*IDN?").unwrap().contains("MHO954"));
+}
+
+#[test]
+fn logic_capture_via_parallel_decoder() {
+    let mut s = Scope::open(&Connection::Sim).unwrap();
+    assert!(matches!(s.logic_capture(0), Err(DriverError::Invalid(_))));
+    let cap = s.logic_capture(4).unwrap();
+    assert_eq!(cap.lines.len(), 16);
+    let values: Vec<u64> = cap.events.iter().map(|e| e.value).collect();
+    assert_eq!(
+        values,
+        b"Hello".iter().map(|&b| u64::from(b)).collect::<Vec<_>>()
+    );
+    let vcd = mho_dsp::write_vcd(&cap.events, &cap.lines);
+    assert!(vcd.contains("$var wire 1 0 D15 $end"), "{vcd}");
+}
+
+#[test]
+fn bode_sweep_of_simulated_low_pass() {
+    let mut s = Scope::open(&Connection::Sim).unwrap();
+    let before = s.timebase().unwrap();
+    let req = mho_driver::BodeRequest {
+        start: 1e3,
+        stop: 100e3,
+        points: 5,
+        settle_ms: 0,
+        ..Default::default()
+    };
+    let mut calls = 0;
+    let pts = s.bode_sweep(&req, &mut |_, _| calls += 1).unwrap();
+    assert_eq!((pts.len(), calls), (5, 5));
+    // first-order low-pass, corner 10 kHz (point 3 of 1k..100k log-spaced)
+    let corner = &pts[2];
+    assert!((corner.frequency - 10e3).abs() < 1.0);
+    assert!((corner.gain_db + 3.01).abs() < 0.3, "{pts:?}");
+    assert!((corner.phase_deg + 45.0).abs() < 3.0, "{pts:?}");
+    assert!(
+        pts[0].gain_db.abs() < 0.3 && pts[4].gain_db < -19.0,
+        "{pts:?}"
+    );
+    // timebase restored, generator off
+    assert_eq!(s.timebase().unwrap().scale, before.scale);
+    let same_channel = mho_driver::BodeRequest {
+        output: 1,
+        ..Default::default()
+    };
+    assert!(matches!(
+        s.bode_sweep(&same_channel, &mut |_, _| {}),
+        Err(DriverError::Invalid(_))
+    ));
 }

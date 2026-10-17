@@ -143,6 +143,11 @@ pub enum CommandArg {
     Path {
         extensions: &'static [&'static str],
     },
+    /// Index such as the reference number.
+    Index {
+        min: u8,
+        max: u8,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -245,6 +250,20 @@ pub const COMMANDS: &[Command] = &[
         ":HIST:RES",
         "reset the histogram statistics",
     ),
+    Command {
+        id: "ref.save",
+        title: "store the selected source into reference <1..10>",
+        command: ":REF:SAVE",
+        arg: CommandArg::Index { min: 1, max: 10 },
+        confirm: false,
+    },
+    Command {
+        id: "ref.reset",
+        title: "reset reference <1..10>",
+        command: ":REF:RES",
+        arg: CommandArg::Index { min: 1, max: 10 },
+        confirm: false,
+    },
     cmd("record.start", ":REC:STAR ON", "start recording"),
     cmd("record.stop", ":REC:STAR OFF", "stop recording"),
     cmd("record.play", ":REC:PLAY ON", "play back the recording"),
@@ -388,6 +407,8 @@ pub struct CommandInfo {
     pub title: String,
     /// Allowed file extensions if the command takes a path on the scope.
     pub path_extensions: Option<Vec<String>>,
+    /// Index range if the command takes a number (e.g. reference 1..10).
+    pub index: Option<(u8, u8)>,
     /// Must be confirmed explicitly (`confirm: true`).
     pub confirm: bool,
 }
@@ -419,7 +440,11 @@ pub fn describe_command(c: &Command) -> CommandInfo {
             CommandArg::Path { extensions } => {
                 Some(extensions.iter().map(|e| e.to_string()).collect())
             }
-            CommandArg::None => None,
+            _ => None,
+        },
+        index: match c.arg {
+            CommandArg::Index { min, max } => Some((min, max)),
+            _ => None,
         },
         confirm: c.confirm,
     }

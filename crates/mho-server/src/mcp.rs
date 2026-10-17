@@ -135,6 +135,18 @@ pub struct CommandArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct LogicArgs {
+    /// Decoder bus 1..4 used for the capture (it is reconfigured as parallel bus).
+    pub bus: u8,
+    /// Return at most this many events (default 500).
+    #[serde(default)]
+    pub max_events: Option<usize>,
+    /// Also save a VCD file under this name in the capture directory.
+    #[serde(default)]
+    pub save_as: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct MathArg {
     /// Math channel 1..4.
     pub math: u8,
@@ -492,6 +504,44 @@ impl McpScope {
         ok_json(&serde_json::json!({ "done": p.id }))
     }
 
+    #[tool(
+        description = "Capture the digital channels D0..D15 (logic probe needed) through decoder \
+        `bus`, returned as value changes (bit i = Di). save_as writes a VCD file for PulseView/GTKWave \
+        into the capture directory. Configure thresholds/channels with groups `la`, `la.channel`."
+    )]
+    async fn logic_capture(&self, Parameters(p): Parameters<LogicArgs>) -> ToolResult {
+        let cap = try_api!(self.api.logic_capture(p.bus).await);
+        let mut saved = None;
+        if let Some(name) = &p.save_as {
+            let vcd = mho_dsp::write_vcd(&cap.events, &cap.lines);
+            saved = Some(try_api!(self.save_file(name, vcd.as_bytes(), &["vcd"])));
+        }
+        let total = cap.events.len();
+        let events: Vec<_> = cap
+            .events
+            .iter()
+            .take(p.max_events.unwrap_or(500))
+            .collect();
+        ok_json(&serde_json::json!({
+            "bus": cap.bus,
+            "lines": cap.lines,
+            "total_events": total,
+            "events": events,
+            "saved_to": saved,
+        }))
+    }
+
+    #[tool(
+        description = "Measure a frequency response (Bode plot) with the built-in function generator \
+        (AFG option): sine sweep from start to stop Hz (points, log spaced), generator 1|2, input/output \
+        = channel numbers probing DUT input and output, amplitude in Vpp. Returns gain in dB and phase \
+        in degrees per frequency. Switches the generator output on during the sweep: make sure the \
+        user expects a signal on the generator output."
+    )]
+    async fn bode_sweep(&self, Parameters(p): Parameters<mho_driver::BodeRequest>) -> ToolResult {
+        ok_json(&try_api!(self.api.bode_sweep(p).await))
+    }
+
     #[tool(description = "Read the digital voltmeter (enable/configure it with group `dvm`).")]
     async fn read_dvm(&self) -> ToolResult {
         ok_json(&serde_json::json!({ "value": try_api!(self.api.dvm_value().await) }))
@@ -515,14 +565,59 @@ impl McpScope {
     }
 }
 
+/// Plain file name inside the capture directory (no paths, no hidden files).
+fn valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+fn io_error(e: std::io::Error) -> ApiError {
+    ApiError::new(mho_service::ErrorKind::Internal, e.to_string())
+}
+
+/// Never overwrites (and never follows a planted symlink): `create_new` fails if anything
+/// exists at the path.
+fn create_new(p: &std::path::Path) -> Result<std::fs::File, ApiError> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(p)
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                ApiError::invalid(format!(
+                    "{} already exists; choose another name",
+                    p.display()
+                ))
+            } else {
+                io_error(e)
+            }
+        })
+}
+
 impl McpScope {
+    /// Writes `data` to a new file `name` (one of `extensions`) in the capture directory.
+    fn save_file(&self, name: &str, data: &[u8], extensions: &[&str]) -> Result<String, ApiError> {
+        let ext_ok = extensions
+            .iter()
+            .any(|e| name.to_ascii_lowercase().ends_with(&format!(".{e}")));
+        if !valid_name(name) || !ext_ok {
+            return Err(ApiError::invalid(format!(
+                "save_as must be a plain file name ending in .{}",
+                extensions.join(" or .")
+            )));
+        }
+        std::fs::create_dir_all(&self.capture_dir).map_err(io_error)?;
+        let path = self.capture_dir.join(name);
+        use std::io::Write;
+        create_new(&path)?.write_all(data).map_err(io_error)?;
+        Ok(path.display().to_string())
+    }
+
     fn save(&self, name: &str, w: &Waveform, volts: &[f64]) -> Result<String, ApiError> {
-        let valid = !name.is_empty()
-            && !name.starts_with('.')
-            && name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-        if !valid {
+        if !valid_name(name) {
             return Err(ApiError::invalid(
                 "save_as must be a plain file name like capture1.csv",
             ));
@@ -534,27 +629,10 @@ impl McpScope {
                 w.raw.len()
             )));
         }
-        let io = |e: std::io::Error| ApiError::new(mho_service::ErrorKind::Internal, e.to_string());
+        let io = io_error;
         std::fs::create_dir_all(&self.capture_dir).map_err(io)?;
         let path = self.capture_dir.join(name);
-        // Never overwrite (and never follow a planted symlink): create_new fails if anything
-        // exists at the path.
-        let create = |p: &std::path::Path| {
-            std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(p)
-                .map_err(|e| {
-                    if e.kind() == std::io::ErrorKind::AlreadyExists {
-                        ApiError::invalid(format!(
-                            "{} already exists; choose another name",
-                            p.display()
-                        ))
-                    } else {
-                        io(e)
-                    }
-                })
-        };
+        let create = create_new;
         if name.ends_with(".csv") {
             let file = create(&path)?;
             mho_dsp::export::write_csv(

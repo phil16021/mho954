@@ -71,6 +71,12 @@ pub enum ParamKind {
         max: f64,
         unit: &'static str,
     },
+    /// Value addressed by a leading index argument (`{n}` = instance), e.g.
+    /// `:LA:DIG:ENAB D3,ON` / `:LA:DIG:ENAB? D3` or `:REF:SOUR 2,CHAN1` / `:REF:SOUR? 2`.
+    Prefixed {
+        key: &'static str,
+        inner: &'static ParamKind,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -220,6 +226,33 @@ const ANALOG_MATH: &[&str] = &[
     "CHANnel1", "CHANnel2", "CHANnel3", "CHANnel4", "MATH1", "MATH2", "MATH3", "MATH4",
 ];
 const GRID3: &[&str] = &["FULL", "HALF", "NONE"];
+const DIGITAL: &[&str] = &[
+    "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14",
+    "D15",
+];
+const REF_SOURCES: &[&str] = &[
+    "CHANnel1", "CHANnel2", "CHANnel3", "CHANnel4", "MATH1", "MATH2", "MATH3", "MATH4", "D0", "D1",
+    "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15",
+];
+const MOD_WAVES: &[&str] = &[
+    "SINusoid", "SQUare", "TRIangle", "UPRamp", "DNRamp", "NOISe",
+];
+
+/// Parameter addressed by a leading index argument (`{n}` = instance).
+const fn indexed(
+    name: &'static str,
+    node: &'static str,
+    key: &'static str,
+    inner: &'static ParamKind,
+    help: &'static str,
+) -> ParamSpec {
+    ParamSpec {
+        name,
+        node,
+        kind: ParamKind::Prefixed { key, inner },
+        help,
+    }
+}
 /// Math operands (reference waveforms REF1..10 are left out until REF is supported).
 const MATH_SRC: &[&str] = &[
     "CHANnel1", "CHANnel2", "CHANnel3", "CHANnel4", "MATH1", "MATH2", "MATH3",
@@ -1466,6 +1499,311 @@ pub const GROUPS: &[Group] = &[
             ),
         ],
     },
+    // ---- logic analyzer (needs the PLA2216 probe), reference waveforms ----
+    Group {
+        id: "la",
+        title: "Logic analyzer: enable, pods, thresholds",
+        select: Some(":LA:ENAB ON"),
+        instances: None,
+        requires: Requires::LogicAnalyzer,
+        params: &[
+            boolean("enable", ":LA:ENAB", "digital channels on/off"),
+            en("active", ":LA:ACT", DIGITAL, "highlighted channel"),
+            en(
+                "sort",
+                ":LA:AUT",
+                &["D0D15", "D15D0"],
+                "channel order on screen",
+            ),
+            en(
+                "size",
+                ":LA:SIZE",
+                &["SMALl", "MEDium", "LARGe"],
+                "trace height",
+            ),
+            boolean("pod1", ":LA:POD1:DISP", "show D0..D7"),
+            boolean("pod2", ":LA:POD2:DISP", "show D8..D15"),
+            real(
+                "pod1_threshold",
+                ":LA:POD1:THR",
+                -15.0,
+                15.0,
+                "V",
+                "D0..D7 threshold",
+            ),
+            real(
+                "pod2_threshold",
+                ":LA:POD2:THR",
+                -15.0,
+                15.0,
+                "V",
+                "D8..D15 threshold",
+            ),
+        ],
+    },
+    Group {
+        id: "la.channel",
+        title: "Digital channel D0..D15: on/off, label",
+        select: None,
+        instances: Some((0, 15)),
+        requires: Requires::LogicAnalyzer,
+        params: &[
+            indexed(
+                "display",
+                ":LA:DIG:ENAB",
+                "D{n}",
+                &ParamKind::Bool,
+                "channel on/off",
+            ),
+            indexed(
+                "label",
+                ":LA:DIG:LAB",
+                "D{n}",
+                &ParamKind::Text { max_len: 16 },
+                "label",
+            ),
+        ],
+    },
+    Group {
+        id: "reference",
+        title: "Reference waveform REF1..10 (save/reset: commands ref.save, ref.reset)",
+        select: None,
+        instances: Some((1, 10)),
+        requires: Requires::Nothing,
+        params: &[
+            indexed(
+                "source",
+                ":REF:SOUR",
+                "{n}",
+                &ParamKind::Enum(REF_SOURCES),
+                "waveform saved into this reference",
+            ),
+            indexed(
+                "scale",
+                ":REF:VSC",
+                "{n}",
+                &ParamKind::Real {
+                    min: 1e-15,
+                    max: 1e15,
+                    unit: "",
+                },
+                "vertical scale",
+            ),
+            indexed(
+                "offset",
+                ":REF:VOFF",
+                "{n}",
+                &ParamKind::Real {
+                    min: -1e9,
+                    max: 1e9,
+                    unit: "",
+                },
+                "vertical offset",
+            ),
+            indexed(
+                "color",
+                ":REF:COL",
+                "{n}",
+                &ParamKind::Enum(&["GRAY", "GREen", "BLUE", "RED", "ORANge"]),
+                "trace color",
+            ),
+            indexed(
+                "label",
+                ":REF:LAB:CONT",
+                "{n}",
+                &ParamKind::Text { max_len: 16 },
+                "label",
+            ),
+        ],
+    },
+    // ---- function generator and Bode plot (AFG option) ----
+    Group {
+        id: "afg",
+        title: "Built-in function generator GI/GII (AFG option)",
+        select: Some(":SOUR{n}:OUTP:STAT ON"),
+        instances: Some((1, 2)),
+        requires: Requires::FunctionGenerator,
+        params: &[
+            boolean("output", ":SOUR{n}:OUTP:STAT", "output on/off"),
+            en(
+                "function",
+                ":SOUR{n}:FUNC",
+                &[
+                    "SINusoid",
+                    "SQUare",
+                    "RAMP",
+                    "NOISe",
+                    "DC",
+                    "ARB",
+                    "EXPRise",
+                    "EXPFall",
+                    "ECG1",
+                    "GAUSsian",
+                    "LORentz",
+                    "HAVersine",
+                    "SINC",
+                ],
+                "waveform",
+            ),
+            real("frequency", ":SOUR{n}:FREQ", 1e-3, 100e6, "Hz", "frequency"),
+            real(
+                "amplitude",
+                ":SOUR{n}:VOLT:AMPL",
+                0.0,
+                10.0,
+                "V",
+                "amplitude (Vpp)",
+            ),
+            real(
+                "offset",
+                ":SOUR{n}:VOLT:OFFS",
+                -10.0,
+                10.0,
+                "V",
+                "DC offset",
+            ),
+            real("phase", ":SOUR{n}:PHAS", 0.0, 360.0, "°", "start phase"),
+            real(
+                "duty",
+                ":SOUR{n}:FUNC:SQU:DUTY",
+                1.0,
+                99.0,
+                "%",
+                "square duty cycle",
+            ),
+            real(
+                "symmetry",
+                ":SOUR{n}:FUNC:RAMP:SYMM",
+                0.0,
+                100.0,
+                "%",
+                "ramp symmetry",
+            ),
+            en(
+                "load",
+                ":SOUR{n}:IMP",
+                &["OMEG", "FIFTy"],
+                "load: high-Z or 50 Ω",
+            ),
+        ],
+    },
+    Group {
+        id: "afg.modulation",
+        title: "Function generator modulation (AM/FM/PM)",
+        select: Some(":SOUR{n}:MOD:STAT ON"),
+        instances: Some((1, 2)),
+        requires: Requires::FunctionGenerator,
+        params: &[
+            boolean("enable", ":SOUR{n}:MOD:STAT", "modulation on/off"),
+            en(
+                "type",
+                ":SOUR{n}:MOD:TYP",
+                &["AM", "FM", "PM"],
+                "modulation type",
+            ),
+            real(
+                "am_depth",
+                ":SOUR{n}:MOD:AM:DEPT",
+                0.0,
+                120.0,
+                "%",
+                "AM depth",
+            ),
+            real(
+                "am_frequency",
+                ":SOUR{n}:MOD:AM:INT:FREQ",
+                2e-3,
+                1e6,
+                "Hz",
+                "AM rate",
+            ),
+            en(
+                "am_wave",
+                ":SOUR{n}:MOD:AM:INT:FUNC",
+                MOD_WAVES,
+                "AM waveform",
+            ),
+            real(
+                "fm_deviation",
+                ":SOUR{n}:MOD:FM:DEV",
+                0.0,
+                100e6,
+                "Hz",
+                "FM deviation",
+            ),
+            real(
+                "fm_frequency",
+                ":SOUR{n}:MOD:FM:INT:FREQ",
+                2e-3,
+                1e6,
+                "Hz",
+                "FM rate",
+            ),
+            en(
+                "fm_wave",
+                ":SOUR{n}:MOD:FM:INT:FUNC",
+                MOD_WAVES,
+                "FM waveform",
+            ),
+            real(
+                "pm_deviation",
+                ":SOUR{n}:MOD:PM:DEV",
+                0.0,
+                360.0,
+                "°",
+                "PM deviation",
+            ),
+            real(
+                "pm_frequency",
+                ":SOUR{n}:MOD:PM:INT:FREQ",
+                2e-3,
+                1e6,
+                "Hz",
+                "PM rate",
+            ),
+            en(
+                "pm_wave",
+                ":SOUR{n}:MOD:PM:INT:FUNC",
+                MOD_WAVES,
+                "PM waveform",
+            ),
+        ],
+    },
+    Group {
+        id: "bode",
+        title: "Bode plot on the scope (AFG option; results only on screen)",
+        select: Some(":BOD:ENAB ON"),
+        instances: None,
+        requires: Requires::FunctionGenerator,
+        params: &[
+            boolean("enable", ":BOD:ENAB", "Bode plot on/off"),
+            boolean("running", ":BOD:RUNS", "sweep running"),
+            en("sweep", ":BOD:SWE", &["LOG", "LINE"], "frequency spacing"),
+            en("input", ":BOD:REF:IN", ANALOG, "channel at the DUT input"),
+            en(
+                "output",
+                ":BOD:REF:OUT",
+                ANALOG,
+                "channel at the DUT output",
+            ),
+            real("start", ":BOD:STAR", 10.0, 3e6, "Hz", "start frequency"),
+            real("stop", ":BOD:STOP", 100.0, 30e6, "Hz", "stop frequency"),
+            int("points", ":BOD:POIN", 10, 100, "points per decade"),
+            indexed(
+                "amplitude",
+                ":BOD:VOLT",
+                "ALL",
+                &ParamKind::Real {
+                    min: 0.02,
+                    max: 10.0,
+                    unit: "V",
+                },
+                "sweep amplitude (all ranges)",
+            ),
+            boolean("gain_curve", ":BOD:GAIN:ENAB", "show gain"),
+            boolean("phase_curve", ":BOD:PHAS:ENAB", "show phase"),
+        ],
+    },
     // ---- protocol decoders (:BUS<n>) ----
     Group {
         id: "bus",
@@ -1712,6 +2050,9 @@ pub fn node(spec: &ParamSpec, n: u8) -> String {
 /// Query used to read a parameter (with `source` filled in for source-keyed levels).
 pub fn query_for(spec: &ParamSpec, n: u8, source: Option<&str>) -> String {
     match spec.kind {
+        ParamKind::Prefixed { key, .. } => {
+            format!("{}? {}", node(spec, n), key.replace("{n}", &n.to_string()))
+        }
         ParamKind::SourceLevel { .. } => {
             format!("{}? {}", node(spec, n), source.unwrap_or("CHAN1"))
         }
@@ -1796,7 +2137,21 @@ fn invalid(spec: &ParamSpec, msg: impl std::fmt::Display) -> DriverError {
 }
 
 /// Validates `v` and renders it as SCPI argument.
+/// `spec` with a prefixed kind replaced by its inner kind.
+fn unwrap_prefixed(spec: &ParamSpec) -> ParamSpec {
+    match spec.kind {
+        ParamKind::Prefixed { inner, .. } => ParamSpec {
+            kind: *inner,
+            ..*spec
+        },
+        _ => *spec,
+    }
+}
+
 pub fn encode(spec: &ParamSpec, v: &ParamValue) -> Result<String> {
+    if let ParamKind::Prefixed { .. } = spec.kind {
+        return encode(&unwrap_prefixed(spec), v);
+    }
     match (spec.kind, v) {
         (ParamKind::Real { min, max, .. } | ParamKind::Keyed { min, max, .. }, _) => {
             let x = match v {
@@ -1897,6 +2252,7 @@ pub fn encode(spec: &ParamSpec, v: &ParamValue) -> Result<String> {
             }
         }
         (ParamKind::Pattern { .. }, _) => Err(invalid(spec, "expected a pattern like H,L,X,X")),
+        (ParamKind::Prefixed { .. }, _) => unreachable!("unwrapped above"),
         (ParamKind::SourceLevel { .. }, _) => {
             // Encoded together with the source in `write_command`.
             let x = match v {
@@ -1914,6 +2270,9 @@ pub fn encode(spec: &ParamSpec, v: &ParamValue) -> Result<String> {
 
 /// Parses an answer according to the parameter kind.
 pub fn decode(spec: &ParamSpec, answer: &str) -> Result<ParamValue> {
+    if let ParamKind::Prefixed { .. } = spec.kind {
+        return decode(&unwrap_prefixed(spec), answer);
+    }
     let a = answer.trim().trim_matches('"');
     let bad = || DriverError::Protocol(format!("{}: unexpected answer {a:?}", spec.node));
     Ok(match spec.kind {
@@ -1944,6 +2303,11 @@ pub fn write_command(spec: &ParamSpec, n: u8, encoded: &str, source: Option<&str
             format!("{} {},{encoded}", node(spec, n), source.unwrap_or("CHAN1"))
         }
         ParamKind::Keyed { key, .. } => format!("{} {encoded},{key}", node(spec, n)),
+        ParamKind::Prefixed { key, .. } => format!(
+            "{} {},{encoded}",
+            node(spec, n),
+            key.replace("{n}", &n.to_string())
+        ),
         _ => format!("{} {encoded}", node(spec, n)),
     }
 }
@@ -1990,6 +2354,7 @@ pub fn describe(g: &Group, available: bool) -> GroupInfo {
             .params
             .iter()
             .map(|p| {
+                let p = &unwrap_prefixed(p);
                 let (kind, min, max, unit, values): (
                     &str,
                     Option<f64>,
@@ -2035,6 +2400,7 @@ pub fn describe(g: &Group, available: bool) -> GroupInfo {
                     ParamKind::SourceLevel { .. } => {
                         ("source_level", None, None, Some("V".into()), vec![])
                     }
+                    ParamKind::Prefixed { .. } => unreachable!("unwrapped above"),
                 };
                 ParamInfo {
                     name: p.name.into(),

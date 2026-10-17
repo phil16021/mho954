@@ -36,6 +36,11 @@ pub struct Shared {
     /// `(scale, offset)` per math source (`MATH1`..) for the division view.
     pub math_scale: std::collections::HashMap<String, (f64, f64)>,
     pub readouts: Option<Vec<mho_driver::ops::ReadoutInfo>>,
+    /// Last Bode sweep and whether one is running.
+    pub bode: Option<Vec<mho_driver::BodePoint>>,
+    pub bode_running: bool,
+    /// Hardware modules (`None` until loaded).
+    pub modules: Option<mho_driver::Modules>,
     pub commands: Option<Vec<mho_driver::ops::CommandInfo>>,
     /// Last read value set: `(readout id, values)`.
     pub readout_values: Option<(String, mho_driver::params::ParamMap)>,

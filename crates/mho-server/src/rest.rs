@@ -88,6 +88,8 @@ pub fn routes() -> Router {
         .route("/readouts/{id}", get(readout))
         .route("/commands", get(commands))
         .route("/commands/{id}", post(run_command))
+        .route("/logic/{bus}", get(logic))
+        .route("/bode", post(bode))
         .route("/groups", get(groups))
         .route("/groups/{id}", get(group_get).put(group_set))
         .route("/openapi.json", get(openapi_json))
@@ -146,7 +148,9 @@ pub fn doc_routes() -> Router {
         readouts,
         readout,
         commands,
-        run_command
+        run_command,
+        logic,
+        bode
     ),
     components(schemas(ApiError, ErrorKind))
 )]
@@ -696,6 +700,48 @@ async fn run_command(
     let request = body.map(|Json(b)| b).unwrap_or_default();
     s.backend.run_command(id, request).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+struct LogicQuery {
+    /// `json` (default) or `vcd` (Value Change Dump for PulseView/sigrok, GTKWave).
+    format: Option<String>,
+}
+
+/// Digital channels D0..D15, read through decoder `bus` as a 16-bit parallel bus (the
+/// MHO954 does not deliver digital channels via `:WAV:DATA?`). Needs the logic probe.
+#[utoipa::path(get, path = "/api/v1/logic/{bus}", params(("bus" = u8, Path), LogicQuery),
+    responses((status = 200, body = mho_driver::LogicCapture)))]
+async fn logic(
+    State(s): State<AppState>,
+    Path(bus): Path<u8>,
+    Query(q): Query<LogicQuery>,
+) -> HttpResult<Response> {
+    let format = q.format.as_deref().unwrap_or("json").to_ascii_lowercase();
+    if !matches!(format.as_str(), "json" | "vcd") {
+        return Err(ApiError::invalid(format!("unknown format {format:?}")).into());
+    }
+    let cap = s.backend.logic_capture(bus).await?;
+    Ok(if format == "vcd" {
+        (
+            [(header::CONTENT_TYPE, "text/plain")],
+            mho_dsp::write_vcd(&cap.events, &cap.lines),
+        )
+            .into_response()
+    } else {
+        Json(cap).into_response()
+    })
+}
+
+/// Software Bode sweep with the built-in function generator (AFG option). Blocks the scope
+/// for the duration of the sweep.
+#[utoipa::path(post, path = "/api/v1/bode", request_body = mho_driver::BodeRequest,
+    responses((status = 200, body = Vec<mho_driver::BodePoint>)))]
+async fn bode(
+    State(s): State<AppState>,
+    Json(r): Json<mho_driver::BodeRequest>,
+) -> HttpResult<Json<Vec<mho_driver::BodePoint>>> {
+    Ok(Json(s.backend.bode_sweep(r).await?))
 }
 
 /// Digital voltmeter reading (enable it via group `dvm`).

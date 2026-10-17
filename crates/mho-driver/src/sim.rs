@@ -18,6 +18,8 @@ const SCREEN_POINTS: usize = 1000;
 /// ADC codes per vertical division (matches the real scope's WORD scaling).
 const CODES_PER_DIV: f64 = 7500.0;
 const Y_REF: f64 = 32768.0;
+/// Corner frequency of the simulated device under test behind the function generator.
+pub const SIM_DUT_CORNER: f64 = 10e3;
 
 #[derive(Debug, Clone)]
 struct SimChannel {
@@ -148,6 +150,9 @@ pub struct SimOptions {
     /// Otherwise the simulator is trusted with commands not yet verified on the instrument,
     /// so every feature can be tried without hardware.
     pub strict: bool,
+    /// Report logic analyzer and function generator hardware (`:SYST:MOD?`); option `noafg`
+    /// turns the generator off like on the test scope.
+    pub afg: bool,
 }
 
 impl Default for SimOptions {
@@ -158,6 +163,7 @@ impl Default for SimOptions {
             truncate_idn: true,
             hang_after: 5,
             strict: false,
+            afg: true,
         }
     }
 }
@@ -185,6 +191,7 @@ impl SimOptions {
                 }
                 "fullidn" => o.truncate_idn = false,
                 "strict" => o.strict = true,
+                "noafg" => o.afg = false,
                 "hang_after" => o.hang_after = v.parse().unwrap_or(o.hang_after),
                 _ => tracing::warn!("MHO954_SIM: unknown option {k:?}"),
             }
@@ -378,10 +385,21 @@ impl SimTransport {
         let wall = self.now();
         let ch = self.state.ch[n - 1].clone();
         let noise_amp = ch.scale * 0.02;
+        let afg = self.afg_tone();
         (first..first + count)
             .map(|i| {
                 let t = i as f64 * x_inc + x_org;
-                let mut v = Self::signal(n as u8, t, wall);
+                let mut v = match (afg, n) {
+                    // Generator GI drives a first-order low-pass (fc = 10 kHz): CH1 sees its
+                    // input, CH2 its output.
+                    (Some((f, a)), 1) => a / 2.0 * (2.0 * PI * f * t).sin(),
+                    (Some((f, a)), 2) => {
+                        let r = f / SIM_DUT_CORNER;
+                        let gain = 1.0 / (1.0 + r * r).sqrt();
+                        gain * a / 2.0 * (2.0 * PI * f * t - r.atan()).sin()
+                    }
+                    _ => Self::signal(n as u8, t, wall),
+                };
                 if ch.coupling == Coupling::AC {
                     v -= [1.5, 0.0, 0.0, 0.0][n - 1];
                 }
@@ -394,6 +412,20 @@ impl SimTransport {
                 v + noise_amp * self.noise()
             })
             .collect()
+    }
+
+    /// `(frequency, amplitude Vpp)` of generator GI while its output is on.
+    fn afg_tone(&self) -> Option<(f64, f64)> {
+        if !self.opts.afg {
+            return None;
+        }
+        let on = self.param_or(":SOUR1:OUTP:STAT", "0");
+        if on != "ON" && on != "1" {
+            return None;
+        }
+        let f = self.param_or(":SOUR1:FREQ", "1000").parse().ok()?;
+        let a = self.param_or(":SOUR1:VOLT:AMPL", "1").parse().ok()?;
+        Some((f, a))
     }
 
     fn math_index(src: &str) -> Option<u8> {
@@ -648,6 +680,10 @@ impl SimTransport {
             Source { .. } => "CHAN1".into(),
             Text { .. } => "XXXXXXXX".into(),
             Pattern { count, .. } => vec!["X"; count].join(","),
+            Prefixed { inner, .. } => Self::param_default(&crate::params::ParamSpec {
+                kind: *inner,
+                ..*spec
+            }),
         }
     }
 
@@ -771,6 +807,7 @@ impl SimTransport {
                 None => "0,\"No error\"".into(),
             },
             ":SYST:VERS" => "3.0".into(),
+            ":SYST:MOD" => format!("1,{},0,0,0", u8::from(self.opts.afg)),
             ":LAN:STAT" => if self.state.lan.manual && self.state.lan.ip != "0.0.0.0" {
                 "CONFIGURED"
             } else {
@@ -933,6 +970,12 @@ impl SimTransport {
                 let (src, v) = args.split_once(',').ok_or("missing source")?;
                 self.params.insert(
                     format!("{hdr} {}", src.trim().to_ascii_uppercase()),
+                    v.trim().to_string(),
+                );
+            } else if let crate::params::ParamKind::Prefixed { .. } = spec.kind {
+                let (key, v) = args.split_once(',').ok_or("missing index")?;
+                self.params.insert(
+                    format!("{hdr} {}", key.trim().to_ascii_uppercase()),
                     v.trim().to_string(),
                 );
             } else if let crate::params::ParamKind::Keyed { .. } = spec.kind {
