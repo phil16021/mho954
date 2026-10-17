@@ -7,7 +7,9 @@ use std::time::Duration;
 
 use eframe::egui;
 use mho_driver::ScopeStatus;
-use mho_service::{ApiResult, Frame, LiveConfig, LiveEvent, MeasureSnapshot, RemoteBackend, ScopeApi, ServiceInfo};
+use mho_service::{
+    ApiResult, Frame, LiveConfig, LiveEvent, MeasureSnapshot, RemoteBackend, ScopeApi, ServiceInfo,
+};
 
 const LOG_LINES: usize = 8;
 const STATUS_INTERVAL: Duration = Duration::from_secs(5);
@@ -47,10 +49,18 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(url: &str, token: Option<String>, rt: tokio::runtime::Handle, ctx: egui::Context) -> Self {
+    pub fn new(
+        url: &str,
+        token: Option<String>,
+        rt: tokio::runtime::Handle,
+        ctx: egui::Context,
+    ) -> Self {
         let c = Client {
             api: Arc::new(RemoteBackend::with_token(url, token)),
-            shared: Arc::new(Mutex::new(Shared { status_dirty: true, ..Default::default() })),
+            shared: Arc::new(Mutex::new(Shared {
+                status_dirty: true,
+                ..Default::default()
+            })),
             rt,
             ctx,
         };

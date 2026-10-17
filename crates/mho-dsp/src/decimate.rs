@@ -15,16 +15,28 @@ pub fn minmax_decimate(v: &[f64], buckets: usize) -> Vec<MinMax> {
         return Vec::new();
     }
     if v.len() <= buckets {
-        return v.iter().enumerate().map(|(i, &x)| MinMax { start: i, min: x, max: x }).collect();
+        return v
+            .iter()
+            .enumerate()
+            .map(|(i, &x)| MinMax {
+                start: i,
+                min: x,
+                max: x,
+            })
+            .collect();
     }
     let size = v.len() as f64 / buckets as f64;
     (0..buckets)
         .map(|b| {
             let start = (b as f64 * size) as usize;
-            let end = (((b + 1) as f64 * size) as usize).min(v.len()).max(start + 1);
+            let end = (((b + 1) as f64 * size) as usize)
+                .min(v.len())
+                .max(start + 1);
             let (min, max) = v[start..end]
                 .iter()
-                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &x| (lo.min(x), hi.max(x)));
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &x| {
+                    (lo.min(x), hi.max(x))
+                });
             MinMax { start, min, max }
         })
         .collect()

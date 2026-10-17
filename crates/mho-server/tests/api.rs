@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use mho_driver::{Action, ChannelUpdate, Connection, WaveMode};
 use mho_server::ServerOptions;
-use mho_service::{LiveConfig, LiveEvent, LocalBackend, MeasureRequest, RemoteBackend, ScopeApi, ScpiRequest};
+use mho_service::{
+    LiveConfig, LiveEvent, LocalBackend, MeasureRequest, RemoteBackend, ScopeApi, ScpiRequest,
+};
 use tokio_util::sync::CancellationToken;
 
 async fn start(allow_raw: bool) -> (String, CancellationToken) {
@@ -25,7 +27,10 @@ async fn start_with(allow_raw: bool, api_token: Option<&str>) -> (String, Cancel
     let app = mho_server::router(backend, &opts, shutdown.clone());
     let s = shutdown.clone();
     tokio::spawn(async move {
-        mho_server::axum_reexport::serve(listener, app).with_graceful_shutdown(s.cancelled_owned()).await.unwrap();
+        mho_server::axum_reexport::serve(listener, app)
+            .with_graceful_shutdown(s.cancelled_owned())
+            .await
+            .unwrap();
     });
     (format!("http://{addr}"), shutdown)
 }
@@ -42,20 +47,40 @@ async fn rest_roundtrip() {
     let st = api.status().await.unwrap();
     assert_eq!(st.channels.len(), 4);
 
-    let ch = api.set_channel(3, ChannelUpdate { display: Some(true), scale: Some(0.5), ..Default::default() }).await.unwrap();
+    let ch = api
+        .set_channel(
+            3,
+            ChannelUpdate {
+                display: Some(true),
+                scale: Some(0.5),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     assert!(ch.display);
     assert_eq!(ch.scale, 0.5);
 
-    let err = api.set_channel(9, ChannelUpdate::default()).await.unwrap_err();
+    let err = api
+        .set_channel(9, ChannelUpdate::default())
+        .await
+        .unwrap_err();
     assert_eq!(err.kind, mho_service::ErrorKind::InvalidArgument);
 
     let m = api
-        .measure(MeasureRequest { items: vec!["FREQ".into()], source: "1".into(), source2: None })
+        .measure(MeasureRequest {
+            items: vec!["FREQ".into()],
+            source: "1".into(),
+            source2: None,
+        })
         .await
         .unwrap();
     assert!((m[0].value.unwrap() - 1000.0).abs() < 5.0, "{m:?}");
 
-    let w = api.waveform("CHAN2".into(), WaveMode::Normal).await.unwrap();
+    let w = api
+        .waveform("CHAN2".into(), WaveMode::Normal)
+        .await
+        .unwrap();
     assert_eq!(w.raw.len(), 1000);
 
     api.action(Action::Stop).await.unwrap();
@@ -66,7 +91,13 @@ async fn rest_roundtrip() {
     let png = api.screenshot().await.unwrap();
     assert!(png.starts_with(b"\x89PNG"));
 
-    let r = api.scpi(ScpiRequest { command: ":TIM:SCAL?".into(), timeout_ms: None }).await.unwrap();
+    let r = api
+        .scpi(ScpiRequest {
+            command: ":TIM:SCAL?".into(),
+            timeout_ms: None,
+        })
+        .await
+        .unwrap();
     assert!(r.response.unwrap().contains("E-4"));
 
     let net = api.network().await.unwrap();
@@ -82,7 +113,10 @@ async fn rest_roundtrip() {
         .unwrap();
     assert_eq!(net.ip, "192.168.1.50");
     let err = api
-        .set_network(mho_driver::NetworkUpdate { gateway: Some("1.2.3".into()), ..Default::default() })
+        .set_network(mho_driver::NetworkUpdate {
+            gateway: Some("1.2.3".into()),
+            ..Default::default()
+        })
         .await
         .unwrap_err();
     assert_eq!(err.kind, mho_service::ErrorKind::InvalidArgument);
@@ -97,7 +131,13 @@ async fn rest_roundtrip() {
 async fn raw_scpi_forbidden_by_default() {
     let (url, shutdown) = start(false).await;
     let api = RemoteBackend::new(&url);
-    let err = api.scpi(ScpiRequest { command: "*IDN?".into(), timeout_ms: None }).await.unwrap_err();
+    let err = api
+        .scpi(ScpiRequest {
+            command: "*IDN?".into(),
+            timeout_ms: None,
+        })
+        .await
+        .unwrap_err();
     assert_eq!(err.kind, mho_service::ErrorKind::Forbidden);
     shutdown.cancel();
 }
@@ -123,7 +163,10 @@ async fn live_stream_delivers_frames_and_measurements() {
             _ => break,
         }
     }
-    assert!(frames >= 3 && meas >= 1, "frames {frames}, measurements {meas}");
+    assert!(
+        frames >= 3 && meas >= 1,
+        "frames {frames}, measurements {meas}"
+    );
     shutdown.cancel();
 }
 
@@ -150,19 +193,39 @@ async fn mcp_initialize_and_call_tool() {
     .await
     .unwrap();
     assert!(init.status().is_success());
-    let sid = init.headers().get("mcp-session-id").map(|v| v.to_str().unwrap().to_string());
+    let sid = init
+        .headers()
+        .get("mcp-session-id")
+        .map(|v| v.to_str().unwrap().to_string());
     let body = init.text().await.unwrap();
     assert!(body.contains("\"name\":\"mho954\""), "{body}");
 
-    post(serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}), sid.clone()).await.unwrap();
-    let list = post(serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}), sid.clone())
-        .await
-        .unwrap()
-        .text()
-        .await
-        .unwrap();
-    for tool in ["get_status", "measure", "get_waveform", "screenshot", "fft_peaks"] {
-        assert!(list.contains(&format!("\"name\":\"{tool}\"")), "missing {tool}");
+    post(
+        serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+        sid.clone(),
+    )
+    .await
+    .unwrap();
+    let list = post(
+        serde_json::json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}),
+        sid.clone(),
+    )
+    .await
+    .unwrap()
+    .text()
+    .await
+    .unwrap();
+    for tool in [
+        "get_status",
+        "measure",
+        "get_waveform",
+        "screenshot",
+        "fft_peaks",
+    ] {
+        assert!(
+            list.contains(&format!("\"name\":\"{tool}\"")),
+            "missing {tool}"
+        );
     }
     let call = post(
         serde_json::json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
@@ -174,7 +237,10 @@ async fn mcp_initialize_and_call_tool() {
     .text()
     .await
     .unwrap();
-    assert!(call.contains("frequency") && call.contains("\"isError\":false"), "{call}");
+    assert!(
+        call.contains("frequency") && call.contains("\"isError\":false"),
+        "{call}"
+    );
     shutdown.cancel();
 }
 
@@ -183,7 +249,12 @@ async fn browser_requests_are_refused() {
     let (url, shutdown) = start(true).await;
     let client = reqwest::Client::new();
     // DNS rebinding: a foreign Host name pointing at 127.0.0.1.
-    let r = client.get(format!("{url}/api/v1/info")).header("host", "evil.example").send().await.unwrap();
+    let r = client
+        .get(format!("{url}/api/v1/info"))
+        .header("host", "evil.example")
+        .send()
+        .await
+        .unwrap();
     assert_eq!(r.status(), 403);
     // Cross-site request from a web page.
     let r = client
@@ -195,7 +266,11 @@ async fn browser_requests_are_refused() {
         .unwrap();
     assert_eq!(r.status(), 403);
     // Local tools (no Origin) still work.
-    let r = client.get(format!("{url}/api/v1/info")).send().await.unwrap();
+    let r = client
+        .get(format!("{url}/api/v1/info"))
+        .send()
+        .await
+        .unwrap();
     assert!(r.status().is_success());
     let r = client.get(format!("{url}/docs")).send().await.unwrap();
     let html = r.text().await.unwrap();
@@ -208,19 +283,40 @@ async fn token_is_enforced() {
     let (url, shutdown) = start_with(false, Some("s3cret")).await;
     let err = RemoteBackend::new(&url).info().await.unwrap_err();
     assert_eq!(err.kind, mho_service::ErrorKind::Forbidden);
-    let ok = RemoteBackend::with_token(&url, Some("s3cret".into())).info().await.unwrap();
+    let ok = RemoteBackend::with_token(&url, Some("s3cret".into()))
+        .info()
+        .await
+        .unwrap();
     assert!(ok.connected);
-    let mut rx = RemoteBackend::with_token(&url, Some("s3cret".into())).stream().await.unwrap();
-    assert!(tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().is_some());
+    let mut rx = RemoteBackend::with_token(&url, Some("s3cret".into()))
+        .stream()
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_secs(3), rx.recv())
+            .await
+            .unwrap()
+            .is_some()
+    );
     assert!(RemoteBackend::new(&url).stream().await.is_err());
-    assert!(RemoteBackend::probe(&url, Duration::from_secs(1)).await, "a refusing daemon still owns the scope");
+    assert!(
+        RemoteBackend::probe(&url, Duration::from_secs(1)).await,
+        "a refusing daemon still owns the scope"
+    );
     shutdown.cancel();
 }
 
 #[test]
 fn network_bind_requires_token() {
-    let opts = ServerOptions { bind: "0.0.0.0:8954".parse().unwrap(), capture_dir: ".".into(), api_token: None };
+    let opts = ServerOptions {
+        bind: "0.0.0.0:8954".parse().unwrap(),
+        capture_dir: ".".into(),
+        api_token: None,
+    };
     assert!(opts.validate().is_err());
-    let opts = ServerOptions { api_token: Some("x".into()), ..opts };
+    let opts = ServerOptions {
+        api_token: Some("x".into()),
+        ..opts
+    };
     assert!(opts.validate().is_ok());
 }

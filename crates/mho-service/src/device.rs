@@ -47,7 +47,10 @@ impl Slot {
             if let Some(t) = self.last_attempt
                 && t.elapsed() < RECONNECT_BACKOFF
             {
-                let msg = self.last_open_error.clone().unwrap_or_else(|| "not connected".into());
+                let msg = self
+                    .last_open_error
+                    .clone()
+                    .unwrap_or_else(|| "not connected".into());
                 return Err(ApiError::unavailable(msg));
             }
             self.last_attempt = Some(Instant::now());
@@ -136,7 +139,9 @@ impl Device {
                 while let Some(msg) = rx.blocking_recv() {
                     match msg {
                         Msg::Job(job) => {
-                            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| job(&mut slot)));
+                            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                job(&mut slot)
+                            }));
                             if r.is_err() {
                                 // The scope state is unknown after a panic: reconnect on next use.
                                 warn!("device job panicked; dropping the connection");
@@ -176,7 +181,8 @@ impl Device {
             .send(Msg::Job(job))
             .await
             .map_err(|_| ApiError::new(ErrorKind::Internal, "device thread stopped"))?;
-        rx.await.map_err(|_| ApiError::new(ErrorKind::Internal, "device job dropped"))?
+        rx.await
+            .map_err(|_| ApiError::new(ErrorKind::Internal, "device job dropped"))?
     }
 
     /// Like [`Self::call`] for operations that change scope settings: bumps the settings

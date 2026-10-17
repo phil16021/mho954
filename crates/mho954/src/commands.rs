@@ -165,11 +165,18 @@ async fn backend(cli: &Cli, cfg: &Config) -> anyhow::Result<Backend> {
     let explicit = cli.direct || cli.connection.is_some();
     if !explicit && daemon_running(cli, cfg).await {
         info!("using daemon at {}", daemon_url(cli, cfg));
-        return Ok(Backend::Remote(RemoteBackend::with_token(&daemon_url(cli, cfg), cfg.api_token.clone())));
+        return Ok(Backend::Remote(RemoteBackend::with_token(
+            &daemon_url(cli, cfg),
+            cfg.api_token.clone(),
+        )));
     }
     let mut live = cfg.live.clone();
     live.enabled = false;
-    Ok(Backend::Local(LocalBackend::start(connection(cfg)?, true, live)))
+    Ok(Backend::Local(LocalBackend::start(
+        connection(cfg)?,
+        true,
+        live,
+    )))
 }
 
 async fn ensure_no_daemon(cli: &Cli, cfg: &Config) -> anyhow::Result<()> {
@@ -198,7 +205,10 @@ async fn with_scope<R: Send + 'static>(
 
 pub async fn run(cli: Cli, cfg: Config) -> anyhow::Result<()> {
     match &cli.command {
-        Command::Serve { bind, allow_raw_scpi } => return serve(&cli, cfg.clone(), *bind, *allow_raw_scpi).await,
+        Command::Serve {
+            bind,
+            allow_raw_scpi,
+        } => return serve(&cli, cfg.clone(), *bind, *allow_raw_scpi).await,
         Command::Mcp => return mcp_stdio(&cli, &cfg).await,
         Command::Config => {
             print!("{}", toml::to_string_pretty(&cfg)?);
@@ -270,7 +280,13 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
         Command::Auto => api.action(Action::Autoscale).await?,
         Command::Force => api.action(Action::Force).await?,
         Command::Channel(a) => {
-            let display = if a.on { Some(true) } else if a.off { Some(false) } else { None };
+            let display = if a.on {
+                Some(true)
+            } else if a.off {
+                Some(false)
+            } else {
+                None
+            };
             let u = ChannelUpdate {
                 display,
                 scale: a.scale,
@@ -282,13 +298,30 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 invert: a.invert,
                 vernier: None,
             };
-            let c = if u == ChannelUpdate::default() { api.channel(a.n).await? } else { api.set_channel(a.n, u).await? };
+            let c = if u == ChannelUpdate::default() {
+                api.channel(a.n).await?
+            } else {
+                api.set_channel(a.n, u).await?
+            };
             print_channel(&c);
         }
         Command::Timebase(a) => {
-            let u = TimebaseUpdate { scale: a.scale, offset: a.offset, mode: a.mode };
-            let t = if u == TimebaseUpdate::default() { api.timebase().await? } else { api.set_timebase(u).await? };
-            println!("timebase {}/div  offset {}  mode {}", format_si(t.scale, "s"), format_si(t.offset, "s"), t.mode);
+            let u = TimebaseUpdate {
+                scale: a.scale,
+                offset: a.offset,
+                mode: a.mode,
+            };
+            let t = if u == TimebaseUpdate::default() {
+                api.timebase().await?
+            } else {
+                api.set_timebase(u).await?
+            };
+            println!(
+                "timebase {}/div  offset {}  mode {}",
+                format_si(t.scale, "s"),
+                format_si(t.offset, "s"),
+                t.mode
+            );
         }
         Command::Trigger(a) => {
             let u = TriggerUpdate {
@@ -300,17 +333,40 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 edge_slope: a.slope,
                 edge_level: a.level,
             };
-            let t = if u == TriggerUpdate::default() { api.trigger().await? } else { api.set_trigger(u).await? };
+            let t = if u == TriggerUpdate::default() {
+                api.trigger().await?
+            } else {
+                api.set_trigger(u).await?
+            };
             print_trigger(&t);
         }
-        Command::Measure { items, source, local, .. } => {
+        Command::Measure {
+            items,
+            source,
+            local,
+            ..
+        } => {
             if local {
                 let w = api.waveform(source, WaveMode::Normal).await?;
                 print_local(&w.source, &w.analyze());
             } else {
-                let items = if items.is_empty() { vec!["VPP".into(), "FREQ".into(), "VRMS".into()] } else { items };
-                for m in api.measure(MeasureRequest { items, source, source2: None }).await? {
-                    let v = m.value.map(|v| format_si(v, &m.unit)).unwrap_or_else(|| "---".into());
+                let items = if items.is_empty() {
+                    vec!["VPP".into(), "FREQ".into(), "VRMS".into()]
+                } else {
+                    items
+                };
+                for m in api
+                    .measure(MeasureRequest {
+                        items,
+                        source,
+                        source2: None,
+                    })
+                    .await?
+                {
+                    let v = m
+                        .value
+                        .map(|v| format_si(v, &m.unit))
+                        .unwrap_or_else(|| "---".into());
                     println!("{:<10} {:<6} {v}", m.item, m.source);
                 }
             }
@@ -320,20 +376,40 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
             std::fs::write(&output, &png)?;
             println!("{} ({} bytes)", output.display(), png.len());
         }
-        Command::Capture { source, raw, output } => capture(&backend, source, raw, &output).await?,
+        Command::Capture {
+            source,
+            raw,
+            output,
+        } => capture(backend, source, raw, &output).await?,
         Command::Fft { source, peaks, raw } => {
             let mode = if raw { WaveMode::Raw } else { WaveMode::Normal };
             let w = api.waveform(source, mode).await?;
-            let spec = mho_dsp::spectrum(&w.volts(), w.preamble.x_increment, mho_dsp::Window::FlatTop);
-            println!("{}: {} points, resolution {}", w.source, w.raw.len(), format_si(spec.df, "Hz"));
+            let spec =
+                mho_dsp::spectrum(&w.volts(), w.preamble.x_increment, mho_dsp::Window::FlatTop);
+            println!(
+                "{}: {} points, resolution {}",
+                w.source,
+                w.raw.len(),
+                format_si(spec.df, "Hz")
+            );
             for p in spec.peaks(peaks) {
-                println!("  {:>12}  {:>8.2} dBV  {}", format_si(p.frequency, "Hz"), p.dbv, format_si(p.vrms, "Vrms"));
+                println!(
+                    "  {:>12}  {:>8.2} dBV  {}",
+                    format_si(p.frequency, "Hz"),
+                    p.dbv,
+                    format_si(p.vrms, "Vrms")
+                );
             }
         }
         Command::Options { cmd } => match cmd.unwrap_or(OptionsCmd::List) {
             OptionsCmd::List => {
                 for o in api.options().await? {
-                    println!("{} {:<10} {}", if o.active { "[x]" } else { "[ ]" }, o.name, o.description);
+                    println!(
+                        "{} {:<10} {}",
+                        if o.active { "[x]" } else { "[ ]" },
+                        o.name,
+                        o.description
+                    );
                 }
             }
             OptionsCmd::Install { license } => {
@@ -350,7 +426,7 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
             api.setup_load(blob).await?;
             println!("setup restored from {}", file.display());
         }
-        Command::Fw { cmd: FwCmd::Status } => fw_status(api, &cfg).await?,
+        Command::Fw { cmd: FwCmd::Status } => fw_status(api, cfg).await?,
         Command::Net { cmd } => match cmd.unwrap_or(NetCmd::Show) {
             NetCmd::Show => print_network(&api.network().await?),
             NetCmd::Set(a) => {
@@ -408,11 +484,20 @@ async fn shutdown_signal() {
     }
 }
 
-async fn serve(cli: &Cli, cfg: Config, bind: Option<std::net::SocketAddr>, allow_raw: bool) -> anyhow::Result<()> {
+async fn serve(
+    cli: &Cli,
+    cfg: Config,
+    bind: Option<std::net::SocketAddr>,
+    allow_raw: bool,
+) -> anyhow::Result<()> {
     if daemon_running(cli, &cfg).await && bind.is_none() {
         bail!("a daemon is already running at {}", cfg.url());
     }
-    let backend = LocalBackend::start(connection(&cfg)?, allow_raw || cfg.allow_raw_scpi, cfg.live.clone());
+    let backend = LocalBackend::start(
+        connection(&cfg)?,
+        allow_raw || cfg.allow_raw_scpi,
+        cfg.live.clone(),
+    );
     let opts = ServerOptions {
         bind: bind.unwrap_or(cfg.bind),
         capture_dir: cfg.capture_dir.clone(),
@@ -436,7 +521,13 @@ async fn mcp_stdio(cli: &Cli, cfg: &Config) -> anyhow::Result<()> {
     let explicit = cli.direct || cli.connection.is_some();
     let (api, local): (Arc<dyn ScopeApi>, Option<LocalBackend>) =
         if !explicit && daemon_running(cli, cfg).await {
-            (Arc::new(RemoteBackend::with_token(&daemon_url(cli, cfg), cfg.api_token.clone())), None)
+            (
+                Arc::new(RemoteBackend::with_token(
+                    &daemon_url(cli, cfg),
+                    cfg.api_token.clone(),
+                )),
+                None,
+            )
         } else {
             let mut live = cfg.live.clone();
             live.enabled = false;
@@ -463,8 +554,13 @@ pub fn gui(cli: &Cli, cfg: Config, sim: bool) -> anyhow::Result<()> {
     let url = if !explicit && rt.block_on(daemon_running(cli, &cfg)) {
         daemon_url(cli, &cfg)
     } else {
-        let conn = if sim { Connection::Sim } else { connection(&cfg)? };
-        let backend = rt.block_on(async { LocalBackend::start(conn, cfg.allow_raw_scpi, cfg.live.clone()) });
+        let conn = if sim {
+            Connection::Sim
+        } else {
+            connection(&cfg)?
+        };
+        let backend =
+            rt.block_on(async { LocalBackend::start(conn, cfg.allow_raw_scpi, cfg.live.clone()) });
         // The real scope prefers the configured port so MCP clients find it; the simulator
         // never takes it, so the CLI cannot mistake it for the daemon.
         let listener = if sim {
@@ -477,7 +573,11 @@ pub fn gui(cli: &Cli, cfg: Config, sim: bool) -> anyhow::Result<()> {
         if !addr.ip().is_loopback() {
             tracing::warn!("embedded server listens on {addr} — reachable from the network");
         }
-        let opts = ServerOptions { bind: addr, capture_dir: cfg.capture_dir.clone(), api_token: cfg.api_token.clone() };
+        let opts = ServerOptions {
+            bind: addr,
+            capture_dir: cfg.capture_dir.clone(),
+            api_token: cfg.api_token.clone(),
+        };
         opts.validate()?;
         let shutdown = CancellationToken::new();
         let app = mho_server::router(backend.clone(), &opts, shutdown.clone());
@@ -495,15 +595,26 @@ pub fn gui(cli: &Cli, cfg: Config, sim: bool) -> anyhow::Result<()> {
         local = Some(backend);
         format!("http://{addr}")
     };
-    let r = mho_gui::run(url, cfg.api_token.clone(), rt.handle().clone(), cfg.capture_dir.clone());
+    let r = mho_gui::run(
+        url,
+        cfg.api_token.clone(),
+        rt.handle().clone(),
+        cfg.capture_dir.clone(),
+    );
     if let Some(b) = local {
         rt.block_on(b.shutdown());
     }
     r
 }
 
-async fn axum_serve(listener: tokio::net::TcpListener, app: mho_server::axum_reexport::Router, shutdown: CancellationToken) -> std::io::Result<()> {
-    mho_server::axum_reexport::serve(listener, app).with_graceful_shutdown(shutdown.cancelled_owned()).await
+async fn axum_serve(
+    listener: tokio::net::TcpListener,
+    app: mho_server::axum_reexport::Router,
+    shutdown: CancellationToken,
+) -> std::io::Result<()> {
+    mho_server::axum_reexport::serve(listener, app)
+        .with_graceful_shutdown(shutdown.cancelled_owned())
+        .await
 }
 
 // ---- output helpers -------------------------------------------------------------------------
@@ -518,7 +629,11 @@ fn print_channel(c: &ChannelState) {
         c.coupling,
         c.bw_limit,
         c.probe,
-        if c.impedance == Impedance::Fifty { "50Ω" } else { "1MΩ" },
+        if c.impedance == Impedance::Fifty {
+            "50Ω"
+        } else {
+            "1MΩ"
+        },
         if c.invert { "  inverted" } else { "" }
     );
 }
@@ -534,17 +649,26 @@ fn print_network(n: &NetworkState) {
         "?"
     };
     println!("LAN status   {}", n.status);
-    println!("mode         {mode} (dhcp {}, auto-ip {}, static {})", n.dhcp, n.auto_ip, n.manual);
+    println!(
+        "mode         {mode} (dhcp {}, auto-ip {}, static {})",
+        n.dhcp, n.auto_ip, n.manual
+    );
     println!("ip / mask    {} / {}", n.ip, n.mask);
     println!("gateway      {}", n.gateway);
     println!("dns          {}", n.dns);
     println!("dhcp server  {}", n.dhcp_server);
     println!("mac          {}", n.mac);
-    println!("hostname     {}  (mDNS {})", n.hostname, if n.mdns { "on" } else { "off" });
+    println!(
+        "hostname     {}  (mDNS {})",
+        n.hostname,
+        if n.mdns { "on" } else { "off" }
+    );
     println!("description  {}", n.description);
     println!("visa         {}", n.visa);
     if n.status == "UNLINK" {
-        println!("note: :LAN covers the RJ45 port only; a WLAN dongle's address is shown on the scope (Utility → IO).");
+        println!(
+            "note: :LAN covers the RJ45 port only; a WLAN dongle's address is shown on the scope (Utility → IO)."
+        );
     }
 }
 
@@ -563,7 +687,10 @@ fn print_trigger(t: &TriggerState) {
 }
 
 fn print_status(st: &ScopeStatus) {
-    println!("{} {} ({})  firmware {}", st.idn.manufacturer, st.idn.model, st.idn.serial, st.idn.firmware);
+    println!(
+        "{} {} ({})  firmware {}",
+        st.idn.manufacturer, st.idn.model, st.idn.serial, st.idn.firmware
+    );
     println!("status {}", st.trigger_status);
     for c in &st.channels {
         print_channel(c);
@@ -579,7 +706,10 @@ fn print_status(st: &ScopeStatus) {
         "acquire {}  {}  depth {} pts  averages {}",
         st.acquire.acq_type,
         format_si(st.acquire.sample_rate, "Sa/s"),
-        st.acquire.memory_depth.map(|d| d.to_string()).unwrap_or_else(|| "?".into()),
+        st.acquire
+            .memory_depth
+            .map(|d| d.to_string())
+            .unwrap_or_else(|| "?".into()),
         st.acquire.averages
     );
 }
@@ -587,17 +717,47 @@ fn print_status(st: &ScopeStatus) {
 fn print_local(source: &str, m: &mho_dsp::Measurements) {
     let opt = |v: Option<f64>, u: &str| v.map(|v| format_si(v, u)).unwrap_or_else(|| "---".into());
     println!("{source} ({} samples, computed locally)", m.samples);
-    println!("  Vpp {}  Vmax {}  Vmin {}", format_si(m.vpp, "V"), format_si(m.vmax, "V"), format_si(m.vmin, "V"));
-    println!("  Vtop {}  Vbase {}  Vamp {}", format_si(m.vtop, "V"), format_si(m.vbase, "V"), format_si(m.vamp, "V"));
-    println!("  Vavg {}  Vrms {}  Vrms(AC) {}", format_si(m.vavg, "V"), format_si(m.vrms, "V"), format_si(m.vrms_ac, "V"));
-    println!("  freq {}  period {}  duty {}", opt(m.frequency, "Hz"), opt(m.period, "s"), opt(m.duty, "%"));
-    println!("  rise {}  fall {}  overshoot {}", opt(m.rise_time, "s"), opt(m.fall_time, "s"), opt(m.overshoot, "%"));
+    println!(
+        "  Vpp {}  Vmax {}  Vmin {}",
+        format_si(m.vpp, "V"),
+        format_si(m.vmax, "V"),
+        format_si(m.vmin, "V")
+    );
+    println!(
+        "  Vtop {}  Vbase {}  Vamp {}",
+        format_si(m.vtop, "V"),
+        format_si(m.vbase, "V"),
+        format_si(m.vamp, "V")
+    );
+    println!(
+        "  Vavg {}  Vrms {}  Vrms(AC) {}",
+        format_si(m.vavg, "V"),
+        format_si(m.vrms, "V"),
+        format_si(m.vrms_ac, "V")
+    );
+    println!(
+        "  freq {}  period {}  duty {}",
+        opt(m.frequency, "Hz"),
+        opt(m.period, "s"),
+        opt(m.duty, "%")
+    );
+    println!(
+        "  rise {}  fall {}  overshoot {}",
+        opt(m.rise_time, "s"),
+        opt(m.fall_time, "s"),
+        opt(m.overshoot, "%")
+    );
 }
 
 // ---- scpi ---------------------------------------------------------------------------------------
 
 async fn scpi_once(api: &dyn ScopeApi, cmd: &str) -> anyhow::Result<()> {
-    let r = api.scpi(ScpiRequest { command: cmd.to_string(), timeout_ms: None }).await?;
+    let r = api
+        .scpi(ScpiRequest {
+            command: cmd.to_string(),
+            timeout_ms: None,
+        })
+        .await?;
     if let Some(line) = r.response {
         println!("{line}");
     }
@@ -606,7 +766,8 @@ async fn scpi_once(api: &dyn ScopeApi, cmd: &str) -> anyhow::Result<()> {
 
 async fn scpi_repl(api: &dyn ScopeApi) -> anyhow::Result<()> {
     let mut rl = rustyline::DefaultEditor::new()?;
-    let history = directories::ProjectDirs::from("", "", "mho954").map(|d| d.data_dir().join("scpi_history"));
+    let history =
+        directories::ProjectDirs::from("", "", "mho954").map(|d| d.data_dir().join("scpi_history"));
     if let Some(h) = &history {
         let _ = rl.load_history(h);
     }
@@ -636,22 +797,39 @@ async fn scpi_repl(api: &dyn ScopeApi) -> anyhow::Result<()> {
 
 // ---- capture ------------------------------------------------------------------------------------
 
-async fn capture(backend: &Backend, source: String, raw: bool, output: &Path) -> anyhow::Result<()> {
+async fn capture(
+    backend: &Backend,
+    source: String,
+    raw: bool,
+    output: &Path,
+) -> anyhow::Result<()> {
     let start = Instant::now();
     let w = match (backend, raw) {
         (Backend::Local(b), true) => {
             let progress = Arc::new(|done: usize, total: usize| {
-                eprint!("\r{done}/{total} points ({:.0} %)   ", 100.0 * done as f64 / total.max(1) as f64);
+                eprint!(
+                    "\r{done}/{total} points ({:.0} %)   ",
+                    100.0 * done as f64 / total.max(1) as f64
+                );
                 let _ = std::io::stderr().flush();
             });
             let w = b.raw_waveform(source, progress).await?;
             eprintln!();
             w
         }
-        (_, raw) => backend.api().waveform(source, if raw { WaveMode::Raw } else { WaveMode::Normal }).await?,
+        (_, raw) => {
+            backend
+                .api()
+                .waveform(source, if raw { WaveMode::Raw } else { WaveMode::Normal })
+                .await?
+        }
     };
     let secs = start.elapsed().as_secs_f64();
-    let ext = output.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    let ext = output
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     match ext.as_str() {
         "csv" => {
             let volts = w.volts();
@@ -660,13 +838,19 @@ async fn capture(backend: &Backend, source: String, raw: bool, output: &Path) ->
                 file,
                 w.preamble.time(0),
                 w.preamble.x_increment,
-                &[mho_dsp::export::CsvColumn { name: &w.source, volts: &volts }],
+                &[mho_dsp::export::CsvColumn {
+                    name: &w.source,
+                    volts: &volts,
+                }],
             )?;
         }
         "npy" => {
             mho_dsp::export::write_npy(output, &w.raw)?;
             let meta = serde_json::json!({ "source": w.source, "preamble": w.preamble });
-            std::fs::write(output.with_extension("json"), serde_json::to_vec_pretty(&meta)?)?;
+            std::fs::write(
+                output.with_extension("json"),
+                serde_json::to_vec_pretty(&meta)?,
+            )?;
         }
         "json" => std::fs::write(output, serde_json::to_vec(&w)?)?,
         other => bail!("unsupported output extension {other:?} (use .csv, .npy or .json)"),
@@ -692,7 +876,10 @@ async fn backup(api: &dyn ScopeApi, base: std::path::PathBuf) -> anyhow::Result<
     let status = api.status().await?;
     std::fs::write(dir.join("status.json"), serde_json::to_vec_pretty(&status)?)?;
     let options = api.options().await?;
-    std::fs::write(dir.join("options.json"), serde_json::to_vec_pretty(&options)?)?;
+    std::fs::write(
+        dir.join("options.json"),
+        serde_json::to_vec_pretty(&options)?,
+    )?;
     let setup = api.setup_save().await?;
     std::fs::write(dir.join("setup.bin"), &setup)?;
     match api.screenshot().await {
@@ -700,7 +887,11 @@ async fn backup(api: &dyn ScopeApi, base: std::path::PathBuf) -> anyhow::Result<
         Err(e) => eprintln!("screenshot skipped: {e}"),
     }
     println!("backup written to {}", dir.display());
-    println!("  setup.bin ({} bytes) can be restored with `mho954 restore {}`", setup.len(), dir.join("setup.bin").display());
+    println!(
+        "  setup.bin ({} bytes) can be restored with `mho954 restore {}`",
+        setup.len(),
+        dir.join("setup.bin").display()
+    );
     println!(
         "  note: calibration data and license files live on the scope's internal storage and are \
          not reachable via SCPI"
@@ -714,13 +905,22 @@ async fn fw_status(api: &dyn ScopeApi, cfg: &Config) -> anyhow::Result<()> {
     println!("model     {}", idn.model);
     println!("serial    {}", idn.serial);
     println!("installed {}", idn.firmware);
-    println!("latest    {} (from config `latest_firmware`; check rigol.com)", cfg.latest_firmware);
-    let short = |v: &str| v.split('.').map(|p| p.parse::<u32>().unwrap_or(0)).collect::<Vec<_>>();
+    println!(
+        "latest    {} (from config `latest_firmware`; check rigol.com)",
+        cfg.latest_firmware
+    );
+    let short = |v: &str| {
+        v.split('.')
+            .map(|p| p.parse::<u32>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
     let (inst, latest) = (short(&idn.firmware), short(&cfg.latest_firmware));
     if inst.len() >= latest.len() && inst >= latest {
         println!("→ up to date");
     } else if inst.len() < latest.len() && latest.starts_with(&inst) {
-        println!("→ *IDN? reports a shortened version; compare in Utility → System → About on the scope");
+        println!(
+            "→ *IDN? reports a shortened version; compare in Utility → System → About on the scope"
+        );
     } else {
         println!("→ update available, see `mho954 fw update`");
     }
@@ -757,7 +957,12 @@ fn stats(samples: &[f64]) -> String {
     let min = samples.iter().copied().fold(f64::INFINITY, f64::min);
     let max = samples.iter().copied().fold(0.0, f64::max);
     let mean = samples.iter().sum::<f64>() / samples.len() as f64;
-    format!("mean {:.1} ms  min {:.1}  max {:.1}", mean * 1e3, min * 1e3, max * 1e3)
+    format!(
+        "mean {:.1} ms  min {:.1}  max {:.1}",
+        mean * 1e3,
+        min * 1e3,
+        max * 1e3
+    )
 }
 
 fn time<R>(f: impl FnOnce() -> R) -> (R, f64) {
@@ -791,7 +996,12 @@ fn bench(s: &mut Scope, n: usize) -> anyhow::Result<()> {
 
     let (png, dt) = time(|| s.screenshot());
     let png = png?;
-    println!("screenshot           {:.0} ms, {} bytes, {:.2} MB/s", dt * 1e3, png.len(), png.len() as f64 / dt / 1e6);
+    println!(
+        "screenshot           {:.0} ms, {} bytes, {:.2} MB/s",
+        dt * 1e3,
+        png.len(),
+        png.len() as f64 / dt / 1e6
+    );
 
     if s.trigger_status()? == "STOP" {
         let (w, dt) = time(|| s.raw_waveform("CHAN1", &mut |_, _| {}));
@@ -837,7 +1047,13 @@ fn probe(s: &mut Scope, output: Option<&Path>) -> anyhow::Result<()> {
             Ok(v) => (true, v.unwrap_or_default()),
             Err(e) => (false, e.to_string()),
         };
-        println!("{:<28} {:>7.1} ms  {}{}", q, dt * 1e3, if ok { "" } else { "ERROR " }, resp);
+        println!(
+            "{:<28} {:>7.1} ms  {}{}",
+            q,
+            dt * 1e3,
+            if ok { "" } else { "ERROR " },
+            resp
+        );
         results.push(serde_json::json!({ "query": q, "ok": ok, "ms": dt * 1e3, "response": resp }));
     }
     report.insert("queries".into(), results.into());
@@ -846,7 +1062,10 @@ fn probe(s: &mut Scope, output: Option<&Path>) -> anyhow::Result<()> {
     let (w, dt) = time(|| s.screen_waveform("CHAN1", None));
     match w {
         Ok(w) => {
-            let (min, max) = w.raw.iter().fold((u16::MAX, 0u16), |(a, b), &x| (a.min(x), b.max(x)));
+            let (min, max) = w
+                .raw
+                .iter()
+                .fold((u16::MAX, 0u16), |(a, b), &x| (a.min(x), b.max(x)));
             let low_bits_used = w.raw.iter().any(|&x| x & 0x000f != 0);
             println!(
                 "screen waveform CH1          {:>7.1} ms  {} pts, codes {min}..{max}, low nibble used: {low_bits_used}",
@@ -861,18 +1080,31 @@ fn probe(s: &mut Scope, output: Option<&Path>) -> anyhow::Result<()> {
         }
         Err(e) => {
             println!("screen waveform CH1          ERROR {e}");
-            report.insert("waveform".into(), serde_json::json!({ "error": e.to_string() }));
+            report.insert(
+                "waveform".into(),
+                serde_json::json!({ "error": e.to_string() }),
+            );
         }
     }
     let (png, dt) = time(|| s.screenshot());
     match png {
         Ok(p) => {
-            println!("screenshot                   {:>7.1} ms  {} bytes", dt * 1e3, p.len());
-            report.insert("screenshot".into(), serde_json::json!({ "ms": dt * 1e3, "bytes": p.len() }));
+            println!(
+                "screenshot                   {:>7.1} ms  {} bytes",
+                dt * 1e3,
+                p.len()
+            );
+            report.insert(
+                "screenshot".into(),
+                serde_json::json!({ "ms": dt * 1e3, "bytes": p.len() }),
+            );
         }
         Err(e) => {
             println!("screenshot                   ERROR {e}");
-            report.insert("screenshot".into(), serde_json::json!({ "error": e.to_string() }));
+            report.insert(
+                "screenshot".into(),
+                serde_json::json!({ "error": e.to_string() }),
+            );
         }
     }
     if let Some(path) = output {

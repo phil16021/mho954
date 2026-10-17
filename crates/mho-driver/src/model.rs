@@ -77,7 +77,9 @@ impl Idn {
     pub fn parse(s: &str) -> Result<Self> {
         let parts: Vec<&str> = s.trim().splitn(4, ',').map(str::trim).collect();
         if parts.len() < 4 {
-            return Err(DriverError::Invalid(format!("unexpected *IDN? response {s:?}")));
+            return Err(DriverError::Invalid(format!(
+                "unexpected *IDN? response {s:?}"
+            )));
         }
         Ok(Idn {
             manufacturer: parts[0].into(),
@@ -224,7 +226,10 @@ impl Preamble {
             .collect::<std::result::Result<_, _>>()
             .map_err(|e| DriverError::Invalid(format!("preamble {s:?}: {e}")))?;
         if f.len() < 10 {
-            return Err(DriverError::Invalid(format!("preamble has {} fields: {s:?}", f.len())));
+            return Err(DriverError::Invalid(format!(
+                "preamble has {} fields: {s:?}",
+                f.len()
+            )));
         }
         Ok(Preamble {
             format: f[0] as u8,
@@ -345,8 +350,18 @@ pub struct NetworkUpdate {
 /// Validates an IPv4 address as the scope accepts it: first octet 0–223 except 127
 /// (`mask = true`: plain dotted quad with contiguous one-bits).
 pub fn validate_ipv4(s: &str, mask: bool) -> Result<String> {
-    let invalid = || DriverError::Invalid(format!("invalid {} {s:?}", if mask { "subnet mask" } else { "IPv4 address" }));
-    let octets: Vec<u8> = s.trim().split('.').map(|p| p.parse::<u8>()).collect::<std::result::Result<_, _>>().map_err(|_| invalid())?;
+    let invalid = || {
+        DriverError::Invalid(format!(
+            "invalid {} {s:?}",
+            if mask { "subnet mask" } else { "IPv4 address" }
+        ))
+    };
+    let octets: Vec<u8> = s
+        .trim()
+        .split('.')
+        .map(|p| p.parse::<u8>())
+        .collect::<std::result::Result<_, _>>()
+        .map_err(|_| invalid())?;
     if octets.len() != 4 {
         return Err(invalid());
     }
@@ -358,7 +373,11 @@ pub fn validate_ipv4(s: &str, mask: bool) -> Result<String> {
     } else if octets[0] > 223 || octets[0] == 127 {
         return Err(invalid());
     }
-    Ok(octets.iter().map(u8::to_string).collect::<Vec<_>>().join("."))
+    Ok(octets
+        .iter()
+        .map(u8::to_string)
+        .collect::<Vec<_>>()
+        .join("."))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -372,18 +391,33 @@ pub struct OptionInfo {
 /// `d3` → `D3`).
 pub fn normalize_source(s: &str) -> Result<String> {
     let u = s.trim().to_ascii_uppercase();
-    let invalid = || DriverError::Invalid(format!("unknown source {s:?} (use CHAN1..4, MATH1..4, D0..D15)"));
+    let invalid = || {
+        DriverError::Invalid(format!(
+            "unknown source {s:?} (use CHAN1..4, MATH1..4, D0..D15)"
+        ))
+    };
     let digits_after = |prefixes: &[&str]| -> Option<u8> {
-        prefixes.iter().find_map(|p| u.strip_prefix(p).and_then(|rest| rest.parse::<u8>().ok()))
+        prefixes
+            .iter()
+            .find_map(|p| u.strip_prefix(p).and_then(|rest| rest.parse::<u8>().ok()))
     };
     if let Ok(n) = u.parse::<u8>() {
-        return (1..=CHANNELS).contains(&n).then(|| format!("CHAN{n}")).ok_or_else(invalid);
+        return (1..=CHANNELS)
+            .contains(&n)
+            .then(|| format!("CHAN{n}"))
+            .ok_or_else(invalid);
     }
     if let Some(n) = digits_after(&["CHANNEL", "CHAN", "CH", "C"]) {
-        return (1..=CHANNELS).contains(&n).then(|| format!("CHAN{n}")).ok_or_else(invalid);
+        return (1..=CHANNELS)
+            .contains(&n)
+            .then(|| format!("CHAN{n}"))
+            .ok_or_else(invalid);
     }
     if let Some(n) = digits_after(&["MATH", "M"]) {
-        return (1..=4).contains(&n).then(|| format!("MATH{n}")).ok_or_else(invalid);
+        return (1..=4)
+            .contains(&n)
+            .then(|| format!("MATH{n}"))
+            .ok_or_else(invalid);
     }
     if let Some(n) = digits_after(&["D"]) {
         return (n <= 15).then(|| format!("D{n}")).ok_or_else(invalid);
@@ -403,7 +437,8 @@ mod tests {
     #[test]
     fn parses_real_preamble() {
         // Captured from the MHO954 (FW 00.01.00), CH1 at 50 mV/div, 2 µs/div.
-        let p = Preamble::parse("1,0,1000,1,2.000000E-8,-1.000000E-5,0.000000,6.6667E-06,0,32768").unwrap();
+        let p = Preamble::parse("1,0,1000,1,2.000000E-8,-1.000000E-5,0.000000,6.6667E-06,0,32768")
+            .unwrap();
         assert_eq!(p.points, 1000);
         assert_eq!(p.format, 1);
         assert_eq!(p.volts(32768), 0.0);
@@ -432,12 +467,18 @@ mod tests {
 
     #[test]
     fn ipv4_validation() {
-        assert_eq!(validate_ipv4(" 192.168.1.20 ", false).unwrap(), "192.168.1.20");
+        assert_eq!(
+            validate_ipv4(" 192.168.1.20 ", false).unwrap(),
+            "192.168.1.20"
+        );
         assert!(validate_ipv4("127.0.0.1", false).is_err());
         assert!(validate_ipv4("224.0.0.1", false).is_err());
         assert!(validate_ipv4("10.0.0", false).is_err());
         assert!(validate_ipv4("10.0.0.1;*RST", false).is_err());
-        assert_eq!(validate_ipv4("255.255.255.0", true).unwrap(), "255.255.255.0");
+        assert_eq!(
+            validate_ipv4("255.255.255.0", true).unwrap(),
+            "255.255.255.0"
+        );
         assert!(validate_ipv4("255.0.255.0", true).is_err());
     }
 

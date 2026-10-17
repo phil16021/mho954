@@ -17,17 +17,21 @@ pub const CH_COLORS: [Color32; 4] = [
     Color32::from_rgb(70, 130, 255),
 ];
 
-const DEPTHS: &[&str] = &["AUTO", "1k", "10k", "100k", "1M", "10M", "25M", "50M", "100M", "125M", "200M", "250M", "500M"];
+const DEPTHS: &[&str] = &[
+    "AUTO", "1k", "10k", "100k", "1M", "10M", "25M", "50M", "100M", "125M", "200M", "250M", "500M",
+];
 const H_DIVS: f64 = 10.0;
 const V_DIVS: f64 = 8.0;
 
 fn channel_color(source: &str) -> Color32 {
-    channel_of(source).map(|n| CH_COLORS[(n - 1) as usize]).unwrap_or(Color32::LIGHT_GRAY)
+    channel_of(source)
+        .map(|n| CH_COLORS[(n - 1) as usize])
+        .unwrap_or(Color32::LIGHT_GRAY)
 }
 
 /// Next value in a 1-2-5 sequence.
 fn step_125(v: f64, up: bool) -> f64 {
-    if !(v > 0.0) {
+    if v.is_nan() || v <= 0.0 {
         return 1.0;
     }
     let e = v.log10().floor();
@@ -37,7 +41,11 @@ fn step_125(v: f64, up: bool) -> f64 {
     let idx = seq.iter().position(|&s| m <= s * 1.001).unwrap_or(3);
     let snapped = seq[idx];
     let new = if up {
-        if (m - snapped).abs() < 1e-3 * snapped { seq.get(idx + 1).copied().unwrap_or(20.0) } else { snapped }
+        if (m - snapped).abs() < 1e-3 * snapped {
+            seq.get(idx + 1).copied().unwrap_or(20.0)
+        } else {
+            snapped
+        }
     } else if (m - snapped).abs() < 1e-3 * snapped {
         if idx == 0 { 0.5 } else { seq[idx - 1] }
     } else if idx == 0 {
@@ -210,10 +218,15 @@ impl ScopeApp {
             "screenshot",
             move |api| async move {
                 let png = api.screenshot().await?;
-                let path = dir.join(format!("mho954-{}.png", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+                let path = dir.join(format!(
+                    "mho954-{}.png",
+                    chrono::Local::now().format("%Y%m%d-%H%M%S")
+                ));
                 std::fs::create_dir_all(&dir)
                     .and_then(|_| std::fs::write(&path, png))
-                    .map_err(|e| mho_service::ApiError::new(mho_service::ErrorKind::Internal, e.to_string()))?;
+                    .map_err(|e| {
+                        mho_service::ApiError::new(mho_service::ErrorKind::Internal, e.to_string())
+                    })?;
                 Ok(path)
             },
             |sh: &mut Shared, p: PathBuf| sh.log(format!("saved {}", p.display()), false),
@@ -222,15 +235,23 @@ impl ScopeApp {
 
     fn export_csv(&self, frame: &Frame) {
         let dir = self.capture_dir.clone();
-        let path = dir.join(format!("mho954-{}.csv", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+        let path = dir.join(format!(
+            "mho954-{}.csv",
+            chrono::Local::now().format("%Y%m%d-%H%M%S")
+        ));
         let volts: Vec<Vec<f64>> = frame.traces.iter().map(|t| t.volts()).collect();
         let cols: Vec<mho_dsp::export::CsvColumn<'_>> = frame
             .traces
             .iter()
             .zip(&volts)
-            .map(|(t, v)| mho_dsp::export::CsvColumn { name: &t.source, volts: v })
+            .map(|(t, v)| mho_dsp::export::CsvColumn {
+                name: &t.source,
+                volts: v,
+            })
             .collect();
-        let Some(first) = frame.traces.first() else { return };
+        let Some(first) = frame.traces.first() else {
+            return;
+        };
         let r = std::fs::create_dir_all(&dir).and_then(|_| {
             let f = std::io::BufWriter::new(std::fs::File::create(&path)?);
             mho_dsp::export::write_csv(f, first.preamble.time(0), first.preamble.x_increment, &cols)
@@ -249,16 +270,28 @@ impl ScopeApp {
             "RAW capture",
             move |api| async move {
                 let w = api.waveform(source, WaveMode::Raw).await?;
-                let stem = format!("mho954-{}-{}", w.source, chrono::Local::now().format("%Y%m%d-%H%M%S"));
+                let stem = format!(
+                    "mho954-{}-{}",
+                    w.source,
+                    chrono::Local::now().format("%Y%m%d-%H%M%S")
+                );
                 let path = dir.join(format!("{stem}.npy"));
-                let io = |e: std::io::Error| mho_service::ApiError::new(mho_service::ErrorKind::Internal, e.to_string());
+                let io = |e: std::io::Error| {
+                    mho_service::ApiError::new(mho_service::ErrorKind::Internal, e.to_string())
+                };
                 std::fs::create_dir_all(&dir).map_err(io)?;
                 mho_dsp::export::write_npy(&path, &w.raw).map_err(io)?;
                 let meta = serde_json::json!({ "source": w.source, "preamble": w.preamble });
-                std::fs::write(path.with_extension("json"), serde_json::to_vec_pretty(&meta).unwrap()).map_err(io)?;
+                std::fs::write(
+                    path.with_extension("json"),
+                    serde_json::to_vec_pretty(&meta).unwrap(),
+                )
+                .map_err(io)?;
                 Ok((path, w.raw.len()))
             },
-            |sh: &mut Shared, (p, n): (PathBuf, usize)| sh.log(format!("RAW {n} pts → {}", p.display()), false),
+            |sh: &mut Shared, (p, n): (PathBuf, usize)| {
+                sh.log(format!("RAW {n} pts → {}", p.display()), false)
+            },
         );
     }
 
@@ -266,11 +299,21 @@ impl ScopeApp {
 
     fn header(&mut self, ui: &mut egui::Ui, s: &Snapshot) {
         ui.horizontal_wrapped(|ui| {
-            let model = s.info.as_ref().and_then(|i| i.idn.as_ref()).map(|i| i.model.clone()).unwrap_or("MHO954".into());
+            let model = s
+                .info
+                .as_ref()
+                .and_then(|i| i.idn.as_ref())
+                .map(|i| i.model.clone())
+                .unwrap_or("MHO954".into());
             ui.heading(model);
             let (txt, col) = match (&s.info, s.ws_connected) {
-                (Some(i), true) if i.connected => (format!("connected: {}", i.connection), Color32::LIGHT_GREEN),
-                (Some(i), _) => (format!("disconnected: {}", i.connection), Color32::LIGHT_RED),
+                (Some(i), true) if i.connected => {
+                    (format!("connected: {}", i.connection), Color32::LIGHT_GREEN)
+                }
+                (Some(i), _) => (
+                    format!("disconnected: {}", i.connection),
+                    Color32::LIGHT_RED,
+                ),
                 (None, _) => ("server unreachable".to_string(), Color32::LIGHT_RED),
             };
             ui.label(RichText::new(txt).color(col));
@@ -327,11 +370,17 @@ impl ScopeApp {
         let tb = &st.timebase;
         ui.horizontal(|ui| {
             if ui.small_button("−").clicked() {
-                self.set_timebase(TimebaseUpdate { scale: Some(step_125(tb.scale, false)), ..Default::default() });
+                self.set_timebase(TimebaseUpdate {
+                    scale: Some(step_125(tb.scale, false)),
+                    ..Default::default()
+                });
             }
             ui.label(RichText::new(format!("{}/div", format_si(tb.scale, "s"))).monospace());
             if ui.small_button("+").clicked() {
-                self.set_timebase(TimebaseUpdate { scale: Some(step_125(tb.scale, true)), ..Default::default() });
+                self.set_timebase(TimebaseUpdate {
+                    scale: Some(step_125(tb.scale, true)),
+                    ..Default::default()
+                });
             }
         });
         ui.horizontal(|ui| {
@@ -347,11 +396,17 @@ impl ScopeApp {
                 self.tb_offset_edit = Some(v);
             }
             if (r.drag_stopped() || r.lost_focus()) && self.tb_offset_edit.is_some() {
-                self.set_timebase(TimebaseUpdate { offset: Some(v), ..Default::default() });
+                self.set_timebase(TimebaseUpdate {
+                    offset: Some(v),
+                    ..Default::default()
+                });
                 self.tb_offset_edit = None;
             }
             if ui.small_button("0").clicked() {
-                self.set_timebase(TimebaseUpdate { offset: Some(0.0), ..Default::default() });
+                self.set_timebase(TimebaseUpdate {
+                    offset: Some(0.0),
+                    ..Default::default()
+                });
             }
         });
 
@@ -359,24 +414,43 @@ impl ScopeApp {
         ui.label(RichText::new("Trigger").strong());
         let tr = &st.trigger;
         ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("trig_src").selected_text(&tr.edge_source).width(70.0).show_ui(ui, |ui| {
-                for n in 1..=CHANNELS {
-                    let src = format!("CHAN{n}");
-                    if ui.selectable_label(tr.edge_source == src, &src).clicked() {
-                        self.set_trigger(TriggerUpdate { edge_source: Some(src), ..Default::default() });
+            egui::ComboBox::from_id_salt("trig_src")
+                .selected_text(&tr.edge_source)
+                .width(70.0)
+                .show_ui(ui, |ui| {
+                    for n in 1..=CHANNELS {
+                        let src = format!("CHAN{n}");
+                        if ui.selectable_label(tr.edge_source == src, &src).clicked() {
+                            self.set_trigger(TriggerUpdate {
+                                edge_source: Some(src),
+                                ..Default::default()
+                            });
+                        }
                     }
-                }
-            });
-            for (slope, label) in [(Slope::Positive, "Rise"), (Slope::Negative, "Fall"), (Slope::Either, "Both")] {
+                });
+            for (slope, label) in [
+                (Slope::Positive, "Rise"),
+                (Slope::Negative, "Fall"),
+                (Slope::Either, "Both"),
+            ] {
                 if ui.selectable_label(tr.edge_slope == slope, label).clicked() {
-                    self.set_trigger(TriggerUpdate { edge_slope: Some(slope), ..Default::default() });
+                    self.set_trigger(TriggerUpdate {
+                        edge_slope: Some(slope),
+                        ..Default::default()
+                    });
                 }
             }
         });
         ui.horizontal(|ui| {
             for sweep in TriggerSweep::ALL {
-                if ui.selectable_label(tr.sweep == *sweep, format!("{sweep:?}")).clicked() {
-                    self.set_trigger(TriggerUpdate { sweep: Some(*sweep), ..Default::default() });
+                if ui
+                    .selectable_label(tr.sweep == *sweep, format!("{sweep:?}"))
+                    .clicked()
+                {
+                    self.set_trigger(TriggerUpdate {
+                        sweep: Some(*sweep),
+                        ..Default::default()
+                    });
                 }
             }
         });
@@ -397,7 +471,10 @@ impl ScopeApp {
                 self.trig_level_edit = Some(v);
             }
             if (r.drag_stopped() || r.lost_focus()) && self.trig_level_edit.is_some() {
-                self.set_trigger(TriggerUpdate { edge_level: Some(v), ..Default::default() });
+                self.set_trigger(TriggerUpdate {
+                    edge_level: Some(v),
+                    ..Default::default()
+                });
                 self.trig_level_edit = None;
             }
         });
@@ -405,22 +482,40 @@ impl ScopeApp {
         ui.separator();
         ui.label(RichText::new("Acquisition").strong());
         let acq = &st.acquire;
-        ui.label(format!("{}  ·  {} pts", format_si(acq.sample_rate, "Sa/s"), acq.memory_depth.map(|d| format_si(d, "")).unwrap_or_else(|| "?".into())));
+        ui.label(format!(
+            "{}  ·  {} pts",
+            format_si(acq.sample_rate, "Sa/s"),
+            acq.memory_depth
+                .map(|d| format_si(d, ""))
+                .unwrap_or_else(|| "?".into())
+        ));
         ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("mdepth").selected_text("depth").width(70.0).show_ui(ui, |ui| {
-                for d in DEPTHS {
-                    if ui.selectable_label(false, *d).clicked() {
-                        self.set_acquire(AcquireUpdate { memory_depth: Some((*d).to_string()), ..Default::default() });
+            egui::ComboBox::from_id_salt("mdepth")
+                .selected_text("depth")
+                .width(70.0)
+                .show_ui(ui, |ui| {
+                    for d in DEPTHS {
+                        if ui.selectable_label(false, *d).clicked() {
+                            self.set_acquire(AcquireUpdate {
+                                memory_depth: Some((*d).to_string()),
+                                ..Default::default()
+                            });
+                        }
                     }
-                }
-            });
+                });
             egui::ComboBox::from_id_salt("acqtype")
                 .selected_text(format!("{:?}", acq.acq_type))
                 .width(80.0)
                 .show_ui(ui, |ui| {
                     for t in AcquireType::ALL {
-                        if ui.selectable_label(acq.acq_type == *t, format!("{t:?}")).clicked() {
-                            self.set_acquire(AcquireUpdate { acq_type: Some(*t), ..Default::default() });
+                        if ui
+                            .selectable_label(acq.acq_type == *t, format!("{t:?}"))
+                            .clicked()
+                        {
+                            self.set_acquire(AcquireUpdate {
+                                acq_type: Some(*t),
+                                ..Default::default()
+                            });
                         }
                     }
                 });
@@ -433,19 +528,29 @@ impl ScopeApp {
                 self.screenshot();
             }
             if let Some(f) = &s.frame
-                && ui.button("CSV").on_hover_text("Export the displayed waveforms").clicked()
+                && ui
+                    .button("CSV")
+                    .on_hover_text("Export the displayed waveforms")
+                    .clicked()
             {
                 self.export_csv(f);
             }
         });
         ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("raw_src").selected_text(&self.raw_source).width(70.0).show_ui(ui, |ui| {
-                for n in 1..=CHANNELS {
-                    let src = format!("CHAN{n}");
-                    ui.selectable_value(&mut self.raw_source, src.clone(), &src);
-                }
-            });
-            if ui.button("RAW to .npy").on_hover_text("Full memory of the channel; stop the scope first").clicked() {
+            egui::ComboBox::from_id_salt("raw_src")
+                .selected_text(&self.raw_source)
+                .width(70.0)
+                .show_ui(ui, |ui| {
+                    for n in 1..=CHANNELS {
+                        let src = format!("CHAN{n}");
+                        ui.selectable_value(&mut self.raw_source, src.clone(), &src);
+                    }
+                });
+            if ui
+                .button("RAW to .npy")
+                .on_hover_text("Full memory of the channel; stop the scope first")
+                .clicked()
+            {
                 self.capture_raw();
             }
         });
@@ -456,18 +561,27 @@ impl ScopeApp {
             let mut fps = live.max_fps;
             let r = ui.add(egui::Slider::new(&mut fps, 1.0..=60.0).text("max fps"));
             if r.drag_stopped() || (r.changed() && !r.dragged()) {
-                self.set_live(LiveConfig { max_fps: fps, ..live.clone() });
+                self.set_live(LiveConfig {
+                    max_fps: fps,
+                    ..live.clone()
+                });
             }
         }
 
         ui.separator();
-        egui::CollapsingHeader::new(RichText::new("Network (RJ45)").strong()).default_open(false).show(ui, |ui| {
-            self.network_controls(ui, s);
-        });
+        egui::CollapsingHeader::new(RichText::new("Network (RJ45)").strong())
+            .default_open(false)
+            .show(ui, |ui| {
+                self.network_controls(ui, s);
+            });
 
         ui.separator();
         for (msg, err) in &s.log {
-            ui.label(RichText::new(msg).small().color(if *err { Color32::LIGHT_RED } else { Color32::GRAY }));
+            ui.label(RichText::new(msg).small().color(if *err {
+                Color32::LIGHT_RED
+            } else {
+                Color32::GRAY
+            }));
         }
     }
 
@@ -505,20 +619,34 @@ impl ScopeApp {
                 mdns: n.mdns,
             };
         }
-        let col = if n.status == "CONNECTED" || n.status == "CONFIGURED" { Color32::LIGHT_GREEN } else { Color32::GRAY };
+        let col = if n.status == "CONNECTED" || n.status == "CONFIGURED" {
+            Color32::LIGHT_GREEN
+        } else {
+            Color32::GRAY
+        };
         ui.label(RichText::new(format!("{}  ·  MAC {}", n.status, n.mac)).color(col));
         ui.horizontal(|ui| {
-            for (m, label) in [(IpMode::Dhcp, "DHCP"), (IpMode::AutoIp, "Auto-IP"), (IpMode::Static, "Static")] {
+            for (m, label) in [
+                (IpMode::Dhcp, "DHCP"),
+                (IpMode::AutoIp, "Auto-IP"),
+                (IpMode::Static, "Static"),
+            ] {
                 ui.selectable_value(&mut f.mode, Some(m), label);
             }
         });
         let static_mode = f.mode == Some(IpMode::Static);
         egui::Grid::new("netgrid").num_columns(2).show(ui, |ui| {
-            for (label, value) in
-                [("IP", &mut f.ip), ("Mask", &mut f.mask), ("Gateway", &mut f.gateway), ("DNS", &mut f.dns)]
-            {
+            for (label, value) in [
+                ("IP", &mut f.ip),
+                ("Mask", &mut f.mask),
+                ("Gateway", &mut f.gateway),
+                ("DNS", &mut f.dns),
+            ] {
                 ui.label(label);
-                ui.add_enabled(static_mode, egui::TextEdit::singleline(value).desired_width(130.0));
+                ui.add_enabled(
+                    static_mode,
+                    egui::TextEdit::singleline(value).desired_width(130.0),
+                );
                 ui.end_row();
             }
             ui.label("Hostname");
@@ -528,7 +656,10 @@ impl ScopeApp {
         ui.checkbox(&mut f.mdns, "mDNS");
         let (mut apply, mut reload) = (false, false);
         ui.horizontal(|ui| {
-            apply = ui.button("Apply").on_hover_text("Sends the settings and :LAN:APPLy").clicked();
+            apply = ui
+                .button("Apply")
+                .on_hover_text("Sends the settings and :LAN:APPLy")
+                .clicked();
             reload = ui.button("Reload").clicked();
         });
         if apply {
@@ -556,7 +687,11 @@ impl ScopeApp {
             self.net_form.loaded = false;
             self.load_network();
         }
-        ui.label(RichText::new("WLAN (USB dongle) has no SCPI interface; configure it on the scope.").small().weak());
+        ui.label(
+            RichText::new("WLAN (USB dongle) has no SCPI interface; configure it on the scope.")
+                .small()
+                .weak(),
+        );
     }
 
     fn channel_controls(&mut self, ui: &mut egui::Ui, c: &ChannelState) {
@@ -566,19 +701,47 @@ impl ScopeApp {
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, n <= 2)
             .show_header(ui, |ui| {
                 let mut on = c.display;
-                if ui.checkbox(&mut on, RichText::new(format!("CH{n}")).color(color).strong()).changed() {
-                    self.set_channel(n, ChannelUpdate { display: Some(on), ..Default::default() });
+                if ui
+                    .checkbox(
+                        &mut on,
+                        RichText::new(format!("CH{n}")).color(color).strong(),
+                    )
+                    .changed()
+                {
+                    self.set_channel(
+                        n,
+                        ChannelUpdate {
+                            display: Some(on),
+                            ..Default::default()
+                        },
+                    );
                 }
-                ui.label(RichText::new(format!("{}/div", format_si(c.scale, "V"))).monospace().color(color));
+                ui.label(
+                    RichText::new(format!("{}/div", format_si(c.scale, "V")))
+                        .monospace()
+                        .color(color),
+                );
             })
             .body(|ui| {
                 ui.horizontal(|ui| {
                     if ui.small_button("−").clicked() {
-                        self.set_channel(n, ChannelUpdate { scale: Some(step_125(c.scale, false)), ..Default::default() });
+                        self.set_channel(
+                            n,
+                            ChannelUpdate {
+                                scale: Some(step_125(c.scale, false)),
+                                ..Default::default()
+                            },
+                        );
                     }
                     ui.label("V/div");
                     if ui.small_button("+").clicked() {
-                        self.set_channel(n, ChannelUpdate { scale: Some(step_125(c.scale, true)), ..Default::default() });
+                        self.set_channel(
+                            n,
+                            ChannelUpdate {
+                                scale: Some(step_125(c.scale, true)),
+                                ..Default::default()
+                            },
+                        );
                     }
                     ui.label("offset");
                     let idx = (n - 1) as usize;
@@ -593,85 +756,152 @@ impl ScopeApp {
                         self.offset_edit[idx] = Some(v);
                     }
                     if (r.drag_stopped() || r.lost_focus()) && self.offset_edit[idx].is_some() {
-                        self.set_channel(n, ChannelUpdate { offset: Some(v), ..Default::default() });
+                        self.set_channel(
+                            n,
+                            ChannelUpdate {
+                                offset: Some(v),
+                                ..Default::default()
+                            },
+                        );
                         self.offset_edit[idx] = None;
                     }
                     if ui.small_button("0").clicked() {
-                        self.set_channel(n, ChannelUpdate { offset: Some(0.0), ..Default::default() });
+                        self.set_channel(
+                            n,
+                            ChannelUpdate {
+                                offset: Some(0.0),
+                                ..Default::default()
+                            },
+                        );
                     }
                 });
                 ui.horizontal(|ui| {
                     for cp in Coupling::ALL {
                         if ui.selectable_label(c.coupling == *cp, cp.scpi()).clicked() {
-                            self.set_channel(n, ChannelUpdate { coupling: Some(*cp), ..Default::default() });
+                            self.set_channel(
+                                n,
+                                ChannelUpdate {
+                                    coupling: Some(*cp),
+                                    ..Default::default()
+                                },
+                            );
                         }
                     }
                     ui.separator();
                     for (imp, label) in [(Impedance::OneMeg, "1MΩ"), (Impedance::Fifty, "50Ω")] {
                         if ui.selectable_label(c.impedance == imp, label).clicked() {
-                            self.set_channel(n, ChannelUpdate { impedance: Some(imp), ..Default::default() });
+                            self.set_channel(
+                                n,
+                                ChannelUpdate {
+                                    impedance: Some(imp),
+                                    ..Default::default()
+                                },
+                            );
                         }
                     }
                 });
                 ui.horizontal(|ui| {
                     ui.label("BWL");
                     for bwl in ["OFF", "20M", "250M"] {
-                        if ui.selectable_label(c.bw_limit.eq_ignore_ascii_case(bwl), bwl).clicked() {
-                            self.set_channel(n, ChannelUpdate { bw_limit: Some(bwl.into()), ..Default::default() });
+                        if ui
+                            .selectable_label(c.bw_limit.eq_ignore_ascii_case(bwl), bwl)
+                            .clicked()
+                        {
+                            self.set_channel(
+                                n,
+                                ChannelUpdate {
+                                    bw_limit: Some(bwl.into()),
+                                    ..Default::default()
+                                },
+                            );
                         }
                     }
                     ui.separator();
                     for p in [1.0, 10.0, 100.0] {
-                        if ui.selectable_label((c.probe - p).abs() < 1e-9, format!("{p}x")).clicked() {
-                            self.set_channel(n, ChannelUpdate { probe: Some(p), ..Default::default() });
+                        if ui
+                            .selectable_label((c.probe - p).abs() < 1e-9, format!("{p}x"))
+                            .clicked()
+                        {
+                            self.set_channel(
+                                n,
+                                ChannelUpdate {
+                                    probe: Some(p),
+                                    ..Default::default()
+                                },
+                            );
                         }
                     }
                     let mut inv = c.invert;
                     if ui.checkbox(&mut inv, "inv").changed() {
-                        self.set_channel(n, ChannelUpdate { invert: Some(inv), ..Default::default() });
+                        self.set_channel(
+                            n,
+                            ChannelUpdate {
+                                invert: Some(inv),
+                                ..Default::default()
+                            },
+                        );
                     }
                 });
             });
     }
 
-    fn measurements_panel(&mut self, ui: &mut egui::Ui, s: &Snapshot, local: &[(String, Measurements)]) {
-        let opt = |v: Option<f64>, u: &str| v.map(|v| format_si(v, u)).unwrap_or_else(|| "---".into());
-        egui::Grid::new("local_meas").striped(true).spacing([18.0, 2.0]).show(ui, |ui| {
-            for h in ["", "Vpp", "Vmax", "Vmin", "Vavg", "Vrms", "Freq", "Period", "Duty", "Rise", "Fall"] {
-                ui.label(RichText::new(h).strong());
-            }
-            ui.end_row();
-            for (src, m) in local {
-                ui.label(RichText::new(src).color(channel_color(src)).strong());
-                if m.samples == 0 {
-                    ui.label(RichText::new("no data (scope reports a constant full-scale code)").weak());
-                    ui.end_row();
-                    continue;
-                }
-                for v in [
-                    format_si(m.vpp, "V"),
-                    format_si(m.vmax, "V"),
-                    format_si(m.vmin, "V"),
-                    format_si(m.vavg, "V"),
-                    format_si(m.vrms, "V"),
-                    opt(m.frequency, "Hz"),
-                    opt(m.period, "s"),
-                    opt(m.duty, "%"),
-                    opt(m.rise_time, "s"),
-                    opt(m.fall_time, "s"),
+    fn measurements_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        s: &Snapshot,
+        local: &[(String, Measurements)],
+    ) {
+        let opt =
+            |v: Option<f64>, u: &str| v.map(|v| format_si(v, u)).unwrap_or_else(|| "---".into());
+        egui::Grid::new("local_meas")
+            .striped(true)
+            .spacing([18.0, 2.0])
+            .show(ui, |ui| {
+                for h in [
+                    "", "Vpp", "Vmax", "Vmin", "Vavg", "Vrms", "Freq", "Period", "Duty", "Rise",
+                    "Fall",
                 ] {
-                    ui.label(RichText::new(v).monospace());
+                    ui.label(RichText::new(h).strong());
                 }
                 ui.end_row();
-            }
-        });
+                for (src, m) in local {
+                    ui.label(RichText::new(src).color(channel_color(src)).strong());
+                    if m.samples == 0 {
+                        ui.label(
+                            RichText::new("no data (scope reports a constant full-scale code)")
+                                .weak(),
+                        );
+                        ui.end_row();
+                        continue;
+                    }
+                    for v in [
+                        format_si(m.vpp, "V"),
+                        format_si(m.vmax, "V"),
+                        format_si(m.vmin, "V"),
+                        format_si(m.vavg, "V"),
+                        format_si(m.vrms, "V"),
+                        opt(m.frequency, "Hz"),
+                        opt(m.period, "s"),
+                        opt(m.duty, "%"),
+                        opt(m.rise_time, "s"),
+                        opt(m.fall_time, "s"),
+                    ] {
+                        ui.label(RichText::new(v).monospace());
+                    }
+                    ui.end_row();
+                }
+            });
 
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Scope:").strong());
             if let (Some(m), Some(live)) = (&s.measurements, &s.live) {
                 for (i, v) in m.values.iter().enumerate() {
                     let txt = format!("{} {} = {}", v.source, v.item, opt(v.value, &v.unit));
-                    ui.label(RichText::new(txt).monospace().color(channel_color(&v.source)));
+                    ui.label(
+                        RichText::new(txt)
+                            .monospace()
+                            .color(channel_color(&v.source)),
+                    );
                     if ui.small_button("x").on_hover_text("remove").clicked() {
                         let mut cfg = live.clone();
                         if i < cfg.measurements.len() {
@@ -682,23 +912,32 @@ impl ScopeApp {
                     ui.separator();
                 }
             }
-            egui::ComboBox::from_id_salt("meas_item").selected_text(&self.new_meas_item).width(80.0).show_ui(ui, |ui| {
-                for it in MEASURE_ITEMS.iter().filter(|i| !i.dual_source) {
-                    ui.selectable_value(&mut self.new_meas_item, it.token.to_string(), it.long)
-                        .on_hover_text(it.description);
-                }
-            });
-            egui::ComboBox::from_id_salt("meas_src").selected_text(&self.new_meas_source).width(70.0).show_ui(ui, |ui| {
-                for n in 1..=CHANNELS {
-                    let src = format!("CHAN{n}");
-                    ui.selectable_value(&mut self.new_meas_source, src.clone(), &src);
-                }
-            });
+            egui::ComboBox::from_id_salt("meas_item")
+                .selected_text(&self.new_meas_item)
+                .width(80.0)
+                .show_ui(ui, |ui| {
+                    for it in MEASURE_ITEMS.iter().filter(|i| !i.dual_source) {
+                        ui.selectable_value(&mut self.new_meas_item, it.token.to_string(), it.long)
+                            .on_hover_text(it.description);
+                    }
+                });
+            egui::ComboBox::from_id_salt("meas_src")
+                .selected_text(&self.new_meas_source)
+                .width(70.0)
+                .show_ui(ui, |ui| {
+                    for n in 1..=CHANNELS {
+                        let src = format!("CHAN{n}");
+                        ui.selectable_value(&mut self.new_meas_source, src.clone(), &src);
+                    }
+                });
             if let Some(live) = &s.live
                 && ui.button("+ add").clicked()
             {
                 let mut cfg = live.clone();
-                cfg.measurements.push(MeasureSpec { item: self.new_meas_item.clone(), source: self.new_meas_source.clone() });
+                cfg.measurements.push(MeasureSpec {
+                    item: self.new_meas_item.clone(),
+                    source: self.new_meas_source.clone(),
+                });
                 self.set_live(cfg);
             }
         });
@@ -712,30 +951,55 @@ impl ScopeApp {
         let status = s.status.as_ref();
         let chan_state = |src: &str| -> Option<ChannelState> {
             let n = channel_of(src)?;
-            status.and_then(|st| st.channels.get((n - 1) as usize)).cloned()
+            status
+                .and_then(|st| st.channels.get((n - 1) as usize))
+                .cloned()
         };
-        let y_mode = if status.is_some() { self.y_mode } else { YMode::Volts };
+        let y_mode = if status.is_some() {
+            self.y_mode
+        } else {
+            YMode::Volts
+        };
 
         let (t0, t1) = frame
             .traces
             .first()
-            .map(|t| (t.preamble.time(0), t.preamble.time(t.raw.len().saturating_sub(1))))
+            .map(|t| {
+                (
+                    t.preamble.time(0),
+                    t.preamble.time(t.raw.len().saturating_sub(1)),
+                )
+            })
             .unwrap_or((0.0, 1.0));
-        let tdiv = status.map(|s| s.timebase.scale).unwrap_or((t1 - t0) / H_DIVS);
+        let tdiv = status
+            .map(|s| s.timebase.scale)
+            .unwrap_or((t1 - t0) / H_DIVS);
 
         let mut plot = Plot::new("scope")
             .height(height)
             .legend(Legend::default())
             .show_background(true)
             .allow_double_click_reset(true)
-            .x_axis_formatter(move |m, _| format_si(if m.value.abs() < tdiv * 1e-6 { 0.0 } else { m.value }, "s"))
+            .x_axis_formatter(move |m, _| {
+                format_si(
+                    if m.value.abs() < tdiv * 1e-6 {
+                        0.0
+                    } else {
+                        m.value
+                    },
+                    "s",
+                )
+            })
             .x_grid_spacer(move |input| {
                 let (lo, hi) = input.bounds;
                 let start = t0 + ((lo - t0) / tdiv).floor() * tdiv;
                 let mut marks = Vec::new();
                 let mut x = start;
                 while x <= hi && marks.len() < 200 {
-                    marks.push(GridMark { value: x, step_size: tdiv });
+                    marks.push(GridMark {
+                        value: x,
+                        step_size: tdiv,
+                    });
                     x += tdiv;
                 }
                 marks
@@ -746,7 +1010,10 @@ impl ScopeApp {
                 .y_grid_spacer(|input| {
                     let (lo, hi) = input.bounds;
                     (lo.floor() as i64..=hi.ceil() as i64)
-                        .map(|v| GridMark { value: v as f64, step_size: 1.0 })
+                        .map(|v| GridMark {
+                            value: v as f64,
+                            step_size: 1.0,
+                        })
                         .collect()
                 })
                 .default_y_bounds(-V_DIVS / 2.0, V_DIVS / 2.0),
@@ -783,7 +1050,11 @@ impl ScopeApp {
                         [w.preamble.time(i), y]
                     })
                     .collect();
-                pui.line(Line::new(w.source.clone(), pts).color(channel_color(&w.source)).width(1.2));
+                pui.line(
+                    Line::new(w.source.clone(), pts)
+                        .color(channel_color(&w.source))
+                        .width(1.2),
+                );
             }
             if let Some(t) = &trig
                 && let Some(cs) = chan_state(&t.edge_source)
@@ -798,15 +1069,28 @@ impl ScopeApp {
                         .style(LineStyle::dashed_loose()),
                 );
             }
-            pui.vline(VLine::new("T", 0.0).color(Color32::from_rgb(255, 140, 0)).style(LineStyle::dotted_dense()));
+            pui.vline(
+                VLine::new("T", 0.0)
+                    .color(Color32::from_rgb(255, 140, 0))
+                    .style(LineStyle::dotted_dense()),
+            );
             if let Some(a) = cursor_a {
                 pui.vline(VLine::new("cursor A", a).color(Color32::WHITE));
             }
             if let Some(b) = cursor_b {
-                pui.vline(VLine::new("cursor B", b).color(Color32::LIGHT_GRAY).style(LineStyle::dashed_dense()));
+                pui.vline(
+                    VLine::new("cursor B", b)
+                        .color(Color32::LIGHT_GRAY)
+                        .style(LineStyle::dashed_dense()),
+                );
             }
             let pointer = pui.pointer_coordinate();
-            (pointer, pui.response().clicked(), pui.response().secondary_clicked(), pui.response().middle_clicked())
+            (
+                pointer,
+                pui.response().clicked(),
+                pui.response().secondary_clicked(),
+                pui.response().middle_clicked(),
+            )
         });
         let (pointer, left, right, middle) = resp.inner;
         if let Some(p) = pointer {
@@ -845,7 +1129,10 @@ impl ScopeApp {
                     ui.label(RichText::new(format!("{name}: {}", format_si(t, "s"))).strong());
                     for w in &frame.traces {
                         if let Some(v) = value_at(w, t) {
-                            ui.label(RichText::new(format!("{} {}", w.source, format_si(v, "V"))).color(channel_color(&w.source)));
+                            ui.label(
+                                RichText::new(format!("{} {}", w.source, format_si(v, "V")))
+                                    .color(channel_color(&w.source)),
+                            );
                         }
                     }
                     ui.separator();
@@ -853,10 +1140,20 @@ impl ScopeApp {
             }
             if let (Some(a), Some(b)) = (self.cursor_a, self.cursor_b) {
                 let dt = b - a;
-                ui.label(RichText::new(format!("Δt {}  1/Δt {}", format_si(dt, "s"), format_si(1.0 / dt.abs(), "Hz"))).strong());
+                ui.label(
+                    RichText::new(format!(
+                        "Δt {}  1/Δt {}",
+                        format_si(dt, "s"),
+                        format_si(1.0 / dt.abs(), "Hz")
+                    ))
+                    .strong(),
+                );
                 for w in &frame.traces {
                     if let (Some(va), Some(vb)) = (value_at(w, a), value_at(w, b)) {
-                        ui.label(RichText::new(format!("Δ{} {}", w.source, format_si(vb - va, "V"))).color(channel_color(&w.source)));
+                        ui.label(
+                            RichText::new(format!("Δ{} {}", w.source, format_si(vb - va, "V")))
+                                .color(channel_color(&w.source)),
+                        );
                     }
                 }
             }
@@ -867,16 +1164,38 @@ impl ScopeApp {
         ui.horizontal(|ui| {
             ui.label(RichText::new("FFT").strong());
             for w in &frame.traces {
-                ui.selectable_value(&mut self.fft_source, w.source.clone(), RichText::new(&w.source).color(channel_color(&w.source)));
+                ui.selectable_value(
+                    &mut self.fft_source,
+                    w.source.clone(),
+                    RichText::new(&w.source).color(channel_color(&w.source)),
+                );
             }
             ui.separator();
-            for (win, label) in [(Window::Rectangular, "Rect"), (Window::Hann, "Hann"), (Window::Blackman, "Blackman"), (Window::FlatTop, "FlatTop")] {
+            for (win, label) in [
+                (Window::Rectangular, "Rect"),
+                (Window::Hann, "Hann"),
+                (Window::Blackman, "Blackman"),
+                (Window::FlatTop, "FlatTop"),
+            ] {
                 ui.selectable_value(&mut self.fft_window, win, label);
             }
         });
-        let Some(w) = frame.traces.iter().find(|t| t.source == self.fft_source).or(frame.traces.first()) else { return };
+        let Some(w) = frame
+            .traces
+            .iter()
+            .find(|t| t.source == self.fft_source)
+            .or(frame.traces.first())
+        else {
+            return;
+        };
         let spec = mho_dsp::spectrum(&w.volts(), w.preamble.x_increment, self.fft_window);
-        let pts: PlotPoints = spec.dbv.iter().enumerate().skip(1).map(|(k, &d)| [spec.frequency(k), d]).collect();
+        let pts: PlotPoints = spec
+            .dbv
+            .iter()
+            .enumerate()
+            .skip(1)
+            .map(|(k, &d)| [spec.frequency(k), d])
+            .collect();
         let peaks = spec.peaks(3);
         Plot::new("fft")
             .include_y(-140.0)
@@ -889,7 +1208,8 @@ impl ScopeApp {
                     pui.text(egui_plot::Text::new(
                         "peak",
                         egui_plot::PlotPoint::new(p.frequency, p.dbv + 3.0),
-                        RichText::new(format!("{} {:.1} dBV", format_si(p.frequency, "Hz"), p.dbv)).small(),
+                        RichText::new(format!("{} {:.1} dBV", format_si(p.frequency, "Hz"), p.dbv))
+                            .small(),
                     ));
                 }
             });
@@ -938,30 +1258,42 @@ impl eframe::App for ScopeApp {
                     .map(|t| {
                         // The MHO954 returns 0xFFFF for every point of channels it has no data for.
                         let invalid = t.raw.iter().all(|&r| r == u16::MAX);
-                        (t.source.clone(), if invalid { Measurements::default() } else { t.analyze() })
+                        (
+                            t.source.clone(),
+                            if invalid {
+                                Measurements::default()
+                            } else {
+                                t.analyze()
+                            },
+                        )
                     })
                     .collect()
             })
             .unwrap_or_default();
 
         egui::Panel::top("header").show(ui, |ui| self.header(ui, &s));
-        egui::Panel::right("controls").resizable(true).default_size(320.0).show(ui, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| self.controls(ui, &s));
-        });
-        egui::Panel::bottom("measurements").resizable(true).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.y_mode, YMode::Divisions, "div");
-                ui.selectable_value(&mut self.y_mode, YMode::Volts, "volts");
-                ui.separator();
-                ui.checkbox(&mut self.show_fft, "FFT");
-                ui.separator();
-                if let Some(f) = &s.frame {
-                    self.cursor_readout(ui, f);
-                }
+        egui::Panel::right("controls")
+            .resizable(true)
+            .default_size(320.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.controls(ui, &s));
             });
-            ui.separator();
-            self.measurements_panel(ui, &s, &local);
-        });
+        egui::Panel::bottom("measurements")
+            .resizable(true)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.y_mode, YMode::Divisions, "div");
+                    ui.selectable_value(&mut self.y_mode, YMode::Volts, "volts");
+                    ui.separator();
+                    ui.checkbox(&mut self.show_fft, "FFT");
+                    ui.separator();
+                    if let Some(f) = &s.frame {
+                        self.cursor_readout(ui, f);
+                    }
+                });
+                ui.separator();
+                self.measurements_panel(ui, &s, &local);
+            });
         egui::CentralPanel::default().show(ui, |ui| {
             let total = ui.available_height();
             let main_h = if self.show_fft { total * 0.62 } else { total };

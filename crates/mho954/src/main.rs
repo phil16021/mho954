@@ -10,7 +10,11 @@ use clap::{Parser, Subcommand};
 use crate::config::Config;
 
 #[derive(Parser)]
-#[command(name = "mho954", version, about = "Control the Rigol MHO954 oscilloscope: live view, REST API, MCP server, CLI")]
+#[command(
+    name = "mho954",
+    version,
+    about = "Control the Rigol MHO954 oscilloscope: live view, REST API, MCP server, CLI"
+)]
 pub struct Cli {
     /// Config file (default ~/.config/mho954/config.toml).
     #[arg(long, global = true, env = "MHO954_CONFIG")]
@@ -155,8 +159,11 @@ fn init_logging(verbose: u8, stderr_only: bool) {
         2 => "debug",
         _ => "trace",
     };
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| level.into());
-    let builder = tracing_subscriber::fmt().with_env_filter(filter).with_target(false);
+    let filter =
+        tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| level.into());
+    let builder = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false);
     if stderr_only {
         builder.with_writer(std::io::stderr).init();
     } else {

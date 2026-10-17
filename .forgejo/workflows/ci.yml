@@ -1,0 +1,21 @@
+# Runs on the host runner (label apps-ws) with the system Rust toolchain.
+# No hardware access: hardware tests are #[ignore] and gated by MHO954_HW=1.
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: apps-ws
+    env:
+      CARGO_TERM_COLOR: never
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v4
+      - name: fmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        run: cargo test --workspace

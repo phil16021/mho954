@@ -16,7 +16,10 @@ pub enum ScpiError {
 
 impl ScpiError {
     pub fn parse(cmd: &str, msg: impl Into<String>) -> Self {
-        ScpiError::Parse { cmd: cmd.to_string(), msg: msg.into() }
+        ScpiError::Parse {
+            cmd: cmd.to_string(),
+            msg: msg.into(),
+        }
     }
 
     pub fn is_timeout(&self) -> bool {
@@ -29,7 +32,10 @@ impl ScpiError {
 }
 
 pub(crate) fn is_timeout_io(e: &io::Error) -> bool {
-    matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock)
+    matches!(
+        e.kind(),
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+    )
 }
 
 pub type Result<T, E = ScpiError> = std::result::Result<T, E>;

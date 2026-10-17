@@ -29,7 +29,10 @@ fn host_name(authority: &str) -> &str {
 }
 
 fn is_loopback_host(host: &str) -> bool {
-    matches!(host_name(host).to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "::1")
+    matches!(
+        host_name(host).to_ascii_lowercase().as_str(),
+        "localhost" | "127.0.0.1" | "::1"
+    )
 }
 
 fn origin_is_loopback(origin: &str) -> bool {
@@ -42,20 +45,30 @@ fn deny(status: StatusCode, msg: &str) -> Response {
     (status, axum::Json(ApiError::new(ErrorKind::Forbidden, msg))).into_response()
 }
 
-fn check(cfg: &GuardConfig, method: &Method, headers: &HeaderMap) -> Result<(), Response> {
+fn check(cfg: &GuardConfig, method: &Method, headers: &HeaderMap) -> Result<(), Box<Response>> {
     if cfg.loopback_only {
-        let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("");
+        let host = headers
+            .get(header::HOST)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
         if !is_loopback_host(host) {
-            return Err(deny(StatusCode::FORBIDDEN, "host not allowed"));
+            return Err(Box::new(deny(StatusCode::FORBIDDEN, "host not allowed")));
         }
     }
     let upgrade = headers.get(header::UPGRADE).is_some();
     let changes_state = !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) || upgrade;
-    if changes_state && let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
-        let host = headers.get(header::HOST).and_then(|v| v.to_str().ok()).unwrap_or("");
+    if changes_state && let Some(origin) = headers.get(header::ORIGIN).and_then(|v| v.to_str().ok())
+    {
+        let host = headers
+            .get(header::HOST)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
         let same_origin = origin.split_once("://").map(|(_, r)| r) == Some(host);
         if !same_origin && !origin_is_loopback(origin) {
-            return Err(deny(StatusCode::FORBIDDEN, "cross-origin request refused"));
+            return Err(Box::new(deny(
+                StatusCode::FORBIDDEN,
+                "cross-origin request refused",
+            )));
         }
     }
     if let Some(token) = &cfg.token {
@@ -63,9 +76,14 @@ fn check(cfg: &GuardConfig, method: &Method, headers: &HeaderMap) -> Result<(), 
             .get(header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "));
-        let ok = given.is_some_and(|g| g.len() == token.len() && g.bytes().zip(token.bytes()).all(|(a, b)| a == b));
+        let ok = given.is_some_and(|g| {
+            g.len() == token.len() && g.bytes().zip(token.bytes()).all(|(a, b)| a == b)
+        });
         if !ok {
-            return Err(deny(StatusCode::UNAUTHORIZED, "missing or wrong API token"));
+            return Err(Box::new(deny(
+                StatusCode::UNAUTHORIZED,
+                "missing or wrong API token",
+            )));
         }
     }
     Ok(())
@@ -74,7 +92,7 @@ fn check(cfg: &GuardConfig, method: &Method, headers: &HeaderMap) -> Result<(), 
 pub async fn guard(State(cfg): State<GuardConfig>, req: Request, next: Next) -> Response {
     match check(&cfg, req.method(), req.headers()) {
         Ok(()) => next.run(req).await,
-        Err(resp) => resp,
+        Err(resp) => *resp,
     }
 }
 
@@ -93,31 +111,54 @@ mod tests {
 
     #[test]
     fn host_rules() {
-        let cfg = GuardConfig { loopback_only: true, token: None };
+        let cfg = GuardConfig {
+            loopback_only: true,
+            token: None,
+        };
         assert!(check(&cfg, &Method::GET, &headers(&[("host", "127.0.0.1:8954")])).is_ok());
         assert!(check(&cfg, &Method::GET, &headers(&[("host", "localhost")])).is_ok());
         assert!(check(&cfg, &Method::GET, &headers(&[("host", "[::1]:8954")])).is_ok());
-        assert!(check(&cfg, &Method::GET, &headers(&[("host", "evil.example:8954")])).is_err());
+        assert!(
+            check(
+                &cfg,
+                &Method::GET,
+                &headers(&[("host", "evil.example:8954")])
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn origin_rules() {
-        let cfg = GuardConfig { loopback_only: true, token: None };
+        let cfg = GuardConfig {
+            loopback_only: true,
+            token: None,
+        };
         let h = |o: &str| headers(&[("host", "127.0.0.1:8954"), ("origin", o)]);
         assert!(check(&cfg, &Method::PUT, &h("https://evil.example")).is_err());
         assert!(check(&cfg, &Method::PUT, &h("http://127.0.0.1:8954")).is_ok());
         assert!(check(&cfg, &Method::PUT, &h("http://localhost:3000")).is_ok());
         // Reads are allowed; the browser's same-origin policy keeps the response private.
         assert!(check(&cfg, &Method::GET, &h("https://evil.example")).is_ok());
-        let ws = headers(&[("host", "127.0.0.1:8954"), ("origin", "https://evil.example"), ("upgrade", "websocket")]);
+        let ws = headers(&[
+            ("host", "127.0.0.1:8954"),
+            ("origin", "https://evil.example"),
+            ("upgrade", "websocket"),
+        ]);
         assert!(check(&cfg, &Method::GET, &ws).is_err());
     }
 
     #[test]
     fn token_rules() {
-        let cfg = GuardConfig { loopback_only: false, token: Some("s3cret".into()) };
+        let cfg = GuardConfig {
+            loopback_only: false,
+            token: Some("s3cret".into()),
+        };
         assert!(check(&cfg, &Method::GET, &headers(&[("host", "10.0.0.5:8954")])).is_err());
-        let ok = headers(&[("host", "10.0.0.5:8954"), ("authorization", "Bearer s3cret")]);
+        let ok = headers(&[
+            ("host", "10.0.0.5:8954"),
+            ("authorization", "Bearer s3cret"),
+        ]);
         assert!(check(&cfg, &Method::GET, &ok).is_ok());
         let bad = headers(&[("host", "10.0.0.5:8954"), ("authorization", "Bearer nope")]);
         assert!(check(&cfg, &Method::GET, &bad).is_err());

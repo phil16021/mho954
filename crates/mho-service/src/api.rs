@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use mho_driver::{
-    AcquireState, AcquireUpdate, Action, ChannelState, ChannelUpdate, DriverError, Idn, Measurement,
-    NetworkState, NetworkUpdate, OptionInfo, ScopeStatus, TimebaseState, TimebaseUpdate, TriggerState, TriggerUpdate, WaveMode, Waveform,
+    AcquireState, AcquireUpdate, Action, ChannelState, ChannelUpdate, DriverError, Idn,
+    Measurement, NetworkState, NetworkUpdate, OptionInfo, ScopeStatus, TimebaseState,
+    TimebaseUpdate, TriggerState, TriggerUpdate, WaveMode, Waveform,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -27,7 +28,9 @@ pub enum ErrorKind {
     Internal,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema, thiserror::Error)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema, thiserror::Error,
+)]
 #[error("{message}")]
 pub struct ApiError {
     pub kind: ErrorKind,
@@ -36,7 +39,10 @@ pub struct ApiError {
 
 impl ApiError {
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
-        ApiError { kind, message: message.into() }
+        ApiError {
+            kind,
+            message: message.into(),
+        }
     }
 
     pub fn invalid(message: impl Into<String>) -> Self {
@@ -58,7 +64,9 @@ impl From<DriverError> for ApiError {
             DriverError::State(_) => ErrorKind::Conflict,
             DriverError::Scpi(s) if s.is_timeout() => ErrorKind::Timeout,
             DriverError::Scpi(mho_scpi::ScpiError::NotFound(_)) => ErrorKind::Unavailable,
-            DriverError::Scpi(mho_scpi::ScpiError::Io(io)) if io.kind() == std::io::ErrorKind::NotFound => {
+            DriverError::Scpi(mho_scpi::ScpiError::Io(io))
+                if io.kind() == std::io::ErrorKind::NotFound =>
+            {
                 ErrorKind::Unavailable
             }
             DriverError::Scpi(mho_scpi::ScpiError::Parse { .. }) => ErrorKind::Protocol,

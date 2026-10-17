@@ -28,13 +28,17 @@ impl McpScope {
 }
 
 fn ok_json<T: Serialize>(v: &T) -> ToolResult {
-    let text = serde_json::to_string_pretty(v).map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+    let text = serde_json::to_string_pretty(v)
+        .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
     Ok(CallToolResult::success(vec![ContentBlock::text(text)]))
 }
 
 /// Scope/API errors are reported as tool errors so the model can read and react to them.
 fn tool_error(e: ApiError) -> ToolResult {
-    Ok(CallToolResult::error(vec![ContentBlock::text(format!("{:?}: {}", e.kind, e.message))]))
+    Ok(CallToolResult::error(vec![ContentBlock::text(format!(
+        "{:?}: {}",
+        e.kind, e.message
+    ))]))
 }
 
 macro_rules! try_api {
@@ -109,50 +113,66 @@ struct WaveformSummary {
 
 #[tool_router]
 impl McpScope {
-    #[tool(description = "Identify the connected oscilloscope (model, serial, firmware) and the connection state.")]
+    #[tool(
+        description = "Identify the connected oscilloscope (model, serial, firmware) and the connection state."
+    )]
     async fn identify(&self) -> ToolResult {
         ok_json(&try_api!(self.api.info().await))
     }
 
-    #[tool(description = "Read the complete scope state: all 4 channels (on/off, V/div, offset, coupling, \
-        bandwidth limit, probe ratio, 50Ω/1MΩ), timebase, trigger and acquisition settings, trigger status.")]
+    #[tool(
+        description = "Read the complete scope state: all 4 channels (on/off, V/div, offset, coupling, \
+        bandwidth limit, probe ratio, 50Ω/1MΩ), timebase, trigger and acquisition settings, trigger status."
+    )]
     async fn get_status(&self) -> ToolResult {
         ok_json(&try_api!(self.api.status().await))
     }
 
-    #[tool(description = "Change settings of one analog channel. Only the given fields are changed. \
-        scale is volts/div, offset in volts, coupling DC|AC|GND, impedance OneMeg|Fifty, bw_limit OFF|20M|250M.")]
+    #[tool(
+        description = "Change settings of one analog channel. Only the given fields are changed. \
+        scale is volts/div, offset in volts, coupling DC|AC|GND, impedance OneMeg|Fifty, bw_limit OFF|20M|250M."
+    )]
     async fn configure_channel(&self, Parameters(p): Parameters<ConfigureChannel>) -> ToolResult {
         ok_json(&try_api!(self.api.set_channel(p.channel, p.settings).await))
     }
 
-    #[tool(description = "Change the timebase: scale in seconds/div, offset (trigger position) in seconds, mode MAIN|XY|ROLL.")]
+    #[tool(
+        description = "Change the timebase: scale in seconds/div, offset (trigger position) in seconds, mode MAIN|XY|ROLL."
+    )]
     async fn configure_timebase(&self, Parameters(p): Parameters<TimebaseUpdate>) -> ToolResult {
         ok_json(&try_api!(self.api.set_timebase(p).await))
     }
 
-    #[tool(description = "Change the edge trigger: edge_source (CHAN1..4), edge_slope (Positive|Negative|Either), \
-        edge_level in volts, sweep (Auto|Normal|Single), coupling, holdoff in seconds.")]
+    #[tool(
+        description = "Change the edge trigger: edge_source (CHAN1..4), edge_slope (Positive|Negative|Either), \
+        edge_level in volts, sweep (Auto|Normal|Single), coupling, holdoff in seconds."
+    )]
     async fn configure_trigger(&self, Parameters(p): Parameters<TriggerUpdate>) -> ToolResult {
         ok_json(&try_api!(self.api.set_trigger(p).await))
     }
 
-    #[tool(description = "Change acquisition: memory_depth (AUTO, 1k, 10k, 100k, 1M, 10M, 25M, 50M, 100M; up to 500M with RLU-05), \
-        acq_type (Normal|Peak|Average|HighRes), averages (power of two).")]
+    #[tool(
+        description = "Change acquisition: memory_depth (AUTO, 1k, 10k, 100k, 1M, 10M, 25M, 50M, 100M; up to 500M with RLU-05), \
+        acq_type (Normal|Peak|Average|HighRes), averages (power of two)."
+    )]
     async fn configure_acquisition(&self, Parameters(p): Parameters<AcquireUpdate>) -> ToolResult {
         ok_json(&try_api!(self.api.set_acquire(p).await))
     }
 
-    #[tool(description = "Front-panel actions: run, stop, single (arm one acquisition), autoscale, clear, force (force trigger).")]
+    #[tool(
+        description = "Front-panel actions: run, stop, single (arm one acquisition), autoscale, clear, force (force trigger)."
+    )]
     async fn run_control(&self, Parameters(p): Parameters<RunControl>) -> ToolResult {
         let action = try_api!(Action::from_scpi(&p.action).map_err(ApiError::from));
         try_api!(self.api.action(action).await);
         ok_json(&serde_json::json!({ "done": p.action }))
     }
 
-    #[tool(description = "Scope-side automatic measurements, e.g. items [\"VPP\",\"FREQ\",\"VRMS\",\"RTIM\"] on source CHAN1. \
+    #[tool(
+        description = "Scope-side automatic measurements, e.g. items [\"VPP\",\"FREQ\",\"VRMS\",\"RTIM\"] on source CHAN1. \
         Delay/phase items (RRDELAY, RRPHASE, ...) need source2. A null value means the scope cannot measure it \
-        on the current signal. See list_measurement_items for all items.")]
+        on the current signal. See list_measurement_items for all items."
+    )]
     async fn measure(&self, Parameters(p): Parameters<MeasureRequest>) -> ToolResult {
         ok_json(&try_api!(self.api.measure(p).await))
     }
@@ -162,17 +182,27 @@ impl McpScope {
         ok_json(&MEASURE_ITEMS)
     }
 
-    #[tool(description = "Compute measurements locally from the screen waveform (Vpp, Vrms, mean, top/base, \
-        frequency, duty, rise/fall time, overshoot). Fast and independent of the scope's measurement engine.")]
+    #[tool(
+        description = "Compute measurements locally from the screen waveform (Vpp, Vrms, mean, top/base, \
+        frequency, duty, rise/fall time, overshoot). Fast and independent of the scope's measurement engine."
+    )]
     async fn analyze_waveform(&self, Parameters(p): Parameters<SourceArg>) -> ToolResult {
         let w = try_api!(self.api.waveform(p.source, WaveMode::Normal).await);
-        ok_json(&serde_json::json!({ "source": w.source, "points": w.raw.len(), "measurements": w.analyze() }))
+        ok_json(
+            &serde_json::json!({ "source": w.source, "points": w.raw.len(), "measurements": w.analyze() }),
+        )
     }
 
-    #[tool(description = "Fetch a waveform as (time, volts) samples plus local measurements. Inline data is \
-        decimated to max_points; use save_as to store the complete record as CSV or NPY.")]
+    #[tool(
+        description = "Fetch a waveform as (time, volts) samples plus local measurements. Inline data is \
+        decimated to max_points; use save_as to store the complete record as CSV or NPY."
+    )]
     async fn get_waveform(&self, Parameters(p): Parameters<GetWaveform>) -> ToolResult {
-        let mode = if p.raw { WaveMode::Raw } else { WaveMode::Normal };
+        let mode = if p.raw {
+            WaveMode::Raw
+        } else {
+            WaveMode::Normal
+        };
         let w = try_api!(self.api.waveform(p.source, mode).await);
         let volts = w.volts();
         let saved_to = match &p.save_as {
@@ -197,12 +227,22 @@ impl McpScope {
         })
     }
 
-    #[tool(description = "Spectrum analysis (FFT) of a channel: returns the strongest peaks with frequency, \
-        level in dBV and RMS volts, plus the bin spacing.")]
+    #[tool(
+        description = "Spectrum analysis (FFT) of a channel: returns the strongest peaks with frequency, \
+        level in dBV and RMS volts, plus the bin spacing."
+    )]
     async fn fft_peaks(&self, Parameters(p): Parameters<FftArgs>) -> ToolResult {
-        let mode = if p.raw { WaveMode::Raw } else { WaveMode::Normal };
+        let mode = if p.raw {
+            WaveMode::Raw
+        } else {
+            WaveMode::Normal
+        };
         let w = try_api!(self.api.waveform(p.source, mode).await);
-        let spec = mho_dsp::spectrum(&w.volts(), w.preamble.x_increment, p.window.unwrap_or_default());
+        let spec = mho_dsp::spectrum(
+            &w.volts(),
+            w.preamble.x_increment,
+            p.window.unwrap_or_default(),
+        );
         ok_json(&serde_json::json!({
             "source": w.source,
             "bin_spacing_hz": spec.df,
@@ -215,31 +255,42 @@ impl McpScope {
     async fn screenshot(&self) -> ToolResult {
         let png = try_api!(self.api.screenshot().await);
         let data = base64::engine::general_purpose::STANDARD.encode(png);
-        Ok(CallToolResult::success(vec![ContentBlock::image(data, "image/png")]))
+        Ok(CallToolResult::success(vec![ContentBlock::image(
+            data,
+            "image/png",
+        )]))
     }
 
-    #[tool(description = "Read the scope's LAN (RJ45) settings and link status: DHCP/Auto-IP/static mode, \
-        IP, mask, gateway, DNS, MAC, hostname, mDNS, VISA address.")]
+    #[tool(
+        description = "Read the scope's LAN (RJ45) settings and link status: DHCP/Auto-IP/static mode, \
+        IP, mask, gateway, DNS, MAC, hostname, mDNS, VISA address."
+    )]
     async fn get_network(&self) -> ToolResult {
         ok_json(&try_api!(self.api.network().await))
     }
 
-    #[tool(description = "Change the scope's LAN (RJ45) settings and apply them. mode: Dhcp | AutoIp | Static; \
+    #[tool(
+        description = "Change the scope's LAN (RJ45) settings and apply them. mode: Dhcp | AutoIp | Static; \
         ip/mask/gateway/dns need Static. Ask the user before changing the network of their instrument; \
-        if the scope is controlled over LAN the connection may drop.")]
+        if the scope is controlled over LAN the connection may drop."
+    )]
     async fn configure_network(&self, Parameters(p): Parameters<NetworkUpdate>) -> ToolResult {
         ok_json(&try_api!(self.api.set_network(p).await))
     }
 
-    #[tool(description = "List the scope's software options (bandwidth upgrades, memory, AFG, decoders) and whether each is active.")]
+    #[tool(
+        description = "List the scope's software options (bandwidth upgrades, memory, AFG, decoders) and whether each is active."
+    )]
     async fn list_options(&self) -> ToolResult {
         ok_json(&try_api!(self.api.options().await))
     }
 
-    #[tool(description = "Send a raw SCPI command or query (MHO900 programming guide syntax). Queries contain '?'. \
+    #[tool(
+        description = "Send a raw SCPI command or query (MHO900 programming guide syntax). Queries contain '?'. \
         Only available if the server was started with --allow-raw-scpi. Only send commands documented \
         in the MHO900 programming guide: the scope does not answer unknown queries, and several of them \
-        in a row hang its firmware until it is power-cycled.")]
+        in a row hang its firmware until it is power-cycled."
+    )]
     async fn raw_scpi(&self, Parameters(p): Parameters<ScpiRequest>) -> ToolResult {
         ok_json(&try_api!(self.api.scpi(p).await))
     }
@@ -249,13 +300,20 @@ impl McpScope {
     fn save(&self, name: &str, w: &Waveform, volts: &[f64]) -> Result<String, ApiError> {
         let valid = !name.is_empty()
             && !name.starts_with('.')
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+            && name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
         if !valid {
-            return Err(ApiError::invalid("save_as must be a plain file name like capture1.csv"));
+            return Err(ApiError::invalid(
+                "save_as must be a plain file name like capture1.csv",
+            ));
         }
         const MAX_POINTS: usize = 200_000_000;
         if w.raw.len() > MAX_POINTS {
-            return Err(ApiError::invalid(format!("record too large to save via MCP ({} points)", w.raw.len())));
+            return Err(ApiError::invalid(format!(
+                "record too large to save via MCP ({} points)",
+                w.raw.len()
+            )));
         }
         let io = |e: std::io::Error| ApiError::new(mho_service::ErrorKind::Internal, e.to_string());
         std::fs::create_dir_all(&self.capture_dir).map_err(io)?;
@@ -263,13 +321,20 @@ impl McpScope {
         // Never overwrite (and never follow a planted symlink): create_new fails if anything
         // exists at the path.
         let create = |p: &std::path::Path| {
-            std::fs::OpenOptions::new().write(true).create_new(true).open(p).map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    ApiError::invalid(format!("{} already exists; choose another name", p.display()))
-                } else {
-                    io(e)
-                }
-            })
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(p)
+                .map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::AlreadyExists {
+                        ApiError::invalid(format!(
+                            "{} already exists; choose another name",
+                            p.display()
+                        ))
+                    } else {
+                        io(e)
+                    }
+                })
         };
         if name.ends_with(".csv") {
             let file = create(&path)?;
@@ -277,7 +342,10 @@ impl McpScope {
                 std::io::BufWriter::new(file),
                 w.preamble.time(0),
                 w.preamble.x_increment,
-                &[mho_dsp::export::CsvColumn { name: &w.source, volts }],
+                &[mho_dsp::export::CsvColumn {
+                    name: &w.source,
+                    volts,
+                }],
             )
             .map_err(io)?;
         } else if name.ends_with(".npy") {
@@ -285,9 +353,12 @@ impl McpScope {
             let mut npy = create(&path)?;
             let mut meta_file = create(&meta_path)?;
             use std::io::Write;
-            npy.write_all(&mho_dsp::export::npy_bytes(&w.raw).map_err(io)?).map_err(io)?;
+            npy.write_all(&mho_dsp::export::npy_bytes(&w.raw).map_err(io)?)
+                .map_err(io)?;
             let meta = serde_json::json!({ "source": w.source, "preamble": w.preamble });
-            meta_file.write_all(&serde_json::to_vec_pretty(&meta).unwrap()).map_err(io)?;
+            meta_file
+                .write_all(&serde_json::to_vec_pretty(&meta).unwrap())
+                .map_err(io)?;
         } else {
             return Err(ApiError::invalid("save_as must end in .csv or .npy"));
         }

@@ -84,7 +84,10 @@ impl MockTransport {
     }
 
     fn push(self, cmd: &str, response: Option<Vec<u8>>) -> Self {
-        self.state.lock().unwrap().script.push_back(Expectation { cmd: cmd.to_string(), response });
+        self.state.lock().unwrap().script.push_back(Expectation {
+            cmd: cmd.to_string(),
+            response,
+        });
         self
     }
 }
@@ -108,9 +111,15 @@ impl Transport for MockTransport {
     fn read_some(&mut self, buf: &mut [u8]) -> io::Result<ReadChunk> {
         let mut s = self.state.lock().unwrap();
         if s.pending.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "mock: no pending response"));
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "mock: no pending response",
+            ));
         }
-        let n = buf.len().min(s.pending.len()).min(self.max_read.unwrap_or(usize::MAX));
+        let n = buf
+            .len()
+            .min(s.pending.len())
+            .min(self.max_read.unwrap_or(usize::MAX));
         buf[..n].copy_from_slice(&s.pending[..n]);
         s.pending.drain(..n);
         let end = !self.stream && (self.short_transfers || s.pending.is_empty());

@@ -46,7 +46,11 @@ impl UsbTmcTransport {
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref().to_path_buf();
         let file = OpenOptions::new().read(true).write(true).open(&path)?;
-        let mut t = UsbTmcTransport { path, file, timeout: Duration::from_secs(2) };
+        let mut t = UsbTmcTransport {
+            path,
+            file,
+            timeout: Duration::from_secs(2),
+        };
         t.set_timeout(t.timeout)?;
         Ok(t)
     }
@@ -55,7 +59,10 @@ impl UsbTmcTransport {
     pub fn open_first() -> io::Result<Self> {
         let devices = find_usbtmc_devices();
         let path = devices.first().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::NotFound, "no Rigol /dev/usbtmc* device found")
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "no Rigol /dev/usbtmc* device found",
+            )
         })?;
         Self::open(path)
     }
@@ -79,9 +86,14 @@ impl Transport for UsbTmcTransport {
         let n = self.file.read(&mut buf[..len])?;
         if n == 0 {
             // The driver returns 0 after rejecting a malformed bulk-in header.
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "usbtmc: empty read (protocol desync)"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "usbtmc: empty read (protocol desync)",
+            ));
         }
         let mut attr = 0u8;
+        // SAFETY: valid open fd of a usbtmc device; `attr` outlives the call and matches the
+        // ioctl's `__u8` argument.
         let end = match unsafe { ioctl::msg_in_attr(self.file.as_raw_fd(), &mut attr) } {
             Ok(_) => attr & 1 != 0,
             Err(_) => n < len,
@@ -92,6 +104,7 @@ impl Transport for UsbTmcTransport {
     fn clear(&mut self) -> io::Result<()> {
         let fd = self.file.as_raw_fd();
         // Same sequence that reliably recovered the MHO954 after an unanswered query.
+        // SAFETY: argument-less ioctls on a valid open usbtmc fd.
         unsafe {
             Self::ioctl_result(ioctl::clear_out_halt(fd))?;
             Self::ioctl_result(ioctl::clear_in_halt(fd))?;
@@ -102,6 +115,7 @@ impl Transport for UsbTmcTransport {
     fn set_timeout(&mut self, timeout: Duration) -> io::Result<()> {
         // The driver rejects values below 100 ms.
         let ms = timeout.as_millis().clamp(100, u32::MAX as u128) as u32;
+        // SAFETY: valid open fd; `ms` is a `u32` as the ioctl expects and outlives the call.
         unsafe { Self::ioctl_result(ioctl::set_timeout(self.file.as_raw_fd(), &ms))? };
         self.timeout = timeout;
         Ok(())
@@ -123,7 +137,9 @@ pub fn find_usbtmc_devices() -> Vec<PathBuf> {
     if symlink.exists() {
         found.push(symlink);
     }
-    let Ok(entries) = std::fs::read_dir("/sys/class/usbmisc") else { return found };
+    let Ok(entries) = std::fs::read_dir("/sys/class/usbmisc") else {
+        return found;
+    };
     let mut names: Vec<String> = entries
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
@@ -137,7 +153,9 @@ pub fn find_usbtmc_devices() -> Vec<PathBuf> {
             .map(|v| v.trim().eq_ignore_ascii_case(RIGOL_VID))
             .unwrap_or(false);
         let dev = PathBuf::from(format!("/dev/{name}"));
-        let already = found.iter().any(|p| std::fs::canonicalize(p).ok() == Some(dev.clone()));
+        let already = found
+            .iter()
+            .any(|p| std::fs::canonicalize(p).ok() == Some(dev.clone()));
         if is_rigol && dev.exists() && !already {
             found.push(dev);
         }

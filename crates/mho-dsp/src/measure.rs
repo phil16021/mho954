@@ -6,7 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema, utoipa::ToSchema)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema, utoipa::ToSchema,
+)]
 pub struct Measurements {
     pub vmax: f64,
     pub vmin: f64,
@@ -38,7 +40,11 @@ pub fn analyze(v: &[f64], dt: f64) -> Measurements {
         return Measurements::default();
     }
     let n = v.len() as f64;
-    let (vmin, vmax) = v.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &x| (lo.min(x), hi.max(x)));
+    let (vmin, vmax) = v
+        .iter()
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &x| {
+            (lo.min(x), hi.max(x))
+        });
     let vavg = v.iter().sum::<f64>() / n;
     let vrms = (v.iter().map(|x| x * x).sum::<f64>() / n).sqrt();
     let vrms_ac = (v.iter().map(|x| (x - vavg).powi(2)).sum::<f64>() / n).sqrt();
@@ -84,10 +90,20 @@ pub fn analyze(v: &[f64], dt: f64) -> Measurements {
 
     let lo = vbase + 0.1 * vamp;
     let hi = vbase + 0.9 * vamp;
-    m.rise_time = mean(edges.iter().filter(|e| e.rising).filter_map(|e| transition_time(v, e.pos, lo, hi)))
-        .map(|s| s * dt);
-    m.fall_time = mean(edges.iter().filter(|e| !e.rising).filter_map(|e| transition_time(v, e.pos, hi, lo)))
-        .map(|s| s * dt);
+    m.rise_time = mean(
+        edges
+            .iter()
+            .filter(|e| e.rising)
+            .filter_map(|e| transition_time(v, e.pos, lo, hi)),
+    )
+    .map(|s| s * dt);
+    m.fall_time = mean(
+        edges
+            .iter()
+            .filter(|e| !e.rising)
+            .filter_map(|e| transition_time(v, e.pos, hi, lo)),
+    )
+    .map(|s| s * dt);
     if !edges.is_empty() {
         m.overshoot = Some(((vmax - vtop) / vamp * 100.0).max(0.0));
         m.preshoot = Some(((vbase - vmin) / vamp * 100.0).max(0.0));
@@ -115,12 +131,26 @@ fn top_base(v: &[f64], vmin: f64, vmax: f64) -> (f64, f64) {
     }
     let level = |b: usize| vmin + span * b as f64 / (BINS - 1) as f64;
     let half = BINS / 2;
-    let (top_bin, top_count) = (half..BINS).map(|b| (b, hist[b])).max_by_key(|&(_, c)| c).unwrap();
-    let (base_bin, base_count) = (0..half).map(|b| (b, hist[b])).max_by_key(|&(_, c)| c).unwrap();
+    let (top_bin, top_count) = (half..BINS)
+        .map(|b| (b, hist[b]))
+        .max_by_key(|&(_, c)| c)
+        .unwrap();
+    let (base_bin, base_count) = (0..half)
+        .map(|b| (b, hist[b]))
+        .max_by_key(|&(_, c)| c)
+        .unwrap();
     // A flat level holds a clear share of the samples; otherwise fall back to extremes.
     let threshold = v.len() / 20;
-    let top = if top_count > threshold { level(top_bin) } else { vmax };
-    let base = if base_count > threshold { level(base_bin) } else { vmin };
+    let top = if top_count > threshold {
+        level(top_bin)
+    } else {
+        vmax
+    };
+    let base = if base_count > threshold {
+        level(base_bin)
+    } else {
+        vmin
+    };
     (top, base)
 }
 
@@ -160,8 +190,11 @@ fn find_edges(v: &[f64], mid: f64, hyst: f64) -> Vec<Edge> {
 
 /// Mean high time (rising → next falling edge) relative to the period (in samples).
 fn duty_cycle(edges: &[Edge], period: f64) -> Option<f64> {
-    let highs: Vec<f64> =
-        edges.windows(2).filter(|w| w[0].rising && !w[1].rising).map(|w| w[1].pos - w[0].pos).collect();
+    let highs: Vec<f64> = edges
+        .windows(2)
+        .filter(|w| w[0].rising && !w[1].rising)
+        .map(|w| w[1].pos - w[0].pos)
+        .collect();
     if highs.is_empty() || period <= 0.0 {
         return None;
     }
@@ -172,7 +205,13 @@ fn duty_cycle(edges: &[Edge], period: f64) -> Option<f64> {
 fn transition_time(v: &[f64], pos: f64, from: f64, to: f64) -> Option<f64> {
     let center = pos.round() as isize;
     let rising = to > from;
-    let crosses = |a: f64, b: f64, level: f64| if rising { a < level && b >= level } else { a > level && b <= level };
+    let crosses = |a: f64, b: f64, level: f64| {
+        if rising {
+            a < level && b >= level
+        } else {
+            a > level && b <= level
+        }
+    };
     let interp = |i: usize, level: f64| {
         let (a, b) = (v[i], v[i + 1]);
         i as f64 + if b != a { (level - a) / (b - a) } else { 0.0 }
@@ -207,7 +246,9 @@ mod tests {
     use std::f64::consts::PI;
 
     fn sine(freq: f64, amp: f64, dt: f64, n: usize) -> Vec<f64> {
-        (0..n).map(|i| amp * (2.0 * PI * freq * i as f64 * dt).sin()).collect()
+        (0..n)
+            .map(|i| amp * (2.0 * PI * freq * i as f64 * dt).sin())
+            .collect()
     }
 
     #[test]
@@ -255,7 +296,9 @@ mod tests {
     #[test]
     fn duty_with_single_rising_edge() {
         // high, low, high, low: only one rising edge in the record.
-        let v: Vec<f64> = (0..2000).map(|i| if (i / 500) % 2 == 0 { 3.0 } else { 0.0 }).collect();
+        let v: Vec<f64> = (0..2000)
+            .map(|i| if (i / 500) % 2 == 0 { 3.0 } else { 0.0 })
+            .collect();
         let m = analyze(&v, 1e-6);
         assert!((m.duty.unwrap() - 50.0).abs() < 0.5, "duty {:?}", m.duty);
         assert!((m.frequency.unwrap() - 1e3).abs() < 1.0);

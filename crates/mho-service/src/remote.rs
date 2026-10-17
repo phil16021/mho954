@@ -51,7 +51,9 @@ impl RemoteBackend {
     /// that refuses the request (401/403): it still owns the device.
     pub async fn probe(base: &str, timeout: Duration) -> bool {
         let url = format!("{}/api/v1/info", base.trim_end_matches('/'));
-        let Ok(client) = reqwest::Client::builder().timeout(timeout).build() else { return false };
+        let Ok(client) = reqwest::Client::builder().timeout(timeout).build() else {
+            return false;
+        };
         match client.get(url).send().await {
             Ok(r) => r.status().is_success() || matches!(r.status().as_u16(), 401 | 403),
             Err(_) => false,
@@ -59,7 +61,9 @@ impl RemoteBackend {
     }
 
     fn req(&self, method: Method, path: &str) -> RequestBuilder {
-        let rb = self.client.request(method, format!("{}/api/v1{path}", self.base));
+        let rb = self
+            .client
+            .request(method, format!("{}/api/v1{path}", self.base));
         match &self.token {
             Some(t) => rb.bearer_auth(t),
             None => rb,
@@ -73,20 +77,28 @@ impl RemoteBackend {
         }
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        Err(serde_json::from_str::<ApiError>(&body)
-            .unwrap_or_else(|_| ApiError::new(ErrorKind::Internal, format!("HTTP {status}: {body}"))))
+        Err(serde_json::from_str::<ApiError>(&body).unwrap_or_else(|_| {
+            ApiError::new(ErrorKind::Internal, format!("HTTP {status}: {body}"))
+        }))
     }
 
     async fn json<T: DeserializeOwned>(&self, rb: RequestBuilder) -> ApiResult<T> {
         let resp = Self::check(rb.send().await).await?;
-        resp.json::<T>().await.map_err(|e| ApiError::new(ErrorKind::Internal, format!("bad response: {e}")))
+        resp.json::<T>()
+            .await
+            .map_err(|e| ApiError::new(ErrorKind::Internal, format!("bad response: {e}")))
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str) -> ApiResult<T> {
         self.json(self.req(Method::GET, path)).await
     }
 
-    async fn send<B: Serialize + Sync, T: DeserializeOwned>(&self, method: Method, path: &str, body: &B) -> ApiResult<T> {
+    async fn send<B: Serialize + Sync, T: DeserializeOwned>(
+        &self,
+        method: Method,
+        path: &str,
+        body: &B,
+    ) -> ApiResult<T> {
         self.json(self.req(method, path).json(body)).await
     }
 
@@ -111,7 +123,9 @@ impl RemoteBackend {
             .into_client_request()
             .map_err(|e| ApiError::invalid(format!("websocket {url}: {e}")))?;
         if let Some(t) = &self.token {
-            let value = format!("Bearer {t}").parse().map_err(|_| ApiError::invalid("invalid API token"))?;
+            let value = format!("Bearer {t}")
+                .parse()
+                .map_err(|_| ApiError::invalid("invalid API token"))?;
             request.headers_mut().insert("authorization", value);
         }
         let (ws, _) = tokio_tungstenite::connect_async(request)
@@ -161,7 +175,8 @@ impl ScopeApi for RemoteBackend {
     }
 
     async fn set_channel(&self, n: u8, update: ChannelUpdate) -> ApiResult<ChannelState> {
-        self.send(Method::PUT, &format!("/channels/{n}"), &update).await
+        self.send(Method::PUT, &format!("/channels/{n}"), &update)
+            .await
     }
 
     async fn timebase(&self) -> ApiResult<TimebaseState> {
@@ -190,7 +205,8 @@ impl ScopeApi for RemoteBackend {
 
     async fn action(&self, action: Action) -> ApiResult<()> {
         let name = format!("{action:?}").to_ascii_lowercase();
-        self.empty(self.req(Method::POST, &format!("/actions/{name}"))).await
+        self.empty(self.req(Method::POST, &format!("/actions/{name}")))
+            .await
     }
 
     async fn measure(&self, request: MeasureRequest) -> ApiResult<Vec<Measurement>> {
@@ -199,10 +215,16 @@ impl ScopeApi for RemoteBackend {
 
     async fn waveform(&self, source: String, mode: WaveMode) -> ApiResult<Waveform> {
         let mode = if mode == WaveMode::Raw { "raw" } else { "norm" };
-        let rb = self.req(Method::GET, &format!("/waveform/{source}")).query(&[("mode", mode), ("format", "bin")]);
+        let rb = self
+            .req(Method::GET, &format!("/waveform/{source}"))
+            .query(&[("mode", mode), ("format", "bin")]);
         let bytes = self.bytes(rb).await?;
         let frame = decode_frame(&bytes).map_err(|e| ApiError::new(ErrorKind::Internal, e))?;
-        frame.traces.into_iter().next().ok_or_else(|| ApiError::new(ErrorKind::Internal, "empty waveform"))
+        frame
+            .traces
+            .into_iter()
+            .next()
+            .ok_or_else(|| ApiError::new(ErrorKind::Internal, "empty waveform"))
     }
 
     async fn screenshot(&self) -> ApiResult<Vec<u8>> {
@@ -214,7 +236,11 @@ impl ScopeApi for RemoteBackend {
     }
 
     async fn install_option(&self, key: String) -> ApiResult<()> {
-        self.empty(self.req(Method::POST, "/options/install").json(&serde_json::json!({ "key": key }))).await
+        self.empty(
+            self.req(Method::POST, "/options/install")
+                .json(&serde_json::json!({ "key": key })),
+        )
+        .await
     }
 
     async fn setup_save(&self) -> ApiResult<Vec<u8>> {

@@ -9,7 +9,12 @@ pub use app::ScopeApp;
 
 /// Runs the GUI on the current (main) thread. `url` points at a running server; `rt` drives
 /// the network tasks.
-pub fn run(url: String, token: Option<String>, rt: tokio::runtime::Handle, capture_dir: PathBuf) -> anyhow::Result<()> {
+pub fn run(
+    url: String,
+    token: Option<String>,
+    rt: tokio::runtime::Handle,
+    capture_dir: PathBuf,
+) -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("MHO954")

@@ -45,8 +45,14 @@ impl Default for LiveConfig {
             max_fps: 30.0,
             stopped_fps: 2.0,
             measurements: vec![
-                MeasureSpec { item: "VPP".into(), source: "CHAN1".into() },
-                MeasureSpec { item: "FREQ".into(), source: "CHAN1".into() },
+                MeasureSpec {
+                    item: "VPP".into(),
+                    source: "CHAN1".into(),
+                },
+                MeasureSpec {
+                    item: "FREQ".into(),
+                    source: "CHAN1".into(),
+                },
             ],
             measure_interval_ms: 1000,
             preamble_refresh_ms: 1000,
@@ -88,7 +94,10 @@ pub enum WsText {
 }
 
 pub fn now_ms() -> u64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 #[derive(Clone)]
@@ -144,7 +153,11 @@ struct Cache {
 }
 
 /// Runs until `stop` is cancelled.
-pub(crate) async fn run_loop(device: Device, hub: LiveHub, stop: tokio_util::sync::CancellationToken) {
+pub(crate) async fn run_loop(
+    device: Device,
+    hub: LiveHub,
+    stop: tokio_util::sync::CancellationToken,
+) {
     let mut cache = Cache::default();
     let mut seq: u64 = 0;
     let mut last_frame = Instant::now();
@@ -167,8 +180,10 @@ pub(crate) async fn run_loop(device: Device, hub: LiveHub, stop: tokio_util::syn
 
         let epoch = device.settings_epoch();
         let refresh = cache.epoch != epoch
-            || cache.refreshed.is_none_or(|t| t.elapsed() >= Duration::from_millis(cfg.preamble_refresh_ms));
-        let poll_status = refresh || seq % u64::from(cfg.status_every.max(1)) == 0;
+            || cache
+                .refreshed
+                .is_none_or(|t| t.elapsed() >= Duration::from_millis(cfg.preamble_refresh_ms));
+        let poll_status = refresh || seq.is_multiple_of(u64::from(cfg.status_every.max(1)));
 
         let job_cache = std::mem::take(&mut cache);
         let result = device
@@ -203,7 +218,11 @@ pub(crate) async fn run_loop(device: Device, hub: LiveHub, stop: tokio_util::syn
                 let dt = last_frame.elapsed().as_secs_f64();
                 last_frame = Instant::now();
                 if dt > 0.0 {
-                    fps = if fps == 0.0 { 1.0 / dt } else { 0.8 * fps + 0.2 / dt };
+                    fps = if fps == 0.0 {
+                        1.0 / dt
+                    } else {
+                        0.8 * fps + 0.2 / dt
+                    };
                 }
                 seq += 1;
                 let frame = Frame {
@@ -232,7 +251,8 @@ pub(crate) async fn run_loop(device: Device, hub: LiveHub, stop: tokio_util::syn
         }
 
         let measure_due = !cfg.measurements.is_empty()
-            && last_measure.is_none_or(|t| t.elapsed() >= Duration::from_millis(cfg.measure_interval_ms));
+            && last_measure
+                .is_none_or(|t| t.elapsed() >= Duration::from_millis(cfg.measure_interval_ms));
         if measure_due {
             last_measure = Some(Instant::now());
             let specs = cfg.measurements.clone();
@@ -243,7 +263,9 @@ pub(crate) async fn run_loop(device: Device, hub: LiveHub, stop: tokio_util::syn
                         match scope.measure(&s.item, &s.source, None) {
                             Ok(m) => values.push(m),
                             // Skip invalid specs instead of failing the whole snapshot.
-                            Err(mho_driver::DriverError::Invalid(msg)) => debug!("measure {s:?}: {msg}"),
+                            Err(mho_driver::DriverError::Invalid(msg)) => {
+                                debug!("measure {s:?}: {msg}")
+                            }
                             Err(e) => return Err(e),
                         }
                     }
@@ -252,13 +274,21 @@ pub(crate) async fn run_loop(device: Device, hub: LiveHub, stop: tokio_util::syn
                 .await;
             match r {
                 Ok(values) => {
-                    hub.measurements.send_replace(Some(Arc::new(MeasureSnapshot { timestamp_ms: now_ms(), values })));
+                    hub.measurements
+                        .send_replace(Some(Arc::new(MeasureSnapshot {
+                            timestamp_ms: now_ms(),
+                            values,
+                        })));
                 }
                 Err(e) => warn!("live measurements: {e}"),
             }
         }
 
-        let target_fps = if cache.trigger_status == "STOP" { cfg.stopped_fps } else { cfg.max_fps };
+        let target_fps = if cache.trigger_status == "STOP" {
+            cfg.stopped_fps
+        } else {
+            cfg.max_fps
+        };
         let interval = Duration::from_secs_f64(1.0 / target_fps.clamp(0.1, 1000.0));
         if let Some(rest) = interval.checked_sub(started.elapsed()) {
             tokio::select! {
@@ -300,7 +330,11 @@ pub fn encode_frame(f: &Frame) -> Vec<u8> {
         traces: f
             .traces
             .iter()
-            .map(|t| TraceHeader { source: t.source.clone(), preamble: t.preamble, len: t.raw.len() })
+            .map(|t| TraceHeader {
+                source: t.source.clone(),
+                preamble: t.preamble,
+                len: t.raw.len(),
+            })
             .collect(),
     };
     let json = serde_json::to_vec(&header).expect("frame header serialises");
@@ -325,11 +359,26 @@ pub fn decode_frame(b: &[u8]) -> Result<Frame, String> {
     let mut traces = Vec::with_capacity(header.traces.len());
     for t in header.traces {
         let bytes = data.get(..t.len * 2).ok_or("truncated frame data")?;
-        let raw = bytes.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let raw = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
         data = &data[t.len * 2..];
-        traces.push(Waveform { source: t.source, preamble: t.preamble, raw });
+        traces.push(Waveform {
+            source: t.source,
+            preamble: t.preamble,
+            raw,
+        });
     }
-    Ok(Frame { seq: header.seq, timestamp_ms: header.timestamp_ms, trigger_status: header.trigger_status, fps: header.fps, traces })
+    Ok(Frame {
+        seq: header.seq,
+        timestamp_ms: header.timestamp_ms,
+        trigger_status: header.trigger_status,
+        fps: header.fps,
+        traces,
+    })
 }
 
 #[cfg(test)]
@@ -345,8 +394,16 @@ mod tests {
             trigger_status: "TD".into(),
             fps: 12.5,
             traces: vec![
-                Waveform { source: "CHAN1".into(), preamble: pre, raw: vec![1, 2, 3] },
-                Waveform { source: "CHAN3".into(), preamble: pre, raw: vec![65535, 0] },
+                Waveform {
+                    source: "CHAN1".into(),
+                    preamble: pre,
+                    raw: vec![1, 2, 3],
+                },
+                Waveform {
+                    source: "CHAN3".into(),
+                    preamble: pre,
+                    raw: vec![65535, 0],
+                },
             ],
         };
         assert_eq!(decode_frame(&encode_frame(&f)).unwrap(), f);

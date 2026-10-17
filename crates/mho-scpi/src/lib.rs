@@ -19,4 +19,7 @@ pub use scpi::{MAX_BLOCK, Response, Scpi};
 pub use tcp::TcpTransport;
 pub use transport::{ReadChunk, Transport};
 pub use usbtmc::{MAX_READ as USBTMC_MAX_READ, UsbTmcTransport, find_usbtmc_devices};
-pub use usbtmc_user::{MHO900_PID, NusbBackend, UsbBackend, UsbDeviceInfo, UsbTmc, UsbTmcUserTransport, list_usb_devices};
+pub use usbtmc_user::{
+    MHO900_PID, NusbBackend, UsbBackend, UsbDeviceInfo, UsbTmc, UsbTmcUserTransport,
+    list_usb_devices,
+};

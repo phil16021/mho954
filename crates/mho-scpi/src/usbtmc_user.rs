@@ -21,8 +21,8 @@
 
 use std::collections::VecDeque;
 use std::io;
-use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
 use nusb::MaybeFuture;
@@ -89,7 +89,11 @@ pub(crate) fn parse_in_header(h: &[u8]) -> Option<InHeader> {
         return None;
     }
     let size = u32::from_le_bytes([h[4], h[5], h[6], h[7]]) as usize;
-    Some(InHeader { tag: h[1], size, eom: h[8] & 1 != 0 })
+    Some(InHeader {
+        tag: h[1],
+        size,
+        eom: h[8] & 1 != 0,
+    })
 }
 
 fn padding_for(size: usize) -> usize {
@@ -147,14 +151,18 @@ pub struct NusbBackend {
 
 impl NusbBackend {
     fn eps(&mut self) -> io::Result<&mut NusbEndpoints> {
-        self.eps.as_mut().ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "usb: closed"))
+        self.eps
+            .as_mut()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "usb: closed"))
     }
 }
 
 fn transfer_error(e: TransferError) -> io::Error {
     match e {
         TransferError::Stall => io::Error::new(io::ErrorKind::BrokenPipe, "usb: endpoint stalled"),
-        TransferError::Disconnected => io::Error::new(io::ErrorKind::NotConnected, "usb: disconnected"),
+        TransferError::Disconnected => {
+            io::Error::new(io::ErrorKind::NotConnected, "usb: disconnected")
+        }
         other => io::Error::other(other),
     }
 }
@@ -174,7 +182,10 @@ impl UsbBackend for NusbBackend {
                 warn!("usb: cancelled bulk OUT transfer has not returned yet");
             }
         }
-        Err(io::Error::new(io::ErrorKind::TimedOut, "usb: bulk OUT timed out"))
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "usb: bulk OUT timed out",
+        ))
     }
 
     fn bulk_in(&mut self, deadline: Instant) -> io::Result<Option<Vec<u8>>> {
@@ -203,11 +214,19 @@ impl UsbBackend for NusbBackend {
             index,
             length,
         };
-        self.eps()?.interface.control_in(req, Duration::from_secs(1)).wait().map_err(transfer_error)
+        self.eps()?
+            .interface
+            .control_in(req, Duration::from_secs(1))
+            .wait()
+            .map_err(transfer_error)
     }
 
     fn clear_halt_out(&mut self) -> io::Result<()> {
-        self.eps()?.out.clear_halt().wait().map_err(io::Error::other)
+        self.eps()?
+            .out
+            .clear_halt()
+            .wait()
+            .map_err(io::Error::other)
     }
 
     fn clear_halt_in(&mut self) -> io::Result<()> {
@@ -220,7 +239,12 @@ impl UsbBackend for NusbBackend {
     fn close(&mut self) {
         if let Some(mut eps) = self.eps.take() {
             eps.inp.cancel_all();
-            while eps.inp.pending() > 0 && eps.inp.wait_next_complete(Duration::from_millis(500)).is_some() {}
+            while eps.inp.pending() > 0
+                && eps
+                    .inp
+                    .wait_next_complete(Duration::from_millis(500))
+                    .is_some()
+            {}
         }
         // Interface released above; hand it back to the kernel driver so /dev/usbtmcN returns.
         if let Err(e) = self.device.attach_kernel_driver(self.interface_number) {
@@ -244,7 +268,8 @@ pub struct UsbDeviceInfo {
 
 fn is_usbtmc(d: &nusb::DeviceInfo) -> bool {
     d.vendor_id() == RIGOL_VID
-        && d.interfaces().any(|i| i.class() == USBTMC_CLASS && i.subclass() == USBTMC_SUBCLASS)
+        && d.interfaces()
+            .any(|i| i.class() == USBTMC_CLASS && i.subclass() == USBTMC_SUBCLASS)
 }
 
 /// Lists Rigol USBTMC devices.
@@ -273,7 +298,12 @@ impl NusbBackend {
             .filter(is_usbtmc)
             .filter(|d| serial.is_some() || pid.is_none_or(|p| d.product_id() == p))
             .find(|d| serial.is_none_or(|s| d.serial_number() == Some(s)))
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no matching Rigol USBTMC device found"))?;
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "no matching Rigol USBTMC device found",
+                )
+            })?;
         let interface_number = info
             .interfaces()
             .find(|i| i.class() == USBTMC_CLASS && i.subclass() == USBTMC_SUBCLASS)
@@ -282,11 +312,16 @@ impl NusbBackend {
         let describe = format!(
             "usb:{}{}",
             info.product_string().unwrap_or("rigol"),
-            info.serial_number().map(|s| format!(":{s}")).unwrap_or_default()
+            info.serial_number()
+                .map(|s| format!(":{s}"))
+                .unwrap_or_default()
         );
 
         let device = info.open().wait().map_err(io::Error::other)?;
-        let interface = device.detach_and_claim_interface(interface_number).wait().map_err(io::Error::other)?;
+        let interface = device
+            .detach_and_claim_interface(interface_number)
+            .wait()
+            .map_err(io::Error::other)?;
         let desc = interface
             .descriptor()
             .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no interface descriptor"))?;
@@ -301,12 +336,27 @@ impl NusbBackend {
             }
         }
         let (Some(addr_in), Some(addr_out)) = (addr_in, addr_out) else {
-            return Err(io::Error::new(io::ErrorKind::NotFound, "USBTMC bulk endpoints missing"));
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "USBTMC bulk endpoints missing",
+            ));
         };
-        let inp = interface.endpoint::<Bulk, In>(addr_in).map_err(io::Error::other)?;
-        let out = interface.endpoint::<Bulk, Out>(addr_out).map_err(io::Error::other)?;
+        let inp = interface
+            .endpoint::<Bulk, In>(addr_in)
+            .map_err(io::Error::other)?;
+        let out = interface
+            .endpoint::<Bulk, Out>(addr_out)
+            .map_err(io::Error::other)?;
         info!(%describe, interface_number, "claimed USBTMC interface (kernel driver detached)");
-        let backend = NusbBackend { device, interface_number, eps: Some(NusbEndpoints { interface, out, inp }) };
+        let backend = NusbBackend {
+            device,
+            interface_number,
+            eps: Some(NusbEndpoints {
+                interface,
+                out,
+                inp,
+            }),
+        };
         Ok((backend, describe))
     }
 }
@@ -356,7 +406,9 @@ impl RxQueue {
     fn take(&mut self, n: usize, mut dst: Option<&mut [u8]>) -> usize {
         let mut done = 0;
         while done < n {
-            let Some(front) = self.chunks.front() else { break };
+            let Some(front) = self.chunks.front() else {
+                break;
+            };
             let k = (n - done).min(front.len() - self.pos);
             if let Some(d) = dst.as_deref_mut() {
                 d[done..done + k].copy_from_slice(&front[self.pos..self.pos + k]);
@@ -484,7 +536,8 @@ impl<B: UsbBackend> UsbTmc<B> {
 
     fn request_in(&mut self, len: usize) -> io::Result<()> {
         let tag = next_tag();
-        self.backend.bulk_out(&encode_request_in(tag, len), self.timeout)?;
+        self.backend
+            .bulk_out(&encode_request_in(tag, len), self.timeout)?;
         self.outstanding = Some(tag);
         Ok(())
     }
@@ -504,14 +557,23 @@ impl<B: UsbBackend> UsbTmc<B> {
             self.rx.take(HEADER, None);
             let padding = padding_for(h.size);
             if h.tag != expected {
-                debug!(tag = h.tag, expected, size = h.size, "usb: skipping stale reply");
+                debug!(
+                    tag = h.tag,
+                    expected,
+                    size = h.size,
+                    "usb: skipping stale reply"
+                );
                 self.skip(h.size, deadline)?;
                 self.drop_padding(padding);
                 continue;
             }
             self.outstanding = None;
             self.last_eom = h.eom;
-            return Ok(Current { remaining: h.size, padding, eom: h.eom });
+            return Ok(Current {
+                remaining: h.size,
+                padding,
+                eom: h.eom,
+            });
         }
     }
 
@@ -568,7 +630,9 @@ impl<B: UsbBackend> UsbTmc<B> {
             }
         }
         if !done {
-            return Err(io::Error::other("device clear still pending after 100 status checks"));
+            return Err(io::Error::other(
+                "device clear still pending after 100 status checks",
+            ));
         }
         self.backend.clear_halt_out()?;
         info!("usb: device clear done");
@@ -583,7 +647,8 @@ impl<B: UsbBackend> Transport for UsbTmc<B> {
         if self.in_message() {
             self.drain_message(Instant::now() + DRAIN_TIMEOUT)?;
         }
-        self.backend.bulk_out(&encode_msg_out(next_tag(), data), self.timeout)
+        self.backend
+            .bulk_out(&encode_msg_out(next_tag(), data), self.timeout)
     }
 
     fn read_some(&mut self, buf: &mut [u8]) -> io::Result<ReadChunk> {
@@ -708,7 +773,10 @@ mod tests {
     impl Fake {
         fn new(answers: &[(&str, &[u8])]) -> Self {
             Fake(Arc::new(Mutex::new(FakeState {
-                answers: answers.iter().map(|(q, a)| (q.to_string(), a.to_vec())).collect(),
+                answers: answers
+                    .iter()
+                    .map(|(q, a)| (q.to_string(), a.to_vec()))
+                    .collect(),
                 chunk: 512,
                 ..Default::default()
             })))
@@ -727,7 +795,9 @@ mod tests {
     impl FakeState {
         /// Answers the pending request if there is data.
         fn serve(&mut self) {
-            let Some((tag, max)) = self.pending_request else { return };
+            let Some((tag, max)) = self.pending_request else {
+                return;
+            };
             if self.output.is_empty() {
                 return;
             }
@@ -758,13 +828,20 @@ mod tests {
             match data[0] {
                 MSG_OUT => {
                     let size = u32::from_le_bytes(data[4..8].try_into().unwrap()) as usize;
-                    let cmd = String::from_utf8_lossy(&data[HEADER..HEADER + size]).trim().to_string();
+                    let cmd = String::from_utf8_lossy(&data[HEADER..HEADER + size])
+                        .trim()
+                        .to_string();
                     s.commands.push(cmd.clone());
                     if s.blocked {
                         return Ok(());
                     }
                     if cmd.contains('?') {
-                        match s.answers.iter().find(|(q, _)| *q == cmd).map(|(_, a)| a.clone()) {
+                        match s
+                            .answers
+                            .iter()
+                            .find(|(q, _)| *q == cmd)
+                            .map(|(_, a)| a.clone())
+                        {
                             Some(a) => s.output.extend(a),
                             None => s.blocked = true,
                         }
@@ -835,7 +912,14 @@ mod tests {
         let mut h = vec![MSG_IN, 9, !9u8, 0];
         h.extend_from_slice(&50u32.to_le_bytes());
         h.extend_from_slice(&[1, 0, 0, 0]);
-        assert_eq!(parse_in_header(&h), Some(InHeader { tag: 9, size: 50, eom: true }));
+        assert_eq!(
+            parse_in_header(&h),
+            Some(InHeader {
+                tag: 9,
+                size: 50,
+                eom: true
+            })
+        );
         assert_eq!(parse_in_header(b"#9000000010abc"), None);
         assert_eq!(padding_for(50), 2);
     }
@@ -868,7 +952,8 @@ mod tests {
         let mut reply = format!("#9{:09}", payload.len()).into_bytes();
         reply.extend_from_slice(&payload);
         reply.push(b'\n');
-        let fake = Fake::new(&[(":DISP:DATA? PNG", &reply), ("*IDN?", IDN)]).with(|s| s.chunk = 4096);
+        let fake =
+            Fake::new(&[(":DISP:DATA? PNG", &reply), ("*IDN?", IDN)]).with(|s| s.chunk = 4096);
         let mut s = scpi(&fake);
         assert_eq!(s.query_block(":DISP:DATA? PNG").unwrap(), payload);
         assert!(s.query("*IDN?").unwrap().starts_with("RIGOL"));
@@ -887,7 +972,8 @@ mod tests {
 
     #[test]
     fn unframed_garbage_before_header_is_dropped_per_transfer() {
-        let fake = Fake::new(&[("*IDN?", IDN)]).with(|s| s.inject.push(vec![0xde, 0xad, 0xbe, 0xef, 0x42]));
+        let fake = Fake::new(&[("*IDN?", IDN)])
+            .with(|s| s.inject.push(vec![0xde, 0xad, 0xbe, 0xef, 0x42]));
         let mut s = scpi(&fake);
         assert!(s.query("*IDN?").unwrap().starts_with("RIGOL"));
     }

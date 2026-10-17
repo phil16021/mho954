@@ -28,7 +28,9 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        let home = directories::BaseDirs::new().map(|d| d.home_dir().to_path_buf()).unwrap_or_else(|| ".".into());
+        let home = directories::BaseDirs::new()
+            .map(|d| d.home_dir().to_path_buf())
+            .unwrap_or_else(|| ".".into());
         Config {
             connection: "usb".into(),
             bind: "127.0.0.1:8954".parse().unwrap(),
@@ -59,12 +61,17 @@ impl Config {
         if !path.exists() {
             return Ok(Config::default());
         }
-        let text = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
         toml::from_str(&text).with_context(|| format!("parsing {}", path.display()))
     }
 
     pub fn url(&self) -> String {
-        let host = if self.bind.ip().is_unspecified() { "127.0.0.1".to_string() } else { self.bind.ip().to_string() };
+        let host = if self.bind.ip().is_unspecified() {
+            "127.0.0.1".to_string()
+        } else {
+            self.bind.ip().to_string()
+        };
         format!("http://{host}:{}", self.bind.port())
     }
 }

@@ -48,16 +48,22 @@ impl std::str::FromStr for Connection {
             return Ok(Connection::Usb { serial: None });
         }
         if let Some(serial) = s.strip_prefix("usb:") {
-            return Ok(Connection::Usb { serial: Some(serial.into()) });
+            return Ok(Connection::Usb {
+                serial: Some(serial.into()),
+            });
         }
         if s.eq_ignore_ascii_case("usbtmc") {
             return Ok(Connection::Usbtmc { path: None });
         }
         if let Some(p) = s.strip_prefix("usbtmc:") {
-            return Ok(Connection::Usbtmc { path: Some(p.into()) });
+            return Ok(Connection::Usbtmc {
+                path: Some(p.into()),
+            });
         }
         if s.starts_with("/dev/") {
-            return Ok(Connection::Usbtmc { path: Some(s.into()) });
+            return Ok(Connection::Usbtmc {
+                path: Some(s.into()),
+            });
         }
         if let Some(a) = s.strip_prefix("tcp:") {
             return Ok(Connection::Tcp { addr: a.into() });
@@ -120,7 +126,10 @@ impl Scope {
         let mut scpi = Scpi::new(transport);
         // No unconditional device clear. A failed or garbled first answer gets one recovery
         // and a second attempt.
-        let first = scpi.query("*IDN?").map_err(DriverError::from).and_then(|r| Idn::parse(&r));
+        let first = scpi
+            .query("*IDN?")
+            .map_err(DriverError::from)
+            .and_then(|r| Idn::parse(&r));
         let idn = match first {
             Ok(idn) => idn,
             Err(e) => {
@@ -186,7 +195,11 @@ impl Scope {
         if errs.is_empty() {
             Ok(())
         } else {
-            let msg = errs.iter().map(|(c, m)| format!("{c}: {m}")).collect::<Vec<_>>().join("; ");
+            let msg = errs
+                .iter()
+                .map(|(c, m)| format!("{c}: {m}"))
+                .collect::<Vec<_>>()
+                .join("; ");
             Err(DriverError::Device(msg))
         }
     }
@@ -194,7 +207,9 @@ impl Scope {
     // ---- status -------------------------------------------------------------------------
 
     pub fn status(&mut self) -> Result<ScopeStatus> {
-        let channels = (1..=CHANNELS).map(|n| self.channel(n)).collect::<Result<Vec<_>>>()?;
+        let channels = (1..=CHANNELS)
+            .map(|n| self.channel(n))
+            .collect::<Result<Vec<_>>>()?;
         Ok(ScopeStatus {
             idn: self.idn.clone(),
             trigger_status: self.trigger_status()?,
@@ -221,7 +236,8 @@ impl Scope {
         self.scpi.write(cmd)?;
         if action == Action::Autoscale {
             // Autoscale takes a few seconds; the next query would otherwise time out.
-            self.scpi.with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
+            self.scpi
+                .with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
         }
         Ok(())
     }
@@ -232,7 +248,9 @@ impl Scope {
         if (1..=CHANNELS).contains(&n) {
             Ok(())
         } else {
-            Err(DriverError::Invalid(format!("channel {n} out of range 1..={CHANNELS}")))
+            Err(DriverError::Invalid(format!(
+                "channel {n} out of range 1..={CHANNELS}"
+            )))
         }
     }
 
@@ -291,7 +309,8 @@ impl Scope {
             self.scpi.write(&format!("{p}:COUP {}", v.scpi()))?;
         }
         if let Some(v) = &u.bw_limit {
-            self.scpi.write(&format!("{p}:BWL {}", token("bw_limit", v)?))?;
+            self.scpi
+                .write(&format!("{p}:BWL {}", token("bw_limit", v)?))?;
         }
         if let Some(v) = u.invert {
             self.scpi.write(&format!("{p}:INV {}", on_off(v)))?;
@@ -313,7 +332,8 @@ impl Scope {
     pub fn set_timebase(&mut self, u: &TimebaseUpdate) -> Result<TimebaseState> {
         self.drain_errors()?;
         if let Some(m) = &u.mode {
-            self.scpi.write(&format!(":TIM:MODE {}", token("mode", m)?))?;
+            self.scpi
+                .write(&format!(":TIM:MODE {}", token("mode", m)?))?;
         }
         if let Some(v) = u.scale {
             positive("scale", v)?;
@@ -345,7 +365,8 @@ impl Scope {
     pub fn set_trigger(&mut self, u: &TriggerUpdate) -> Result<TriggerState> {
         self.drain_errors()?;
         if let Some(m) = &u.mode {
-            self.scpi.write(&format!(":TRIG:MODE {}", token("mode", m)?))?;
+            self.scpi
+                .write(&format!(":TRIG:MODE {}", token("mode", m)?))?;
         }
         if let Some(v) = &u.edge_source {
             let src = match normalize_source(v) {
@@ -362,7 +383,8 @@ impl Scope {
             self.scpi.write(&format!(":TRIG:EDGE:LEV {v:e}"))?;
         }
         if let Some(v) = &u.coupling {
-            self.scpi.write(&format!(":TRIG:COUP {}", token("coupling", v)?))?;
+            self.scpi
+                .write(&format!(":TRIG:COUP {}", token("coupling", v)?))?;
         }
         if let Some(v) = u.holdoff {
             positive("holdoff", v)?;
@@ -397,12 +419,15 @@ impl Scope {
         }
         if let Some(n) = u.averages {
             if !n.is_power_of_two() || n < 2 {
-                return Err(DriverError::Invalid(format!("averages must be a power of two ≥ 2, got {n}")));
+                return Err(DriverError::Invalid(format!(
+                    "averages must be a power of two ≥ 2, got {n}"
+                )));
             }
             self.scpi.write(&format!(":ACQ:AVER {n}"))?;
         }
         if let Some(d) = &u.memory_depth {
-            self.scpi.write(&format!(":ACQ:MDEP {}", token("memory_depth", d)?))?;
+            self.scpi
+                .write(&format!(":ACQ:MDEP {}", token("memory_depth", d)?))?;
         }
         self.check_errors()?;
         self.acquire()
@@ -411,12 +436,18 @@ impl Scope {
     // ---- measurements -------------------------------------------------------------------
 
     /// Queries one `:MEASure:ITEM?`. `source2` is required for delay/phase items.
-    pub fn measure(&mut self, item: &str, source: &str, source2: Option<&str>) -> Result<Measurement> {
+    pub fn measure(
+        &mut self,
+        item: &str,
+        source: &str,
+        source2: Option<&str>,
+    ) -> Result<Measurement> {
         let it = find_item(item)?;
         let src = measure_source(source)?;
         let cmd = if it.dual_source {
-            let s2 = source2
-                .ok_or_else(|| DriverError::Invalid(format!("{} needs a second source", it.long)))?;
+            let s2 = source2.ok_or_else(|| {
+                DriverError::Invalid(format!("{} needs a second source", it.long))
+            })?;
             format!(":MEAS:ITEM? {},{},{}", it.token, src, measure_source(s2)?)
         } else {
             format!(":MEAS:ITEM? {},{}", it.token, src)
@@ -429,11 +460,19 @@ impl Scope {
             raw = self.scpi.query_f64(&cmd)?;
         }
         self.measured.insert(cmd);
-        Ok(Measurement { item: it.long.to_string(), source: src, value: valid_value(raw), unit: it.unit.to_string() })
+        Ok(Measurement {
+            item: it.long.to_string(),
+            source: src,
+            value: valid_value(raw),
+            unit: it.unit.to_string(),
+        })
     }
 
     pub fn measure_many(&mut self, items: &[String], source: &str) -> Result<Vec<Measurement>> {
-        items.iter().map(|i| self.measure(i, source, None)).collect()
+        items
+            .iter()
+            .map(|i| self.measure(i, source, None))
+            .collect()
     }
 
     // ---- waveforms ----------------------------------------------------------------------
@@ -465,16 +504,32 @@ impl Scope {
     }
 
     /// Reads waveform data for an already configured source (see [`Self::preamble`]).
-    fn read_words(&mut self, cmd: &str, progress: &mut dyn FnMut(usize, usize)) -> Result<Vec<u16>> {
+    fn read_words(
+        &mut self,
+        cmd: &str,
+        progress: &mut dyn FnMut(usize, usize),
+    ) -> Result<Vec<u16>> {
         let bytes = self.scpi.query_block_progress(cmd, progress)?;
         if bytes.len() % 2 != 0 {
-            return Err(DriverError::Protocol(format!("odd WORD data length {}", bytes.len())));
+            return Err(DriverError::Protocol(format!(
+                "odd WORD data length {}",
+                bytes.len()
+            )));
         }
-        Ok(bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect())
+        Ok(bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| u16::from_le_bytes([b[0], b[1]]))
+            .collect())
     }
 
     /// Screen waveform (`NORM`, ~1000 points). Pass a cached preamble to save a round trip.
-    pub fn screen_waveform(&mut self, source: &str, preamble: Option<Preamble>) -> Result<Waveform> {
+    pub fn screen_waveform(
+        &mut self,
+        source: &str,
+        preamble: Option<Preamble>,
+    ) -> Result<Waveform> {
         let src = normalize_source(source)?;
         self.configure_wav(&src, WaveMode::Normal)?;
         self.wav_guard(|s| {
@@ -483,13 +538,21 @@ impl Scope {
                 None => Preamble::parse(&s.scpi.query(":WAV:PRE?")?)?,
             };
             let raw = s.read_words(":WAV:DATA?", &mut |_, _| {})?;
-            Ok(Waveform { source: src, preamble, raw })
+            Ok(Waveform {
+                source: src,
+                preamble,
+                raw,
+            })
         })
     }
 
     /// Full acquisition memory (`RAW`). The scope must be stopped; downloads in chunks of
     /// [`Self::raw_chunk_points`] and reports `(points_done, points_total)`.
-    pub fn raw_waveform(&mut self, source: &str, progress: &mut dyn FnMut(usize, usize)) -> Result<Waveform> {
+    pub fn raw_waveform(
+        &mut self,
+        source: &str,
+        progress: &mut dyn FnMut(usize, usize),
+    ) -> Result<Waveform> {
         let status = self.trigger_status()?;
         if status != "STOP" {
             return Err(DriverError::State(format!(
@@ -501,11 +564,17 @@ impl Scope {
         self.wav_guard(|s| s.raw_download(src, progress))
     }
 
-    fn raw_download(&mut self, src: String, progress: &mut dyn FnMut(usize, usize)) -> Result<Waveform> {
+    fn raw_download(
+        &mut self,
+        src: String,
+        progress: &mut dyn FnMut(usize, usize),
+    ) -> Result<Waveform> {
         let preamble = Preamble::parse(&self.scpi.query(":WAV:PRE?")?)?;
         let total = preamble.points;
         if total > MAX_RAW_POINTS {
-            return Err(DriverError::Protocol(format!("preamble reports {total} points")));
+            return Err(DriverError::Protocol(format!(
+                "preamble reports {total} points"
+            )));
         }
         let chunk = self.raw_chunk_points.max(1000);
         let mut raw = Vec::with_capacity(total.min(16_000_000));
@@ -518,15 +587,26 @@ impl Scope {
                 scpi.write(&format!(":WAV:STOP {stop}"))?;
                 scpi.write(&format!(":WAV:STAR {start}"))?;
                 let done = raw.len();
-                let bytes = scpi.query_block_progress(":WAV:DATA?", &mut |got, _| progress(done + got / 2, total))?;
+                let bytes = scpi.query_block_progress(":WAV:DATA?", &mut |got, _| {
+                    progress(done + got / 2, total)
+                })?;
                 let expected = 2 * (stop - start + 1);
                 if bytes.len() != expected {
                     return Err(mho_scpi::ScpiError::parse(
                         ":WAV:DATA?",
-                        format!("RAW chunk {start}..{stop}: {} bytes, expected {expected}", bytes.len()),
+                        format!(
+                            "RAW chunk {start}..{stop}: {} bytes, expected {expected}",
+                            bytes.len()
+                        ),
                     ));
                 }
-                raw.extend(bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])));
+                raw.extend(
+                    bytes
+                        .as_chunks::<2>()
+                        .0
+                        .iter()
+                        .map(|b| u16::from_le_bytes([b[0], b[1]])),
+                );
                 debug!(start, stop, got = raw.len(), "raw chunk");
                 start = stop + 1;
             }
@@ -536,13 +616,19 @@ impl Scope {
             Ok(())
         })?;
         progress(raw.len(), total);
-        Ok(Waveform { source: src, preamble, raw })
+        Ok(Waveform {
+            source: src,
+            preamble,
+            raw,
+        })
     }
 
     // ---- display / setup ----------------------------------------------------------------
 
     pub fn screenshot(&mut self) -> Result<Vec<u8>> {
-        let png = self.scpi.with_timeout(Duration::from_secs(15), |s| s.query_block(":DISP:DATA? PNG"))?;
+        let png = self.scpi.with_timeout(Duration::from_secs(15), |s| {
+            s.query_block(":DISP:DATA? PNG")
+        })?;
         if !png.starts_with(b"\x89PNG") {
             return Err(DriverError::Protocol("screenshot is not a PNG".into()));
         }
@@ -551,13 +637,16 @@ impl Scope {
 
     /// Binary setup blob (`:SYSTem:SETup?`) for later restore.
     pub fn setup_save(&mut self) -> Result<Vec<u8>> {
-        Ok(self.scpi.with_timeout(Duration::from_secs(10), |s| s.query_block(":SYST:SET?"))?)
+        Ok(self
+            .scpi
+            .with_timeout(Duration::from_secs(10), |s| s.query_block(":SYST:SET?"))?)
     }
 
     pub fn setup_load(&mut self, blob: &[u8]) -> Result<()> {
         self.scpi.write_block(":SYST:SET", blob)?;
         self.wav = WavSettings::default();
-        self.scpi.with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
+        self.scpi
+            .with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
         self.check_errors()
     }
 
@@ -570,7 +659,9 @@ impl Scope {
                 Ok(OptionInfo {
                     name: o.code.to_string(),
                     description: o.description.to_string(),
-                    active: self.scpi.query_bool(&format!(":SYST:OPT:STAT? {}", o.token))?,
+                    active: self
+                        .scpi
+                        .query_bool(&format!(":SYST:OPT:STAT? {}", o.token))?,
                 })
             })
             .collect()
@@ -588,11 +679,13 @@ impl Scope {
         });
         if !valid {
             return Err(DriverError::Invalid(
-                "license must look like MHO900-<OPTION>@<code> (from rigol.com License Activation)".into(),
+                "license must look like MHO900-<OPTION>@<code> (from rigol.com License Activation)"
+                    .into(),
             ));
         }
         self.scpi.write(&format!(":SYST:OPT:INST {key}"))?;
-        self.scpi.with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
+        self.scpi
+            .with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
         self.check_errors()
     }
 
@@ -623,20 +716,55 @@ impl Scope {
     pub fn set_network(&mut self, u: &NetworkUpdate) -> Result<NetworkState> {
         let label = |name: &str, v: &str| -> Result<String> {
             let v = v.trim();
-            if v.is_empty() || v.len() > 64 || !v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
-                return Err(DriverError::Invalid(format!("{name}: use 1-64 letters, digits, '-', '_', '.'")));
+            if v.is_empty()
+                || v.len() > 64
+                || !v
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            {
+                return Err(DriverError::Invalid(format!(
+                    "{name}: use 1-64 letters, digits, '-', '_', '.'"
+                )));
             }
             Ok(v.to_string())
         };
         // Validate everything before sending anything.
-        let ip = u.ip.as_deref().map(|v| validate_ipv4(v, false)).transpose()?;
-        let mask = u.mask.as_deref().map(|v| validate_ipv4(v, true)).transpose()?;
-        let gateway = u.gateway.as_deref().map(|v| validate_ipv4(v, false)).transpose()?;
-        let dns = u.dns.as_deref().map(|v| validate_ipv4(v, false)).transpose()?;
-        let hostname = u.hostname.as_deref().map(|v| label("hostname", v)).transpose()?;
-        let description = u.description.as_deref().map(|v| label("description", v)).transpose()?;
-        if u.mode.is_none() && (ip.is_some() || mask.is_some() || gateway.is_some() || dns.is_some()) && !self.scpi.query_bool(":LAN:MAN?")? {
-            return Err(DriverError::Invalid("ip/mask/gateway/dns need mode Static".into()));
+        let ip =
+            u.ip.as_deref()
+                .map(|v| validate_ipv4(v, false))
+                .transpose()?;
+        let mask = u
+            .mask
+            .as_deref()
+            .map(|v| validate_ipv4(v, true))
+            .transpose()?;
+        let gateway = u
+            .gateway
+            .as_deref()
+            .map(|v| validate_ipv4(v, false))
+            .transpose()?;
+        let dns = u
+            .dns
+            .as_deref()
+            .map(|v| validate_ipv4(v, false))
+            .transpose()?;
+        let hostname = u
+            .hostname
+            .as_deref()
+            .map(|v| label("hostname", v))
+            .transpose()?;
+        let description = u
+            .description
+            .as_deref()
+            .map(|v| label("description", v))
+            .transpose()?;
+        if u.mode.is_none()
+            && (ip.is_some() || mask.is_some() || gateway.is_some() || dns.is_some())
+            && !self.scpi.query_bool(":LAN:MAN?")?
+        {
+            return Err(DriverError::Invalid(
+                "ip/mask/gateway/dns need mode Static".into(),
+            ));
         }
 
         let s = &mut self.scpi;
@@ -681,7 +809,8 @@ impl Scope {
         }
         self.check_errors()?;
         self.scpi.write(":LAN:APPL")?;
-        self.scpi.with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
+        self.scpi
+            .with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
         self.check_errors()?;
         self.network()
     }
@@ -701,7 +830,9 @@ impl Scope {
             return Err(DriverError::Invalid("empty command".into()));
         }
         if cmd.chars().any(|c| c.is_control()) {
-            return Err(DriverError::Invalid("one command per request; control characters are not allowed".into()));
+            return Err(DriverError::Invalid(
+                "one command per request; control characters are not allowed".into(),
+            ));
         }
         if self.raw_blocked {
             match self.scpi.query("*IDN?") {
@@ -727,7 +858,11 @@ impl Scope {
                     self.raw_blocked = !healthy;
                     Err(DriverError::Invalid(format!(
                         "no answer to `{cmd}` (unknown query?){}",
-                        if healthy { "" } else { "; the scope stopped responding — power-cycle it" }
+                        if healthy {
+                            ""
+                        } else {
+                            "; the scope stopped responding — power-cycle it"
+                        }
                     )))
                 }
                 Err(e) => Err(e.into()),
@@ -745,7 +880,9 @@ impl Scope {
 fn measure_source(s: &str) -> Result<String> {
     let src = normalize_source(s)?;
     if src.starts_with('D') {
-        return Err(DriverError::Unsupported(format!("{src}: digital measurement sources are not supported")));
+        return Err(DriverError::Unsupported(format!(
+            "{src}: digital measurement sources are not supported"
+        )));
     }
     Ok(src)
 }
@@ -763,14 +900,21 @@ fn positive(name: &str, v: f64) -> Result<()> {
 }
 
 fn finite(name: &str, v: f64) -> Result<()> {
-    if v.is_finite() { Ok(()) } else { Err(DriverError::Invalid(format!("{name} must be finite"))) }
+    if v.is_finite() {
+        Ok(())
+    } else {
+        Err(DriverError::Invalid(format!("{name} must be finite")))
+    }
 }
 
 /// Accepts a bare SCPI token (letters, digits, `.`, `+`, `-`) to prevent command injection
 /// through `;` or newlines in string parameters.
 fn token<'a>(name: &str, v: &'a str) -> Result<&'a str> {
     let v = v.trim();
-    if !v.is_empty() && v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-')) {
+    if !v.is_empty()
+        && v.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '+' | '-'))
+    {
         Ok(v)
     } else {
         Err(DriverError::Invalid(format!("{name}: invalid value {v:?}")))

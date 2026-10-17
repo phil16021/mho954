@@ -36,7 +36,13 @@ pub struct Scpi {
 
 impl Scpi {
     pub fn new(transport: Box<dyn Transport>) -> Self {
-        Scpi { transport, rx: Vec::new(), rx_end: false, chunk: DEFAULT_CHUNK, last_duration: Duration::ZERO }
+        Scpi {
+            transport,
+            rx: Vec::new(),
+            rx_end: false,
+            chunk: DEFAULT_CHUNK,
+            last_duration: Duration::ZERO,
+        }
     }
 
     pub fn describe(&self) -> String {
@@ -56,7 +62,11 @@ impl Scpi {
     }
 
     /// Runs `f` with a temporarily changed I/O timeout.
-    pub fn with_timeout<R>(&mut self, timeout: Duration, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
+    pub fn with_timeout<R>(
+        &mut self,
+        timeout: Duration,
+        f: impl FnOnce(&mut Self) -> Result<R>,
+    ) -> Result<R> {
         let old = self.timeout();
         self.set_timeout(timeout)?;
         let r = f(self);
@@ -92,7 +102,10 @@ impl Scpi {
         msg.extend_from_slice(format!("#{}{}", len.len(), len).as_bytes());
         msg.extend_from_slice(data);
         msg.push(b'\n');
-        let r = self.transport.write_all(&msg).map_err(|e| self.fail(prefix, e));
+        let r = self
+            .transport
+            .write_all(&msg)
+            .map_err(|e| self.fail(prefix, e));
         self.last_duration = start.elapsed();
         r
     }
@@ -102,13 +115,20 @@ impl Scpi {
         let start = Instant::now();
         let r = self.query_inner(cmd);
         self.last_duration = start.elapsed();
-        trace!(cmd, ?r, elapsed_ms = self.last_duration.as_secs_f64() * 1e3, "scpi query");
+        trace!(
+            cmd,
+            ?r,
+            elapsed_ms = self.last_duration.as_secs_f64() * 1e3,
+            "scpi query"
+        );
         r
     }
 
     pub fn query_f64(&mut self, cmd: &str) -> Result<f64> {
         let s = self.query(cmd)?;
-        s.trim().parse::<f64>().map_err(|e| ScpiError::parse(cmd, format!("{s:?}: {e}")))
+        s.trim()
+            .parse::<f64>()
+            .map_err(|e| ScpiError::parse(cmd, format!("{s:?}: {e}")))
     }
 
     pub fn query_bool(&mut self, cmd: &str) -> Result<bool> {
@@ -116,7 +136,10 @@ impl Scpi {
         match s.trim().to_ascii_uppercase().as_str() {
             "1" | "ON" => Ok(true),
             "0" | "OFF" => Ok(false),
-            other => Err(ScpiError::parse(cmd, format!("expected boolean, got {other:?}"))),
+            other => Err(ScpiError::parse(
+                cmd,
+                format!("expected boolean, got {other:?}"),
+            )),
         }
     }
 
@@ -164,7 +187,13 @@ impl Scpi {
         self.last_duration = start.elapsed();
         if let Ok(data) = &r {
             let secs = self.last_duration.as_secs_f64();
-            debug!(cmd, bytes = data.len(), ms = secs * 1e3, mb_s = data.len() as f64 / secs / 1e6, "block read");
+            debug!(
+                cmd,
+                bytes = data.len(),
+                ms = secs * 1e3,
+                mb_s = data.len() as f64 / secs / 1e6,
+                "block read"
+            );
         }
         r
     }
@@ -175,7 +204,10 @@ impl Scpi {
         for _ in 0..32 {
             let line = self.query(":SYST:ERR?")?;
             let (code, msg) = line.split_once(',').unwrap_or((line.as_str(), ""));
-            let code: i32 = code.trim().parse().map_err(|_| ScpiError::parse(":SYST:ERR?", line.clone()))?;
+            let code: i32 = code
+                .trim()
+                .parse()
+                .map_err(|_| ScpiError::parse(":SYST:ERR?", line.clone()))?;
             if code == 0 {
                 break;
             }
@@ -200,7 +232,11 @@ impl Scpi {
         Ok(line)
     }
 
-    fn query_block_inner(&mut self, cmd: &str, progress: &mut dyn FnMut(usize, usize)) -> Result<Vec<u8>> {
+    fn query_block_inner(
+        &mut self,
+        cmd: &str,
+        progress: &mut dyn FnMut(usize, usize),
+    ) -> Result<Vec<u8>> {
         self.discard_stale();
         self.send(cmd)?;
         self.guard(cmd, |s| s.read_block(cmd, progress))
@@ -228,7 +264,11 @@ impl Scpi {
 
     fn fail(&mut self, cmd: &str, e: std::io::Error) -> ScpiError {
         self.recover();
-        if is_timeout_io(&e) { ScpiError::Timeout(cmd.to_string()) } else { ScpiError::Io(e) }
+        if is_timeout_io(&e) {
+            ScpiError::Timeout(cmd.to_string())
+        } else {
+            ScpiError::Io(e)
+        }
     }
 
     fn discard_stale(&mut self) {
@@ -262,7 +302,9 @@ impl Scpi {
             if let Some(pos) = self.rx.iter().position(|&b| b == b'\n') {
                 let line: Vec<u8> = self.rx.drain(..=pos).collect();
                 self.rx.clear();
-                return Ok(String::from_utf8_lossy(&line[..pos]).trim_end_matches('\r').to_string());
+                return Ok(String::from_utf8_lossy(&line[..pos])
+                    .trim_end_matches('\r')
+                    .to_string());
             }
             // A short USBTMC read is not a reliable end-of-message marker (long responses arrive
             // in several transfers), so only the '\n' terminator ends a line.
@@ -291,14 +333,20 @@ impl Scpi {
                     if self.fill(self.chunk)? == 0 {
                         empty += 1;
                         if empty >= MAX_EMPTY_READS {
-                            return Err(ScpiError::parse(cmd, "response ended inside block header"));
+                            return Err(ScpiError::parse(
+                                cmd,
+                                "response ended inside block header",
+                            ));
                         }
                     }
                 }
             }
         };
         if header.data_len.is_some_and(|l| l > MAX_BLOCK) {
-            return Err(ScpiError::parse(cmd, format!("block length {:?} exceeds limit", header.data_len)));
+            return Err(ScpiError::parse(
+                cmd,
+                format!("block length {:?} exceeds limit", header.data_len),
+            ));
         }
 
         let Some(len) = header.data_len else {
@@ -307,7 +355,10 @@ impl Scpi {
 
         let total = header.header_len + len;
         self.rx.reserve(total + 1 - self.rx.len().min(total + 1));
-        progress(self.rx.len().saturating_sub(header.header_len).min(len), len);
+        progress(
+            self.rx.len().saturating_sub(header.header_len).min(len),
+            len,
+        );
         while self.rx.len() < total {
             // +1 so the final request also covers the trailing '\n'.
             let want = (total - self.rx.len() + 1).min(self.chunk);
@@ -334,7 +385,10 @@ impl Scpi {
         while !self.rx_end {
             self.fill(self.chunk)?;
             if self.rx.len() > MAX_BLOCK {
-                return Err(ScpiError::parse("#0 block", "indefinite block exceeds limit"));
+                return Err(ScpiError::parse(
+                    "#0 block",
+                    "indefinite block exceeds limit",
+                ));
             }
         }
         let mut data = std::mem::take(&mut self.rx);
@@ -357,7 +411,10 @@ mod tests {
             .expect("*IDN?", b"RIGOL TECHNOLOGIES,MHO954,X,00.01.00\n")
             .expect(":WAV:DATA?", b"#14abcd\n");
         let mut s = Scpi::new(Box::new(mock.clone()));
-        assert_eq!(s.query("*IDN?").unwrap(), "RIGOL TECHNOLOGIES,MHO954,X,00.01.00");
+        assert_eq!(
+            s.query("*IDN?").unwrap(),
+            "RIGOL TECHNOLOGIES,MHO954,X,00.01.00"
+        );
         assert_eq!(s.query_block(":WAV:DATA?").unwrap(), b"abcd");
         assert!(mock.is_done());
     }
@@ -366,7 +423,9 @@ mod tests {
     fn block_in_small_chunks() {
         let mut payload = b"#9000000010".to_vec();
         payload.extend_from_slice(b"0123456789\n");
-        let mock = MockTransport::new().with_max_read(3).expect(":DISP:DATA? PNG", &payload);
+        let mock = MockTransport::new()
+            .with_max_read(3)
+            .expect(":DISP:DATA? PNG", &payload);
         let mut s = Scpi::new(Box::new(mock));
         let mut calls = 0;
         let data = s.query_block_progress(":DISP:DATA? PNG", &mut |_, total| {
@@ -404,7 +463,9 @@ mod tests {
 
     #[test]
     fn timeout_triggers_clear() {
-        let mock = MockTransport::new().expect_silence("*OPT?").expect("*IDN?", b"ok\n");
+        let mock = MockTransport::new()
+            .expect_silence("*OPT?")
+            .expect("*IDN?", b"ok\n");
         let mut s = Scpi::new(Box::new(mock.clone()));
         let err = s.query("*OPT?").unwrap_err();
         assert!(err.is_timeout(), "{err:?}");
@@ -418,6 +479,9 @@ mod tests {
             .expect(":SYST:ERR?", b"-109,\"Missing parameter\"\n")
             .expect(":SYST:ERR?", b"0,\"No error\"\n");
         let mut s = Scpi::new(Box::new(mock));
-        assert_eq!(s.errors().unwrap(), vec![(-109, "Missing parameter".to_string())]);
+        assert_eq!(
+            s.errors().unwrap(),
+            vec![(-109, "Missing parameter".to_string())]
+        );
     }
 }

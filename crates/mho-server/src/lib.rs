@@ -62,31 +62,45 @@ pub fn router(backend: LocalBackend, opts: &ServerOptions, shutdown: Cancellatio
     }
     let guard_cfg = guard::GuardConfig {
         loopback_only: opts.bind.ip().is_loopback(),
-        token: opts.api_token.as_deref().filter(|t| !t.is_empty()).map(Arc::from),
+        token: opts
+            .api_token
+            .as_deref()
+            .filter(|t| !t.is_empty())
+            .map(Arc::from),
     };
-    let mcp_service: StreamableHttpService<McpScope, LocalSessionManager> = StreamableHttpService::new(
-        move || Ok(McpScope::new(api.clone(), capture_dir.clone())),
-        Default::default(),
-        mcp_config,
-    );
+    let mcp_service: StreamableHttpService<McpScope, LocalSessionManager> =
+        StreamableHttpService::new(
+            move || Ok(McpScope::new(api.clone(), capture_dir.clone())),
+            Default::default(),
+            mcp_config,
+        );
 
     Router::new()
         .nest("/api/v1", rest::routes().merge(ws::routes()))
         .merge(rest::doc_routes())
         .nest_service("/mcp", mcp_service)
-        .layer(axum::middleware::from_fn_with_state(guard_cfg, guard::guard))
+        .layer(axum::middleware::from_fn_with_state(
+            guard_cfg,
+            guard::guard,
+        ))
         .layer(TraceLayer::new_for_http())
         .with_state(AppState { backend })
 }
 
 /// Serves until `shutdown` is cancelled.
-pub async fn serve(backend: LocalBackend, opts: ServerOptions, shutdown: CancellationToken) -> anyhow::Result<()> {
+pub async fn serve(
+    backend: LocalBackend,
+    opts: ServerOptions,
+    shutdown: CancellationToken,
+) -> anyhow::Result<()> {
     opts.validate()?;
     let listener = tokio::net::TcpListener::bind(opts.bind).await?;
     let addr = listener.local_addr()?;
     info!("listening on http://{addr}  (REST /api/v1, docs /docs, MCP /mcp)");
     let app = router(backend, &opts, shutdown.clone());
-    axum::serve(listener, app).with_graceful_shutdown(shutdown.cancelled_owned()).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown.cancelled_owned())
+        .await?;
     Ok(())
 }
 

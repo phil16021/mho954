@@ -18,12 +18,31 @@ pub fn format_si(v: f64, unit: &str) -> String {
     if v == 0.0 {
         return format!("0 {unit}");
     }
-    const PREFIXES: [(f64, &str); 9] =
-        [(1e9, "G"), (1e6, "M"), (1e3, "k"), (1.0, ""), (1e-3, "m"), (1e-6, "µ"), (1e-9, "n"), (1e-12, "p"), (1e-15, "f")];
+    const PREFIXES: [(f64, &str); 9] = [
+        (1e9, "G"),
+        (1e6, "M"),
+        (1e3, "k"),
+        (1.0, ""),
+        (1e-3, "m"),
+        (1e-6, "µ"),
+        (1e-9, "n"),
+        (1e-12, "p"),
+        (1e-15, "f"),
+    ];
     let a = v.abs();
-    let (scale, prefix) = PREFIXES.iter().find(|(s, _)| a >= *s * 0.9995).copied().unwrap_or((1e-15, "f"));
+    let (scale, prefix) = PREFIXES
+        .iter()
+        .find(|(s, _)| a >= *s * 0.9995)
+        .copied()
+        .unwrap_or((1e-15, "f"));
     let x = v / scale;
-    let digits = if x.abs() >= 100.0 { 1 } else if x.abs() >= 10.0 { 2 } else { 3 };
+    let digits = if x.abs() >= 100.0 {
+        1
+    } else if x.abs() >= 10.0 {
+        2
+    } else {
+        3
+    };
     format!("{x:.digits$} {prefix}{unit}")
 }
 

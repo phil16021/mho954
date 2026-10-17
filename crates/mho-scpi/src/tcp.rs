@@ -21,7 +21,11 @@ pub struct TcpTransport {
 fn with_default_port(addr: &str) -> String {
     let addr = addr.trim();
     if addr.starts_with('[') {
-        if addr.contains("]:") { addr.to_string() } else { format!("{addr}:{DEFAULT_PORT}") }
+        if addr.contains("]:") {
+            addr.to_string()
+        } else {
+            format!("{addr}:{DEFAULT_PORT}")
+        }
     } else if addr.matches(':').count() > 1 {
         format!("[{addr}]:{DEFAULT_PORT}")
     } else if addr.contains(':') {
@@ -51,7 +55,11 @@ impl TcpTransport {
     pub fn connect(addr: &str) -> io::Result<Self> {
         let addr = with_default_port(addr);
         let stream = connect_any(&addr)?;
-        let mut t = TcpTransport { addr, stream, timeout: Duration::from_secs(2) };
+        let mut t = TcpTransport {
+            addr,
+            stream,
+            timeout: Duration::from_secs(2),
+        };
         t.set_timeout(t.timeout)?;
         Ok(t)
     }
@@ -65,7 +73,10 @@ impl Transport for TcpTransport {
     fn read_some(&mut self, buf: &mut [u8]) -> io::Result<ReadChunk> {
         let n = self.stream.read(buf)?;
         if n == 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed"));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "connection closed",
+            ));
         }
         Ok(ReadChunk { n, end: false })
     }
@@ -125,7 +136,9 @@ mod tests {
                 let mut line = String::new();
                 while reader.read_line(&mut line).unwrap_or(0) > 0 {
                     match line.trim() {
-                        "*IDN?" => stream.write_all(b"RIGOL TECHNOLOGIES,MHO954,X,1\n").unwrap(),
+                        "*IDN?" => stream
+                            .write_all(b"RIGOL TECHNOLOGIES,MHO954,X,1\n")
+                            .unwrap(),
                         ":DATA?" => stream.write_all(b"#13abc\n").unwrap(),
                         "QUIT" => return connections,
                         _ => {}

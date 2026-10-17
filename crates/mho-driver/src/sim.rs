@@ -170,14 +170,19 @@ impl SimTransport {
             self.rng ^= self.rng >> 12;
             self.rng ^= self.rng << 25;
             self.rng ^= self.rng >> 27;
-            let u = (self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64;
+            let u =
+                (self.rng.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64;
             acc += u - 0.5;
         }
         acc * 1.7
     }
 
     fn now(&self) -> f64 {
-        if self.state.running { self.started.elapsed().as_secs_f64() } else { self.frozen_at }
+        if self.state.running {
+            self.started.elapsed().as_secs_f64()
+        } else {
+            self.frozen_at
+        }
     }
 
     /// Ideal signal of channel `n` (1-based) at time `t` relative to the trigger point.
@@ -210,7 +215,9 @@ impl SimTransport {
     }
 
     fn channel_index(src: &str) -> Option<usize> {
-        src.strip_prefix("CHAN").and_then(|d| d.parse::<usize>().ok()).filter(|n| (1..=4).contains(n))
+        src.strip_prefix("CHAN")
+            .and_then(|d| d.parse::<usize>().ok())
+            .filter(|n| (1..=4).contains(n))
     }
 
     fn mdepth_points(&self) -> usize {
@@ -249,11 +256,23 @@ impl SimTransport {
     /// Screen-resolution sample interval and start time.
     fn screen_timing(&self) -> (f64, f64) {
         let s = &self.state;
-        (10.0 * s.tim_scale / SCREEN_POINTS as f64, -5.0 * s.tim_scale + s.tim_offset)
+        (
+            10.0 * s.tim_scale / SCREEN_POINTS as f64,
+            -5.0 * s.tim_scale + s.tim_offset,
+        )
     }
 
-    fn samples(&mut self, src: &str, first: usize, count: usize, x_inc: f64, x_org: f64) -> Vec<f64> {
-        let Some(n) = Self::channel_index(src) else { return vec![0.0; count] };
+    fn samples(
+        &mut self,
+        src: &str,
+        first: usize,
+        count: usize,
+        x_inc: f64,
+        x_org: f64,
+    ) -> Vec<f64> {
+        let Some(n) = Self::channel_index(src) else {
+            return vec![0.0; count];
+        };
         let wall = self.now();
         let ch = self.state.ch[n - 1].clone();
         let noise_amp = ch.scale * 0.02;
@@ -327,7 +346,8 @@ impl SimTransport {
 
     fn respond_block(&mut self, data: &[u8]) {
         let len = data.len().to_string();
-        self.pending.extend_from_slice(format!("#{}{}", len.len(), len).as_bytes());
+        self.pending
+            .extend_from_slice(format!("#{}{}", len.len(), len).as_bytes());
         self.pending.extend_from_slice(data);
         self.pending.push(b'\n');
     }
@@ -391,7 +411,12 @@ impl SimTransport {
                 None => "0,\"No error\"".into(),
             },
             ":SYST:VERS" => "3.0".into(),
-            ":LAN:STAT" => if self.state.lan.manual && self.state.lan.ip != "0.0.0.0" { "CONFIGURED" } else { "UNLINK" }.into(),
+            ":LAN:STAT" => if self.state.lan.manual && self.state.lan.ip != "0.0.0.0" {
+                "CONFIGURED"
+            } else {
+                "UNLINK"
+            }
+            .into(),
             ":LAN:DHCP" => on(self.state.lan.dhcp),
             ":LAN:AUT" => on(self.state.lan.auto_ip),
             ":LAN:MAN" => on(self.state.lan.manual),
@@ -443,7 +468,11 @@ impl SimTransport {
             ":WAV:POIN" => self.preamble().0.to_string(),
             ":WAV:PRE" => {
                 let (points, x_inc, x_org, y_inc, y_org) = self.preamble();
-                let kind = if self.state.wav_mode == WaveMode::Raw { 2 } else { 0 };
+                let kind = if self.state.wav_mode == WaveMode::Raw {
+                    2
+                } else {
+                    0
+                };
                 format!(
                     "{},{kind},{points},1,{x_inc:.6E},{x_org:.6E},0.000000,{y_inc:.4E},{y_org},{}",
                     u8::from(self.state.wav_word),
@@ -472,7 +501,9 @@ impl SimTransport {
             }
             ":MEAS:ITEM" => {
                 let mut parts = args.split(',').map(str::trim);
-                let (Some(item), Some(src)) = (parts.next(), parts.next()) else { return false };
+                let (Some(item), Some(src)) = (parts.next(), parts.next()) else {
+                    return false;
+                };
                 match self.measure(item, &src.to_ascii_uppercase()) {
                     Some(v) => format!("{v:.4E}"),
                     None => return false,
@@ -485,7 +516,10 @@ impl SimTransport {
     }
 
     fn command(&mut self, hdr: &str, args: &str) -> Result<(), String> {
-        let num = || args.parse::<f64>().map_err(|_| format!("bad number {args:?}"));
+        let num = || {
+            args.parse::<f64>()
+                .map_err(|_| format!("bad number {args:?}"))
+        };
         let boolean = || match args.to_ascii_uppercase().as_str() {
             "1" | "ON" => Ok(true),
             "0" | "OFF" => Ok(false),
@@ -520,11 +554,15 @@ impl SimTransport {
             ":TIM:OFFS" => s.tim_offset = num()?,
             ":TIM:MODE" => s.tim_mode = args.to_ascii_uppercase(),
             ":TRIG:MODE" => s.trig_mode = args.to_ascii_uppercase(),
-            ":TRIG:SWE" => s.trig_sweep = TriggerSweep::from_scpi(args).map_err(|e| e.to_string())?,
+            ":TRIG:SWE" => {
+                s.trig_sweep = TriggerSweep::from_scpi(args).map_err(|e| e.to_string())?
+            }
             ":TRIG:COUP" => s.trig_coupling = args.to_ascii_uppercase(),
             ":TRIG:HOLD" => s.trig_holdoff = num()?,
             ":TRIG:EDGE:SOUR" => s.trig_source = args.to_ascii_uppercase(),
-            ":TRIG:EDGE:SLOP" => s.trig_slope = Slope::from_scpi(args).map_err(|e| e.to_string())?,
+            ":TRIG:EDGE:SLOP" => {
+                s.trig_slope = Slope::from_scpi(args).map_err(|e| e.to_string())?
+            }
             ":TRIG:EDGE:LEV" => s.trig_level = num()?,
             ":ACQ:TYPE" => s.acq_type = AcquireType::from_scpi(args).map_err(|e| e.to_string())?,
             ":ACQ:AVER" => s.acq_aver = num()? as u32,
@@ -617,7 +655,10 @@ fn parse_depth(s: &str) -> Result<Option<usize>, String> {
     } else {
         (u.as_str(), 1.0)
     };
-    let v = num.parse::<f64>().map_err(|_| format!("bad memory depth {s:?}"))? * mult;
+    let v = num
+        .parse::<f64>()
+        .map_err(|_| format!("bad memory depth {s:?}"))?
+        * mult;
     Ok(Some((v as usize).clamp(1000, 1_000_000)))
 }
 
@@ -680,15 +721,25 @@ fn normalize_header(h: &str) -> String {
         ("APPLY", "APPL"),
     ];
     let u = h.to_ascii_uppercase();
-    let lead = if u.starts_with(':') || u.starts_with('*') { "" } else { ":" };
+    let lead = if u.starts_with(':') || u.starts_with('*') {
+        ""
+    } else {
+        ":"
+    };
     let mut out = String::from(lead);
     for (i, node) in u.split(':').enumerate() {
         if i > 0 {
             out.push(':');
         }
-        let split = node.find(|c: char| c.is_ascii_digit()).unwrap_or(node.len());
+        let split = node
+            .find(|c: char| c.is_ascii_digit())
+            .unwrap_or(node.len());
         let (word, digits) = node.split_at(split);
-        let short = LONG.iter().find(|(l, _)| *l == word).map(|(_, s)| *s).unwrap_or(word);
+        let short = LONG
+            .iter()
+            .find(|(l, _)| *l == word)
+            .map(|(_, s)| *s)
+            .unwrap_or(word);
         out.push_str(short);
         out.push_str(digits);
     }
@@ -710,7 +761,10 @@ impl Transport for SimTransport {
 
     fn read_some(&mut self, buf: &mut [u8]) -> io::Result<ReadChunk> {
         if self.pending.is_empty() {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "sim: no response pending"));
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "sim: no response pending",
+            ));
         }
         if !self.latency.is_zero() {
             std::thread::sleep(self.latency);
@@ -718,7 +772,10 @@ impl Transport for SimTransport {
         let n = buf.len().min(self.pending.len());
         buf[..n].copy_from_slice(&self.pending[..n]);
         self.pending.drain(..n);
-        Ok(ReadChunk { n, end: self.pending.is_empty() })
+        Ok(ReadChunk {
+            n,
+            end: self.pending.is_empty(),
+        })
     }
 
     fn clear(&mut self) -> io::Result<()> {
@@ -762,7 +819,15 @@ mod tests {
         let st = s.status().unwrap();
         assert_eq!(st.idn.model, "MHO954");
         assert_eq!(st.channels.len(), 4);
-        let ch = s.set_channel(2, &ChannelUpdate { scale: Some(0.2), ..Default::default() }).unwrap();
+        let ch = s
+            .set_channel(
+                2,
+                &ChannelUpdate {
+                    scale: Some(0.2),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         assert_eq!(ch.scale, 0.2);
     }
 
@@ -774,7 +839,11 @@ mod tests {
         let m = w.analyze();
         // 5 kHz sine, 2 Vpp, at 200 µs/div → 10 periods on screen.
         assert!((m.vpp - 2.0).abs() < 0.15, "vpp {}", m.vpp);
-        assert!((m.frequency.unwrap() - 5e3).abs() < 50.0, "freq {:?}", m.frequency);
+        assert!(
+            (m.frequency.unwrap() - 5e3).abs() < 50.0,
+            "freq {:?}",
+            m.frequency
+        );
     }
 
     #[test]
@@ -824,9 +893,17 @@ mod tests {
         assert!(n.manual && !n.dhcp && !n.auto_ip);
         assert_eq!(n.ip, "192.168.50.20");
         assert_eq!(n.hostname, "mho954-lab");
-        let bad = NetworkUpdate { ip: Some("300.1.1.1".into()), ..Default::default() };
+        let bad = NetworkUpdate {
+            ip: Some("300.1.1.1".into()),
+            ..Default::default()
+        };
         assert!(s.set_network(&bad).is_err());
-        let dhcp = s.set_network(&NetworkUpdate { mode: Some(IpMode::Dhcp), ..Default::default() }).unwrap();
+        let dhcp = s
+            .set_network(&NetworkUpdate {
+                mode: Some(IpMode::Dhcp),
+                ..Default::default()
+            })
+            .unwrap();
         assert!(dhcp.dhcp && !dhcp.manual);
     }
 

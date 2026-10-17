@@ -7,7 +7,9 @@ use axum::routing::{get, post};
 use mho_driver::*;
 use mho_dsp::{Measurements, SpectrumPeak, Window};
 use mho_service::live::{LiveConfig, encode_frame};
-use mho_service::{ApiError, ErrorKind, Frame, MeasureRequest, ScopeApi, ScpiRequest, ScpiResponse, ServiceInfo};
+use mho_service::{
+    ApiError, ErrorKind, Frame, MeasureRequest, ScopeApi, ScpiRequest, ScpiResponse, ServiceInfo,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
 
@@ -67,17 +69,45 @@ pub fn routes() -> Router {
 }
 
 pub fn doc_routes() -> Router {
-    Router::new().route("/docs", get(docs)).route("/", get(|| async { axum::response::Redirect::to("/docs") }))
+    Router::new()
+        .route("/docs", get(docs))
+        .route("/", get(|| async { axum::response::Redirect::to("/docs") }))
 }
 
 #[derive(OpenApi)]
 #[openapi(
-    info(title = "mho954 API", description = "Remote control for the Rigol MHO954 oscilloscope"),
+    info(
+        title = "mho954 API",
+        description = "Remote control for the Rigol MHO954 oscilloscope"
+    ),
     paths(
-        info, status, channel, set_channel, timebase, set_timebase, trigger, set_trigger, acquire,
-        set_acquire, action, measure_get, measure_post, measure_items, measure_local, fft, waveform,
-        screenshot, options, install_option, setup_save, setup_load, scpi, live_get, live_put,
-        network, set_network
+        info,
+        status,
+        channel,
+        set_channel,
+        timebase,
+        set_timebase,
+        trigger,
+        set_trigger,
+        acquire,
+        set_acquire,
+        action,
+        measure_get,
+        measure_post,
+        measure_items,
+        measure_local,
+        fft,
+        waveform,
+        screenshot,
+        options,
+        install_option,
+        setup_save,
+        setup_load,
+        scpi,
+        live_get,
+        live_put,
+        network,
+        set_network
     ),
     components(schemas(ApiError, ErrorKind))
 )]
@@ -138,7 +168,11 @@ async fn channel(State(s): State<AppState>, Path(n): Path<u8>) -> HttpResult<Jso
 
 #[utoipa::path(put, path = "/api/v1/channels/{n}", params(("n" = u8, Path, description = "Channel 1..4")),
     request_body = ChannelUpdate, responses((status = 200, body = ChannelState)))]
-async fn set_channel(State(s): State<AppState>, Path(n): Path<u8>, Json(u): Json<ChannelUpdate>) -> HttpResult<Json<ChannelState>> {
+async fn set_channel(
+    State(s): State<AppState>,
+    Path(n): Path<u8>,
+    Json(u): Json<ChannelUpdate>,
+) -> HttpResult<Json<ChannelState>> {
     Ok(Json(s.backend.set_channel(n, u).await?))
 }
 
@@ -148,7 +182,10 @@ async fn timebase(State(s): State<AppState>) -> HttpResult<Json<TimebaseState>> 
 }
 
 #[utoipa::path(put, path = "/api/v1/timebase", request_body = TimebaseUpdate, responses((status = 200, body = TimebaseState)))]
-async fn set_timebase(State(s): State<AppState>, Json(u): Json<TimebaseUpdate>) -> HttpResult<Json<TimebaseState>> {
+async fn set_timebase(
+    State(s): State<AppState>,
+    Json(u): Json<TimebaseUpdate>,
+) -> HttpResult<Json<TimebaseState>> {
     Ok(Json(s.backend.set_timebase(u).await?))
 }
 
@@ -158,7 +195,10 @@ async fn trigger(State(s): State<AppState>) -> HttpResult<Json<TriggerState>> {
 }
 
 #[utoipa::path(put, path = "/api/v1/trigger", request_body = TriggerUpdate, responses((status = 200, body = TriggerState)))]
-async fn set_trigger(State(s): State<AppState>, Json(u): Json<TriggerUpdate>) -> HttpResult<Json<TriggerState>> {
+async fn set_trigger(
+    State(s): State<AppState>,
+    Json(u): Json<TriggerUpdate>,
+) -> HttpResult<Json<TriggerState>> {
     Ok(Json(s.backend.set_trigger(u).await?))
 }
 
@@ -168,7 +208,10 @@ async fn acquire(State(s): State<AppState>) -> HttpResult<Json<AcquireState>> {
 }
 
 #[utoipa::path(put, path = "/api/v1/acquire", request_body = AcquireUpdate, responses((status = 200, body = AcquireState)))]
-async fn set_acquire(State(s): State<AppState>, Json(u): Json<AcquireUpdate>) -> HttpResult<Json<AcquireState>> {
+async fn set_acquire(
+    State(s): State<AppState>,
+    Json(u): Json<AcquireUpdate>,
+) -> HttpResult<Json<AcquireState>> {
     Ok(Json(s.backend.set_acquire(u).await?))
 }
 
@@ -191,13 +234,32 @@ struct MeasureQuery {
 }
 
 #[utoipa::path(get, path = "/api/v1/measure", params(MeasureQuery), responses((status = 200, body = Vec<Measurement>)))]
-async fn measure_get(State(s): State<AppState>, Query(q): Query<MeasureQuery>) -> HttpResult<Json<Vec<Measurement>>> {
-    let items = q.items.split(',').map(|i| i.trim().to_string()).filter(|i| !i.is_empty()).collect();
-    Ok(Json(s.backend.measure(MeasureRequest { items, source: q.source, source2: q.source2 }).await?))
+async fn measure_get(
+    State(s): State<AppState>,
+    Query(q): Query<MeasureQuery>,
+) -> HttpResult<Json<Vec<Measurement>>> {
+    let items = q
+        .items
+        .split(',')
+        .map(|i| i.trim().to_string())
+        .filter(|i| !i.is_empty())
+        .collect();
+    Ok(Json(
+        s.backend
+            .measure(MeasureRequest {
+                items,
+                source: q.source,
+                source2: q.source2,
+            })
+            .await?,
+    ))
 }
 
 #[utoipa::path(post, path = "/api/v1/measure", request_body = MeasureRequest, responses((status = 200, body = Vec<Measurement>)))]
-async fn measure_post(State(s): State<AppState>, Json(r): Json<MeasureRequest>) -> HttpResult<Json<Vec<Measurement>>> {
+async fn measure_post(
+    State(s): State<AppState>,
+    Json(r): Json<MeasureRequest>,
+) -> HttpResult<Json<Vec<Measurement>>> {
     Ok(Json(s.backend.measure(r).await?))
 }
 
@@ -221,9 +283,15 @@ struct LocalMeasurements {
 
 /// Measurements computed by this server from the screen waveform (not by the scope).
 #[utoipa::path(get, path = "/api/v1/measure/local", params(SourceQuery), responses((status = 200, body = LocalMeasurements)))]
-async fn measure_local(State(s): State<AppState>, Query(q): Query<SourceQuery>) -> HttpResult<Json<LocalMeasurements>> {
+async fn measure_local(
+    State(s): State<AppState>,
+    Query(q): Query<SourceQuery>,
+) -> HttpResult<Json<LocalMeasurements>> {
     let w = s.backend.waveform(q.source, WaveMode::Normal).await?;
-    Ok(Json(LocalMeasurements { values: w.analyze(), source: w.source }))
+    Ok(Json(LocalMeasurements {
+        values: w.analyze(),
+        source: w.source,
+    }))
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -253,8 +321,15 @@ struct FftResponse {
 }
 
 #[utoipa::path(get, path = "/api/v1/fft", params(FftQuery), responses((status = 200, body = FftResponse)))]
-async fn fft(State(s): State<AppState>, Query(q): Query<FftQuery>) -> HttpResult<Json<FftResponse>> {
-    let mode = if q.raw { WaveMode::Raw } else { WaveMode::Normal };
+async fn fft(
+    State(s): State<AppState>,
+    Query(q): Query<FftQuery>,
+) -> HttpResult<Json<FftResponse>> {
+    let mode = if q.raw {
+        WaveMode::Raw
+    } else {
+        WaveMode::Normal
+    };
     let w = s.backend.waveform(q.source, mode).await?;
     let spec = mho_dsp::spectrum(&w.volts(), w.preamble.x_increment, q.window);
     Ok(Json(FftResponse {
@@ -277,7 +352,11 @@ struct WaveformQuery {
 
 #[utoipa::path(get, path = "/api/v1/waveform/{source}", params(("source" = String, Path), WaveformQuery),
     responses((status = 200, body = Waveform)))]
-async fn waveform(State(s): State<AppState>, Path(source): Path<String>, Query(q): Query<WaveformQuery>) -> HttpResult<Response> {
+async fn waveform(
+    State(s): State<AppState>,
+    Path(source): Path<String>,
+    Query(q): Query<WaveformQuery>,
+) -> HttpResult<Response> {
     let mode = WaveMode::from_scpi(q.mode.as_deref().unwrap_or("norm")).map_err(ApiError::from)?;
     let w = s.backend.waveform(source, mode).await?;
     let format = q.format.as_deref().unwrap_or("json").to_ascii_lowercase();
@@ -290,22 +369,42 @@ async fn waveform(State(s): State<AppState>, Path(source): Path<String>, Query(q
                 &mut out,
                 w.preamble.time(0),
                 w.preamble.x_increment,
-                &[mho_dsp::export::CsvColumn { name: &w.source, volts: &volts }],
+                &[mho_dsp::export::CsvColumn {
+                    name: &w.source,
+                    volts: &volts,
+                }],
             )
             .map_err(|e| ApiError::new(ErrorKind::Internal, e.to_string()))?;
             ([(header::CONTENT_TYPE, "text/csv")], out).into_response()
         }
         "npy" => {
-            let bytes = mho_dsp::export::npy_bytes(&w.raw).map_err(|e| ApiError::new(ErrorKind::Internal, e.to_string()))?;
+            let bytes = mho_dsp::export::npy_bytes(&w.raw)
+                .map_err(|e| ApiError::new(ErrorKind::Internal, e.to_string()))?;
             (
-                [(header::CONTENT_TYPE, "application/octet-stream".to_string()), (header::HeaderName::from_static("x-preamble"), w.preamble.to_scpi())],
+                [
+                    (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+                    (
+                        header::HeaderName::from_static("x-preamble"),
+                        w.preamble.to_scpi(),
+                    ),
+                ],
                 bytes,
             )
                 .into_response()
         }
         "bin" => {
-            let frame = Frame { seq: 0, timestamp_ms: mho_service::live::now_ms(), trigger_status: String::new(), fps: 0.0, traces: vec![w] };
-            ([(header::CONTENT_TYPE, "application/octet-stream")], encode_frame(&frame)).into_response()
+            let frame = Frame {
+                seq: 0,
+                timestamp_ms: mho_service::live::now_ms(),
+                trigger_status: String::new(),
+                fps: 0.0,
+                traces: vec![w],
+            };
+            (
+                [(header::CONTENT_TYPE, "application/octet-stream")],
+                encode_frame(&frame),
+            )
+                .into_response()
         }
         other => return Err(ApiError::invalid(format!("unknown format {other:?}")).into()),
     })
@@ -329,7 +428,10 @@ struct InstallRequest {
 }
 
 #[utoipa::path(post, path = "/api/v1/options/install", request_body = InstallRequest, responses((status = 204)))]
-async fn install_option(State(s): State<AppState>, Json(r): Json<InstallRequest>) -> HttpResult<StatusCode> {
+async fn install_option(
+    State(s): State<AppState>,
+    Json(r): Json<InstallRequest>,
+) -> HttpResult<StatusCode> {
     s.backend.install_option(r.key).await?;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -348,7 +450,10 @@ async fn setup_load(State(s): State<AppState>, body: Bytes) -> HttpResult<Status
 
 #[utoipa::path(post, path = "/api/v1/scpi", request_body = ScpiRequest,
     responses((status = 200, body = ScpiResponse), (status = 403, body = ApiError)))]
-async fn scpi(State(s): State<AppState>, Json(r): Json<ScpiRequest>) -> HttpResult<Json<ScpiResponse>> {
+async fn scpi(
+    State(s): State<AppState>,
+    Json(r): Json<ScpiRequest>,
+) -> HttpResult<Json<ScpiResponse>> {
     Ok(Json(s.backend.scpi(r).await?))
 }
 
@@ -358,7 +463,10 @@ async fn live_get(State(s): State<AppState>) -> HttpResult<Json<LiveConfig>> {
 }
 
 #[utoipa::path(put, path = "/api/v1/live", request_body = LiveConfig, responses((status = 200, body = LiveConfig)))]
-async fn live_put(State(s): State<AppState>, Json(c): Json<LiveConfig>) -> HttpResult<Json<LiveConfig>> {
+async fn live_put(
+    State(s): State<AppState>,
+    Json(c): Json<LiveConfig>,
+) -> HttpResult<Json<LiveConfig>> {
     Ok(Json(s.backend.set_live_config(c).await?))
 }
 
@@ -370,6 +478,9 @@ async fn network(State(s): State<AppState>) -> HttpResult<Json<NetworkState>> {
 
 /// Changes LAN settings and applies them (`:LAN:APPLy`).
 #[utoipa::path(put, path = "/api/v1/network", request_body = NetworkUpdate, responses((status = 200, body = NetworkState)))]
-async fn set_network(State(s): State<AppState>, Json(u): Json<NetworkUpdate>) -> HttpResult<Json<NetworkState>> {
+async fn set_network(
+    State(s): State<AppState>,
+    Json(u): Json<NetworkUpdate>,
+) -> HttpResult<Json<NetworkState>> {
     Ok(Json(s.backend.set_network(u).await?))
 }

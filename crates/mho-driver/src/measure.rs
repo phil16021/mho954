@@ -21,12 +21,34 @@ pub struct MeasureItem {
     pub dual_source: bool,
 }
 
-const fn item(token: &'static str, long: &'static str, unit: &'static str, description: &'static str) -> MeasureItem {
-    MeasureItem { token, long, unit, description, dual_source: false }
+const fn item(
+    token: &'static str,
+    long: &'static str,
+    unit: &'static str,
+    description: &'static str,
+) -> MeasureItem {
+    MeasureItem {
+        token,
+        long,
+        unit,
+        description,
+        dual_source: false,
+    }
 }
 
-const fn dual(token: &'static str, long: &'static str, unit: &'static str, description: &'static str) -> MeasureItem {
-    MeasureItem { token, long, unit, description, dual_source: true }
+const fn dual(
+    token: &'static str,
+    long: &'static str,
+    unit: &'static str,
+    description: &'static str,
+) -> MeasureItem {
+    MeasureItem {
+        token,
+        long,
+        unit,
+        description,
+        dual_source: true,
+    }
 }
 
 pub const MEASURE_ITEMS: &[MeasureItem] = &[

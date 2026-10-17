@@ -21,7 +21,12 @@ pub fn write_csv<W: Write>(out: W, t0: f64, dt: f64, columns: &[CsvColumn<'_>]) 
         record.clear();
         record.push(format!("{:.12e}", t0 + i as f64 * dt));
         for c in columns {
-            record.push(c.volts.get(i).map(|v| format!("{v:.6e}")).unwrap_or_default());
+            record.push(
+                c.volts
+                    .get(i)
+                    .map(|v| format!("{v:.6e}"))
+                    .unwrap_or_default(),
+            );
         }
         w.write_record(&record)?;
     }
@@ -30,12 +35,16 @@ pub fn write_csv<W: Write>(out: W, t0: f64, dt: f64, columns: &[CsvColumn<'_>]) 
 
 /// Serialises raw `u16` ADC codes as a 1-D `.npy` array (format version 1.0, little endian).
 pub fn npy_bytes(raw: &[u16]) -> io::Result<Vec<u8>> {
-    let mut header = format!("{{'descr': '<u2', 'fortran_order': False, 'shape': ({},), }}", raw.len());
+    let mut header = format!(
+        "{{'descr': '<u2', 'fortran_order': False, 'shape': ({},), }}",
+        raw.len()
+    );
     // magic(6) + version(2) + header length(2) + header must be a multiple of 64, ending in '\n'.
     let total = 10 + header.len() + 1;
     header.push_str(&" ".repeat((64 - total % 64) % 64));
     header.push('\n');
-    let header_len = u16::try_from(header.len()).map_err(|_| io::Error::other("npy header too long"))?;
+    let header_len =
+        u16::try_from(header.len()).map_err(|_| io::Error::other("npy header too long"))?;
 
     let mut buf = Vec::with_capacity(10 + header.len() + raw.len() * 2);
     buf.extend_from_slice(b"\x93NUMPY\x01\x00");
@@ -59,7 +68,16 @@ mod tests {
     fn csv_layout() {
         let mut out = Vec::new();
         let a = [1.0, 2.0];
-        write_csv(&mut out, 0.0, 1e-3, &[CsvColumn { name: "CHAN1", volts: &a }]).unwrap();
+        write_csv(
+            &mut out,
+            0.0,
+            1e-3,
+            &[CsvColumn {
+                name: "CHAN1",
+                volts: &a,
+            }],
+        )
+        .unwrap();
         let s = String::from_utf8(out).unwrap();
         let lines: Vec<&str> = s.lines().collect();
         assert_eq!(lines[0], "time_s,CHAN1_V");
@@ -76,8 +94,12 @@ mod tests {
         assert_eq!((10 + header_len) % 64, 0);
         let header = std::str::from_utf8(&bytes[10..10 + header_len]).unwrap();
         assert!(header.contains("'shape': (3,)") && header.ends_with('\n'));
-        let data: Vec<u16> =
-            bytes[10 + header_len..].chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let data: Vec<u16> = bytes[10 + header_len..]
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .collect();
         assert_eq!(data, raw);
     }
 }

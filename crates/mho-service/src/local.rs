@@ -24,7 +24,12 @@ impl LocalBackend {
         let hub = LiveHub::new(live);
         let live_stop = tokio_util::sync::CancellationToken::new();
         tokio::spawn(run_loop(device.clone(), hub.clone(), live_stop.clone()));
-        LocalBackend { device, hub, allow_raw_scpi, live_stop }
+        LocalBackend {
+            device,
+            hub,
+            allow_raw_scpi,
+            live_stop,
+        }
     }
 
     /// Stops the live loop and closes the scope connection cleanly (see [`Device::shutdown`]).
@@ -51,7 +56,9 @@ impl LocalBackend {
         source: String,
         progress: Arc<dyn Fn(usize, usize) + Send + Sync>,
     ) -> ApiResult<Waveform> {
-        self.device.call(move |s| s.raw_waveform(&source, &mut |a, b| progress(a, b))).await
+        self.device
+            .call(move |s| s.raw_waveform(&source, &mut |a, b| progress(a, b)))
+            .await
     }
 }
 
@@ -79,7 +86,9 @@ impl ScopeApi for LocalBackend {
     }
 
     async fn set_channel(&self, n: u8, update: ChannelUpdate) -> ApiResult<ChannelState> {
-        self.device.call_mut(move |s| s.set_channel(n, &update)).await
+        self.device
+            .call_mut(move |s| s.set_channel(n, &update))
+            .await
     }
 
     async fn timebase(&self) -> ApiResult<TimebaseState> {
@@ -116,7 +125,10 @@ impl ScopeApi for LocalBackend {
         }
         self.device
             .call(move |s| {
-                req.items.iter().map(|i| s.measure(i, &req.source, req.source2.as_deref())).collect()
+                req.items
+                    .iter()
+                    .map(|i| s.measure(i, &req.source, req.source2.as_deref()))
+                    .collect()
             })
             .await
     }
@@ -124,7 +136,11 @@ impl ScopeApi for LocalBackend {
     async fn waveform(&self, source: String, mode: WaveMode) -> ApiResult<Waveform> {
         match mode {
             WaveMode::Raw => self.raw_waveform(source, Arc::new(|_, _| {})).await,
-            _ => self.device.call(move |s| s.screen_waveform(&source, None)).await,
+            _ => {
+                self.device
+                    .call(move |s| s.screen_waveform(&source, None))
+                    .await
+            }
         }
     }
 
@@ -156,7 +172,10 @@ impl ScopeApi for LocalBackend {
             ));
         }
         let timeout = Duration::from_millis(req.timeout_ms.unwrap_or(2000).clamp(100, 60_000));
-        let response = self.device.call_mut(move |s| s.raw(&req.command, timeout)).await?;
+        let response = self
+            .device
+            .call_mut(move |s| s.raw(&req.command, timeout))
+            .await?;
         Ok(ScpiResponse { response })
     }
 
