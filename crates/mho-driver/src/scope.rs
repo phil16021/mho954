@@ -119,7 +119,7 @@ impl Scope {
             Connection::Usbtmc { path: Some(p) } => Box::new(UsbTmcTransport::open(p)?),
             Connection::Usbtmc { path: None } => Box::new(UsbTmcTransport::open_first()?),
             Connection::Tcp { addr } => Box::new(TcpTransport::connect(addr)?),
-            Connection::Sim => Box::new(SimTransport::new()),
+            Connection::Sim => Box::new(SimTransport::from_env()),
         };
         Self::from_transport(transport)
     }
@@ -843,8 +843,8 @@ impl Scope {
     /// Sends arbitrary SCPI. Queries (containing `?`) return the response line; commands
     /// return `None` after checking the error queue.
     ///
-    /// The MHO954 does not answer unknown queries and its firmware stops answering anything
-    /// after several of them in a row, even after a device clear. So after an unanswered query
+    /// The MHO954 does not answer unknown queries; after about five of them since power-on its
+    /// firmware stops answering anything, even with device clears and valid queries in between. So after an unanswered query
     /// the scope's health is checked with `*IDN?`, and further raw queries are refused until
     /// that check succeeds.
     pub fn raw(&mut self, cmd: &str, timeout: Duration) -> Result<Option<String>> {

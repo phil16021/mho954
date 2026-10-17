@@ -14,4 +14,4 @@ pub use error::{DriverError, Result};
 pub use measure::{MEASURE_ITEMS, MeasureItem, find_item};
 pub use model::*;
 pub use scope::{Connection, Scope};
-pub use sim::SimTransport;
+pub use sim::{SimOptions, SimTransport};

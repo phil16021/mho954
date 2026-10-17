@@ -10,7 +10,7 @@ MHO954 (Serie `MHO9X000000000`, `*IDN?`-Firmware `00.01.00`, USB über USB/IP vo
 |---|---|---|
 | USB | `1ab1:0452`, Kernel-Treiber `usbtmc`, `/dev/usbtmc0` bzw. udev-Symlink `/dev/usbtmc_MHO954` | Gerät |
 | Latenz | 24–37 ms pro Query, `:MEAS:ITEM?` ≈ 130 ms | Gerät |
-| Unbekannte Query | **keine Antwort**; danach antwortet das Scope auf nichts mehr, bis ein USBTMC Device Clear (INITIATE_CLEAR) kommt. Einzelne Fälle erholen sich damit zuverlässig; **mehrere unbekannte Queries hintereinander** hängen die Firmware trotz Clear auf (Neustart nötig) | Gerät |
+| Unbekannte Query | **keine Antwort**; danach antwortet das Scope auf nichts mehr, bis ein USBTMC Device Clear (INITIATE_CLEAR) kommt. Einzelne Fälle erholen sich damit zuverlässig; Einzelne Fälle erholen sich damit zuverlässig. **Nach rund fünf unbekannten Queries seit dem Einschalten hängt die Firmware dauerhaft**, auch wenn dazwischen gültige Queries und Clears liegen (Neustart nötig). Neue Befehle deshalb höchstens 3 pro Einschaltzyklus ungeprüft testen | Gerät |
 | Recovery | `CLEAR_OUT_HALT` + `CLEAR_IN_HALT` + `CLEAR` stellt den Betrieb wieder her | Gerät |
 | `ABORT_BULK_IN` | hängt unter USB/IP (`vhci_hcd`) im Kernel (`usb_kill_urb`, Prozess in D-State) → **nie verwenden** | Gerät |
 | `*OPC?` | liefert `1` (anders als bei DHO800/900, wo es immer `0` liefert) | Gerät |

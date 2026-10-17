@@ -130,8 +130,74 @@ impl Default for SimState {
     }
 }
 
+/// Simulator behaviour switches; `MHO954_SIM` (e.g. `latency=25,nosignal=1+4,fullidn`)
+/// configures the simulator used by `--connection sim`.
+#[derive(Debug, Clone)]
+pub struct SimOptions {
+    /// Per-response latency (the real scope needs ~25 ms over USB/IP).
+    pub latency: Duration,
+    /// Channels that deliver no data (all 0xFFFF), like CH1/CH4 on the test scope.
+    pub no_signal: [bool; 4],
+    /// Report the shortened firmware version like the real `*IDN?` (`00.01.00`).
+    pub truncate_idn: bool,
+    /// Unknown queries since power-on after which the simulated firmware stops answering for
+    /// good. The real MHO954 hung after the 5th, even with valid queries and device clears in
+    /// between.
+    pub hang_after: u32,
+}
+
+impl Default for SimOptions {
+    fn default() -> Self {
+        SimOptions {
+            latency: Duration::ZERO,
+            no_signal: [false; 4],
+            truncate_idn: true,
+            hang_after: 5,
+        }
+    }
+}
+
+impl SimOptions {
+    pub fn from_env() -> Self {
+        let mut o = SimOptions::default();
+        let Ok(spec) = std::env::var("MHO954_SIM") else {
+            return o;
+        };
+        for part in spec.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+            let (k, v) = part.split_once('=').unwrap_or((part, ""));
+            match k {
+                "latency" => {
+                    if let Ok(ms) = v.trim_end_matches("ms").parse::<u64>() {
+                        o.latency = Duration::from_millis(ms);
+                    }
+                }
+                "nosignal" => {
+                    for n in v.split('+').filter_map(|c| c.parse::<usize>().ok()) {
+                        if (1..=4).contains(&n) {
+                            o.no_signal[n - 1] = true;
+                        }
+                    }
+                }
+                "fullidn" => o.truncate_idn = false,
+                "hang_after" => o.hang_after = v.parse().unwrap_or(o.hang_after),
+                _ => tracing::warn!("MHO954_SIM: unknown option {k:?}"),
+            }
+        }
+        o
+    }
+}
+
 pub struct SimTransport {
     state: SimState,
+    opts: SimOptions,
+    /// An unknown query was received: nothing is answered until a device clear.
+    blocked: bool,
+    /// Unknown queries since power-on.
+    unknown_count: u32,
+    /// Firmware hung for good (power cycle needed).
+    hung: bool,
+    /// `:MEAS:ITEM?` item/source pairs seen; the first query of each returns 9.9E37.
+    measured: std::collections::HashSet<String>,
     errors: Vec<(i32, String)>,
     pending: Vec<u8>,
     rng: u64,
@@ -151,15 +217,29 @@ impl Default for SimTransport {
 
 impl SimTransport {
     pub fn new() -> Self {
+        Self::with_options(SimOptions::default())
+    }
+
+    /// Simulator configured from `MHO954_SIM`.
+    pub fn from_env() -> Self {
+        Self::with_options(SimOptions::from_env())
+    }
+
+    pub fn with_options(opts: SimOptions) -> Self {
         SimTransport {
             state: SimState::default(),
+            latency: opts.latency,
+            opts,
+            blocked: false,
+            unknown_count: 0,
+            hung: false,
+            measured: Default::default(),
             errors: Vec::new(),
             pending: Vec::new(),
             rng: 0x2545_F491_4F6C_DD1D,
             started: Instant::now(),
             frozen_at: 0.0,
             timeout: Duration::from_secs(2),
-            latency: Duration::ZERO,
         }
     }
 
@@ -294,7 +374,22 @@ impl SimTransport {
             .collect()
     }
 
+    fn no_signal(&self, src: &str) -> bool {
+        Self::channel_index(src).is_some_and(|n| self.opts.no_signal[n - 1])
+    }
+
     fn wave_codes(&mut self) -> Vec<u16> {
+        if self.no_signal(&self.state.wav_source.clone()) {
+            let (points, ..) = self.preamble();
+            let n = match self.state.wav_mode {
+                WaveMode::Raw => {
+                    let start = self.state.wav_start.clamp(1, points);
+                    self.state.wav_stop.clamp(start, points) - start + 1
+                }
+                _ => points,
+            };
+            return vec![u16::MAX; n];
+        }
         let (points, x_inc, x_org, y_inc, y_org) = self.preamble();
         let src = self.state.wav_source.clone();
         let (first, count) = match self.state.wav_mode {
@@ -313,6 +408,9 @@ impl SimTransport {
 
     fn measure(&mut self, item: &str, src: &str) -> Option<f64> {
         let it = find_item(item).ok()?;
+        if self.no_signal(src) {
+            return Some(9.9e37);
+        }
         Self::channel_index(src)?;
         let (x_inc, x_org) = self.screen_timing();
         let v = self.samples(src, 0, SCREEN_POINTS, x_inc, x_org);
@@ -367,14 +465,33 @@ impl SimTransport {
             Some((h, a)) => (h, a.trim()),
             None => (line, ""),
         };
+        if self.hung || self.blocked {
+            // Like the real firmware: nothing is processed until a device clear (or, once
+            // hung, a power cycle).
+            return;
+        }
         let query = header.ends_with('?');
         let hdr = normalize_header(header.trim_end_matches('?'));
         if query {
             if !self.query(&hdr, args) {
                 tracing::debug!(%line, "sim: unknown query (no response, like the real scope)");
+                self.blocked = true;
+                self.unknown_count += 1;
+                if self.unknown_count >= self.opts.hang_after {
+                    tracing::warn!(
+                        "sim: firmware hung after {} unknown queries",
+                        self.unknown_count
+                    );
+                    self.hung = true;
+                }
             }
         } else if let Err(msg) = self.command(&hdr, args) {
-            self.error(-113, &msg);
+            let code = if msg.starts_with("undefined header") {
+                -113
+            } else {
+                -224
+            };
+            self.error(code, &msg);
         }
     }
 
@@ -401,7 +518,14 @@ impl SimTransport {
             return true;
         }
         let r = match hdr {
-            "*IDN" => "RIGOL TECHNOLOGIES,MHO954,SIM0000001,00.01.00.00.26".into(),
+            "*IDN" => format!(
+                "RIGOL TECHNOLOGIES,MHO954,SIM0000001,{}",
+                if self.opts.truncate_idn {
+                    "00.01.00"
+                } else {
+                    "00.01.00.00.26"
+                }
+            ),
             "*OPC" => "1".into(),
             ":SYST:ERR" => match self.errors.first().cloned() {
                 Some((c, m)) => {
@@ -495,7 +619,7 @@ impl SimTransport {
                 return true;
             }
             ":SYST:SET" => {
-                let blob = format!("SIMSETUP{:?}", self.state).into_bytes();
+                let blob = self.setup_blob();
                 self.respond_block(&blob);
                 return true;
             }
@@ -504,7 +628,11 @@ impl SimTransport {
                 let (Some(item), Some(src)) = (parts.next(), parts.next()) else {
                     return false;
                 };
+                let key = format!("{item},{src}").to_ascii_uppercase();
                 match self.measure(item, &src.to_ascii_uppercase()) {
+                    // The real scope creates the measurement on first use and reports
+                    // "invalid" until it has been evaluated once.
+                    Some(_) if self.measured.insert(key) => "9.9000E+37".into(),
                     Some(v) => format!("{v:.4E}"),
                     None => return false,
                 }
@@ -643,6 +771,64 @@ impl SimTransport {
     }
 }
 
+impl SimTransport {
+    /// Setup blob: `SIMSETUP` followed by `key=value` lines (the real scope's format is binary).
+    fn setup_blob(&self) -> Vec<u8> {
+        let s = &self.state;
+        let mut out = String::from("SIMSETUP\n");
+        for (i, c) in s.ch.iter().enumerate() {
+            let n = i + 1;
+            out += &format!(
+                "ch{n}.display={}\nch{n}.scale={}\nch{n}.offset={}\n",
+                c.display, c.scale, c.offset
+            );
+        }
+        out += &format!("tim.scale={}\ntim.offset={}\n", s.tim_scale, s.tim_offset);
+        out += &format!(
+            "trig.level={}\ntrig.source={}\n",
+            s.trig_level, s.trig_source
+        );
+        out.into_bytes()
+    }
+
+    fn load_setup(&mut self, blob: &[u8]) -> Result<(), String> {
+        let text = std::str::from_utf8(blob).map_err(|e| e.to_string())?;
+        let mut lines = text.lines();
+        if lines.next() != Some("SIMSETUP") {
+            return Err("not a simulator setup".into());
+        }
+        for line in lines {
+            let (k, v) = line.split_once('=').ok_or("bad line")?;
+            let f = || v.parse::<f64>().map_err(|e| e.to_string());
+            match k {
+                "tim.scale" => self.state.tim_scale = f()?,
+                "tim.offset" => self.state.tim_offset = f()?,
+                "trig.level" => self.state.trig_level = f()?,
+                "trig.source" => self.state.trig_source = v.to_string(),
+                _ => {
+                    let (ch, prop) = k.split_once('.').ok_or("bad key")?;
+                    let n: usize = ch
+                        .strip_prefix("ch")
+                        .and_then(|n| n.parse().ok())
+                        .ok_or("bad channel")?;
+                    let c = self
+                        .state
+                        .ch
+                        .get_mut(n.wrapping_sub(1))
+                        .ok_or("bad channel")?;
+                    match prop {
+                        "display" => c.display = v == "true",
+                        "scale" => c.scale = f()?,
+                        "offset" => c.offset = f()?,
+                        _ => return Err(format!("unknown key {k}")),
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 fn parse_depth(s: &str) -> Result<Option<usize>, String> {
     let u = s.trim().to_ascii_uppercase();
     if u == "AUTO" {
@@ -748,8 +934,17 @@ fn normalize_header(h: &str) -> String {
 
 impl Transport for SimTransport {
     fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
-        // Binary setup block: accept without parsing.
         if data.starts_with(b":SYST:SET #") || data.starts_with(b":SYSTEM:SETUP #") {
+            if !(self.hung || self.blocked) {
+                let start = data.iter().position(|&b| b == b'#').unwrap_or(0);
+                if let Ok(Some(h)) = mho_scpi::parse_block_header(&data[start..]) {
+                    let body = &data[start + h.header_len..];
+                    let body = &body[..h.data_len.unwrap_or(body.len()).min(body.len())];
+                    if self.load_setup(body).is_err() {
+                        self.error(-224, "invalid setup data");
+                    }
+                }
+            }
             return Ok(());
         }
         let text = String::from_utf8_lossy(data).into_owned();
@@ -780,6 +975,9 @@ impl Transport for SimTransport {
 
     fn clear(&mut self) -> io::Result<()> {
         self.pending.clear();
+        if !self.hung {
+            self.blocked = false;
+        }
         Ok(())
     }
 
@@ -905,6 +1103,72 @@ mod tests {
             })
             .unwrap();
         assert!(dhcp.dhcp && !dhcp.manual);
+    }
+
+    fn scope_with(opts: SimOptions) -> Scope {
+        Scope::from_transport(Box::new(SimTransport::with_options(opts))).unwrap()
+    }
+
+    #[test]
+    fn unknown_query_blocks_until_clear_then_recovers() {
+        let mut s = scope();
+        // raw(): timeout → device clear → health check → usable again.
+        let err = s.raw(":WLAN:SSID?", Duration::from_millis(50)).unwrap_err();
+        assert!(err.to_string().contains("no answer"), "{err}");
+        assert!(!err.to_string().contains("power-cycle"));
+        assert_eq!(s.trigger_status().unwrap(), "AUTO");
+    }
+
+    #[test]
+    fn repeated_unknown_queries_hang_the_firmware() {
+        let mut s = scope_with(SimOptions {
+            hang_after: 2,
+            ..Default::default()
+        });
+        let _ = s.raw(":FOO?", Duration::from_millis(50));
+        let err = s.raw(":BAR?", Duration::from_millis(50)).unwrap_err();
+        assert!(err.to_string().contains("power-cycle"), "{err}");
+        // Further raw access is refused instead of poking the hung scope.
+        let err = s.raw(":TIM:SCAL?", Duration::from_millis(50)).unwrap_err();
+        assert!(err.to_string().contains("power-cycle"), "{err}");
+    }
+
+    #[test]
+    fn channel_without_signal_has_no_data() {
+        let mut opts = SimOptions::default();
+        opts.no_signal[0] = true;
+        let mut s = scope_with(opts);
+        let w = s.screen_waveform("CHAN1", None).unwrap();
+        assert!(!w.has_data());
+        assert_eq!(w.analyze().samples, 0);
+        assert_eq!(s.measure("VPP", "CHAN1", None).unwrap().value, None);
+        assert!(s.screen_waveform("CHAN2", None).unwrap().has_data());
+    }
+
+    #[test]
+    fn first_measurement_is_retried() {
+        let mut s = scope();
+        // The simulator answers 9.9E37 on first use like the real scope; the driver retries.
+        let m = s.measure("FREQ", "CHAN2", None).unwrap();
+        assert!(m.value.is_some(), "{m:?}");
+    }
+
+    #[test]
+    fn idn_is_truncated_like_the_real_scope() {
+        assert_eq!(scope().idn().firmware, "00.01.00");
+    }
+
+    #[test]
+    fn setup_roundtrip() {
+        let mut s = scope();
+        let blob = s.setup_save().unwrap();
+        s.set_timebase(&crate::TimebaseUpdate {
+            scale: Some(1e-3),
+            ..Default::default()
+        })
+        .unwrap();
+        s.setup_load(&blob).unwrap();
+        assert!((s.timebase().unwrap().scale - 200e-6).abs() < 1e-12);
     }
 
     #[test]
