@@ -10,6 +10,12 @@ pub enum DriverError {
     Device(String),
     #[error("not supported: {0}")]
     Unsupported(String),
+    /// The scope answered with something that violates the expected format.
+    #[error("protocol error: {0}")]
+    Protocol(String),
+    /// The operation is not possible in the scope's current state (e.g. RAW while running).
+    #[error("{0}")]
+    State(String),
 }
 
 impl From<std::io::Error> for DriverError {

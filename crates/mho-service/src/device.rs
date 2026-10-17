@@ -12,6 +12,15 @@ use crate::api::{ApiError, ApiResult, ErrorKind};
 
 type Job = Box<dyn FnOnce(&mut Slot) + Send>;
 
+enum Msg {
+    Job(Job),
+    /// Drop the scope (finishing any reply in flight) and end the thread.
+    Close,
+}
+
+/// Jobs waiting for the device; callers wait when it is full.
+const QUEUE_DEPTH: usize = 64;
+
 /// Connection state visible without going through the job queue.
 #[derive(Debug, Clone, Default)]
 pub struct DeviceState {
@@ -100,17 +109,18 @@ impl Slot {
 /// Handle to the device thread. Cheap to clone.
 #[derive(Clone)]
 pub struct Device {
-    tx: mpsc::UnboundedSender<Job>,
+    tx: mpsc::Sender<Msg>,
     shared: Arc<Mutex<DeviceState>>,
     epoch: Arc<AtomicU64>,
     connection: Connection,
+    thread: Arc<Mutex<Option<std::thread::JoinHandle<()>>>>,
 }
 
 impl Device {
     /// Starts the device thread. The scope is opened lazily on the first job and reopened
     /// automatically after it disappears.
     pub fn spawn(connection: Connection) -> Device {
-        let (tx, mut rx) = mpsc::unbounded_channel::<Job>();
+        let (tx, mut rx) = mpsc::channel::<Msg>(QUEUE_DEPTH);
         let shared = Arc::new(Mutex::new(DeviceState::default()));
         let mut slot = Slot {
             conn: connection.clone(),
@@ -120,16 +130,36 @@ impl Device {
             consecutive_timeouts: 0,
             shared: shared.clone(),
         };
-        std::thread::Builder::new()
+        let handle = std::thread::Builder::new()
             .name("mho-device".into())
             .spawn(move || {
-                while let Some(job) = rx.blocking_recv() {
-                    job(&mut slot);
+                while let Some(msg) = rx.blocking_recv() {
+                    match msg {
+                        Msg::Job(job) => {
+                            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| job(&mut slot)));
+                            if r.is_err() {
+                                // The scope state is unknown after a panic: reconnect on next use.
+                                warn!("device job panicked; dropping the connection");
+                                slot.scope = None;
+                                slot.shared.lock().unwrap().connected = false;
+                            }
+                        }
+                        Msg::Close => break,
+                    }
                 }
+                // Dropping the scope drains any reply in flight and releases the interface.
+                slot.scope = None;
+                slot.shared.lock().unwrap().connected = false;
                 info!("device thread stopped");
             })
             .expect("spawn device thread");
-        Device { tx, shared, epoch: Arc::new(AtomicU64::new(0)), connection }
+        Device {
+            tx,
+            shared,
+            epoch: Arc::new(AtomicU64::new(0)),
+            connection,
+            thread: Arc::new(Mutex::new(Some(handle))),
+        }
     }
 
     /// Runs `f` on the device thread.
@@ -142,7 +172,10 @@ impl Device {
         let job: Job = Box::new(move |slot| {
             let _ = tx.send(slot.run(f));
         });
-        self.tx.send(job).map_err(|_| ApiError::new(ErrorKind::Internal, "device thread stopped"))?;
+        self.tx
+            .send(Msg::Job(job))
+            .await
+            .map_err(|_| ApiError::new(ErrorKind::Internal, "device thread stopped"))?;
         rx.await.map_err(|_| ApiError::new(ErrorKind::Internal, "device job dropped"))?
     }
 
@@ -156,6 +189,18 @@ impl Device {
         let r = self.call(f).await;
         self.epoch.fetch_add(1, Ordering::Relaxed);
         r
+    }
+
+    /// Finishes queued jobs, closes the scope connection cleanly and joins the thread.
+    /// Must be called before the process exits, otherwise the scope may be left mid-transfer.
+    pub async fn shutdown(&self) {
+        if self.tx.send(Msg::Close).await.is_err() {
+            return;
+        }
+        let handle = self.thread.lock().unwrap().take();
+        if let Some(h) = handle {
+            let _ = tokio::task::spawn_blocking(move || h.join()).await;
+        }
     }
 
     pub fn state(&self) -> DeviceState {

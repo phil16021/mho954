@@ -20,6 +20,10 @@ pub enum ErrorKind {
     Unavailable,
     /// Operation disabled by configuration (e.g. raw SCPI).
     Forbidden,
+    /// Not possible in the scope's current state (e.g. RAW readout while running).
+    Conflict,
+    /// The scope answered in an unexpected format.
+    Protocol,
     Internal,
 }
 
@@ -50,12 +54,15 @@ impl From<DriverError> for ApiError {
             DriverError::Invalid(_) => ErrorKind::InvalidArgument,
             DriverError::Device(_) => ErrorKind::Device,
             DriverError::Unsupported(_) => ErrorKind::InvalidArgument,
+            DriverError::Protocol(_) => ErrorKind::Protocol,
+            DriverError::State(_) => ErrorKind::Conflict,
             DriverError::Scpi(s) if s.is_timeout() => ErrorKind::Timeout,
             DriverError::Scpi(mho_scpi::ScpiError::NotFound(_)) => ErrorKind::Unavailable,
             DriverError::Scpi(mho_scpi::ScpiError::Io(io)) if io.kind() == std::io::ErrorKind::NotFound => {
                 ErrorKind::Unavailable
             }
-            DriverError::Scpi(_) => ErrorKind::Device,
+            DriverError::Scpi(mho_scpi::ScpiError::Parse { .. }) => ErrorKind::Protocol,
+            DriverError::Scpi(_) => ErrorKind::Unavailable,
         };
         ApiError::new(kind, e.to_string())
     }

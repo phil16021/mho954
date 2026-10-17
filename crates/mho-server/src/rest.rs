@@ -32,6 +32,8 @@ impl IntoResponse for HttpError {
             ErrorKind::Timeout => StatusCode::GATEWAY_TIMEOUT,
             ErrorKind::Unavailable => StatusCode::SERVICE_UNAVAILABLE,
             ErrorKind::Forbidden => StatusCode::FORBIDDEN,
+            ErrorKind::Conflict => StatusCode::CONFLICT,
+            ErrorKind::Protocol => StatusCode::BAD_GATEWAY,
             ErrorKind::Internal => StatusCode::INTERNAL_SERVER_ERROR,
         };
         (status, Json(self.0)).into_response()

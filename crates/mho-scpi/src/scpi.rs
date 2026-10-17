@@ -10,6 +10,18 @@ use crate::transport::Transport;
 /// [`crate::USBTMC_MAX_READ`]).
 pub const DEFAULT_CHUNK: usize = 64 * 1024;
 
+/// Upper bound for a single IEEE block (500 Mpts WORD = 1 GB, plus margin).
+pub const MAX_BLOCK: usize = 1_200_000_000;
+/// Consecutive empty reads tolerated before a response counts as missing.
+const MAX_EMPTY_READS: u32 = 4;
+
+/// A response whose shape was detected from its first byte.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Response {
+    Line(String),
+    Block(Vec<u8>),
+}
+
 /// SCPI session on top of a [`Transport`].
 ///
 /// Every I/O error triggers a device clear so the next command starts from a clean state:
@@ -106,6 +118,34 @@ impl Scpi {
             "0" | "OFF" => Ok(false),
             other => Err(ScpiError::parse(cmd, format!("expected boolean, got {other:?}"))),
         }
+    }
+
+    /// Sends a query and reads either a line or, if the reply starts with `#`, a block.
+    pub fn query_auto(&mut self, cmd: &str) -> Result<Response> {
+        let start = Instant::now();
+        self.discard_stale();
+        self.send(cmd)?;
+        let r = self.guard(cmd, |s| {
+            let mut empty = 0;
+            while s.rx.is_empty() {
+                if s.fill(s.chunk)? == 0 {
+                    if s.rx_end {
+                        return Ok(Response::Line(String::new()));
+                    }
+                    empty += 1;
+                    if empty >= MAX_EMPTY_READS {
+                        return Err(ScpiError::parse(cmd, "no data in response"));
+                    }
+                }
+            }
+            if s.rx[0] == b'#' {
+                s.read_block(cmd, &mut |_, _| {}).map(Response::Block)
+            } else {
+                s.read_line(cmd).map(Response::Line)
+            }
+        });
+        self.last_duration = start.elapsed();
+        r
     }
 
     /// Sends a query whose response is an IEEE 488.2 definite-length block.
@@ -217,6 +257,7 @@ impl Scpi {
     }
 
     fn read_line(&mut self, cmd: &str) -> Result<String> {
+        let mut empty = 0;
         loop {
             if let Some(pos) = self.rx.iter().position(|&b| b == b'\n') {
                 let line: Vec<u8> = self.rx.drain(..=pos).collect();
@@ -228,19 +269,37 @@ impl Scpi {
             if self.rx.len() > 16 * 1024 * 1024 {
                 return Err(ScpiError::parse(cmd, "response line exceeds 16 MiB"));
             }
-            self.fill(self.chunk)?;
+            if self.fill(self.chunk)? == 0 {
+                // An empty message (EOM without data) is an empty response.
+                if self.rx_end && self.rx.is_empty() {
+                    return Ok(String::new());
+                }
+                empty += 1;
+                if empty >= MAX_EMPTY_READS {
+                    return Err(ScpiError::parse(cmd, "no data in response"));
+                }
+            }
         }
     }
 
     fn read_block(&mut self, cmd: &str, progress: &mut dyn FnMut(usize, usize)) -> Result<Vec<u8>> {
+        let mut empty = 0;
         let header = loop {
             match parse_block_header(&self.rx).map_err(|m| ScpiError::parse(cmd, m))? {
                 Some(h) => break h,
                 None => {
-                    self.fill(self.chunk)?;
+                    if self.fill(self.chunk)? == 0 {
+                        empty += 1;
+                        if empty >= MAX_EMPTY_READS {
+                            return Err(ScpiError::parse(cmd, "response ended inside block header"));
+                        }
+                    }
                 }
             }
         };
+        if header.data_len.is_some_and(|l| l > MAX_BLOCK) {
+            return Err(ScpiError::parse(cmd, format!("block length {:?} exceeds limit", header.data_len)));
+        }
 
         let Some(len) = header.data_len else {
             return self.read_indefinite_block(header.header_len);
@@ -274,6 +333,9 @@ impl Scpi {
     fn read_indefinite_block(&mut self, header_len: usize) -> Result<Vec<u8>> {
         while !self.rx_end {
             self.fill(self.chunk)?;
+            if self.rx.len() > MAX_BLOCK {
+                return Err(ScpiError::parse("#0 block", "indefinite block exceeds limit"));
+            }
         }
         let mut data = std::mem::take(&mut self.rx);
         data.drain(..header_len);

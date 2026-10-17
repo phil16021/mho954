@@ -399,7 +399,7 @@ impl ScopeApp {
         ui.separator();
         ui.label(RichText::new("Acquisition").strong());
         let acq = &st.acquire;
-        ui.label(format!("{}  ·  {} pts", format_si(acq.sample_rate, "Sa/s"), format_si(acq.memory_depth, "")));
+        ui.label(format!("{}  ·  {} pts", format_si(acq.sample_rate, "Sa/s"), acq.memory_depth.map(|d| format_si(d, "")).unwrap_or_else(|| "?".into())));
         ui.horizontal(|ui| {
             egui::ComboBox::from_id_salt("mdepth").selected_text("depth").width(70.0).show_ui(ui, |ui| {
                 for d in DEPTHS {

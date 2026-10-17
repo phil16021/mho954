@@ -230,6 +230,14 @@ pub async fn run(cli: Cli, cfg: Config) -> anyhow::Result<()> {
     }
 
     let backend = backend(&cli, &cfg).await?;
+    let result = run_command(cli, &cfg, &backend).await;
+    if let Backend::Local(b) = &backend {
+        b.shutdown().await;
+    }
+    result
+}
+
+async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Result<()> {
     let api = backend.api();
     match cli.command {
         Command::Idn => {
@@ -382,6 +390,22 @@ pub async fn run(cli: Cli, cfg: Config) -> anyhow::Result<()> {
 
 // ---- serve / mcp / gui ------------------------------------------------------------------
 
+/// Resolves on Ctrl-C or SIGTERM.
+async fn shutdown_signal() {
+    let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = async {
+            match term.as_mut() {
+                Some(t) => {
+                    t.recv().await;
+                }
+                None => std::future::pending().await,
+            }
+        } => {}
+    }
+}
+
 async fn serve(cli: &Cli, cfg: Config, bind: Option<std::net::SocketAddr>, allow_raw: bool) -> anyhow::Result<()> {
     if daemon_running(cli, &cfg).await && bind.is_none() {
         bail!("a daemon is already running at {}", cfg.url());
@@ -395,57 +419,82 @@ async fn serve(cli: &Cli, cfg: Config, bind: Option<std::net::SocketAddr>, allow
     let s2 = shutdown.clone();
     tokio::spawn(async move {
         // Ctrl-C and SIGTERM (systemd stop) both shut down gracefully.
-        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
-        tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            _ = async { match term.as_mut() { Some(t) => { t.recv().await; } None => std::future::pending().await } } => {}
-        }
+        shutdown_signal().await;
         tracing::info!("shutting down");
         s2.cancel();
     });
-    mho_server::serve(backend, opts, shutdown).await
+    let r = mho_server::serve(backend.clone(), opts, shutdown).await;
+    backend.shutdown().await;
+    r
 }
 
 async fn mcp_stdio(cli: &Cli, cfg: &Config) -> anyhow::Result<()> {
-    let api: Arc<dyn ScopeApi> = match backend(cli, cfg).await? {
-        Backend::Local(b) => {
-            // Raw SCPI over MCP only if configured.
+    let explicit = cli.direct || cli.connection.is_some();
+    let (api, local): (Arc<dyn ScopeApi>, Option<LocalBackend>) =
+        if !explicit && daemon_running(cli, cfg).await {
+            (Arc::new(RemoteBackend::new(&daemon_url(cli, cfg))), None)
+        } else {
             let mut live = cfg.live.clone();
             live.enabled = false;
-            drop(b);
-            Arc::new(LocalBackend::start(connection(cfg)?, cfg.allow_raw_scpi, live))
-        }
-        Backend::Remote(b) => Arc::new(b),
-    };
+            // Raw SCPI over MCP only if configured.
+            let b = LocalBackend::start(connection(cfg)?, cfg.allow_raw_scpi, live);
+            (Arc::new(b.clone()), Some(b))
+        };
     let server = McpScope::new(api, cfg.capture_dir.clone());
     let service = server.serve(rmcp::transport::stdio()).await?;
-    service.waiting().await?;
+    tokio::select! {
+        r = service.waiting() => { r?; }
+        _ = shutdown_signal() => {}
+    }
+    if let Some(b) = local {
+        b.shutdown().await;
+    }
     Ok(())
 }
 
 pub fn gui(cli: &Cli, cfg: Config, sim: bool) -> anyhow::Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     let explicit = cli.direct || cli.connection.is_some() || sim;
+    let mut local = None;
     let url = if !explicit && rt.block_on(daemon_running(cli, &cfg)) {
         daemon_url(cli, &cfg)
     } else {
         let conn = if sim { Connection::Sim } else { connection(&cfg)? };
         let backend = rt.block_on(async { LocalBackend::start(conn, cfg.allow_raw_scpi, cfg.live.clone()) });
-        // Prefer the configured port so MCP clients find us; fall back to an ephemeral one.
-        let listener = rt
-            .block_on(tokio::net::TcpListener::bind(cfg.bind))
-            .or_else(|_| rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")))?;
+        // The real scope prefers the configured port so MCP clients find it; the simulator
+        // never takes it, so the CLI cannot mistake it for the daemon.
+        let listener = if sim {
+            rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0"))?
+        } else {
+            rt.block_on(tokio::net::TcpListener::bind(cfg.bind))
+                .or_else(|_| rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")))?
+        };
         let addr = listener.local_addr()?;
+        if !addr.ip().is_loopback() {
+            tracing::warn!("embedded server listens on {addr} — reachable from the network");
+        }
         let opts = ServerOptions { bind: addr, capture_dir: cfg.capture_dir.clone() };
         let shutdown = CancellationToken::new();
-        let app = mho_server::router(backend, &opts, shutdown.clone());
+        let app = mho_server::router(backend.clone(), &opts, shutdown.clone());
         rt.spawn(async move {
             let _ = axum_serve(listener, app, shutdown).await;
         });
+        // A signal must not kill the process while the scope is mid-transfer.
+        let b = backend.clone();
+        rt.spawn(async move {
+            shutdown_signal().await;
+            b.shutdown().await;
+            std::process::exit(0);
+        });
         info!("embedded server on http://{addr} (MCP at /mcp)");
+        local = Some(backend);
         format!("http://{addr}")
     };
-    mho_gui::run(url, rt.handle().clone(), cfg.capture_dir.clone())
+    let r = mho_gui::run(url, rt.handle().clone(), cfg.capture_dir.clone());
+    if let Some(b) = local {
+        rt.block_on(b.shutdown());
+    }
+    r
 }
 
 async fn axum_serve(listener: tokio::net::TcpListener, app: mho_server::axum_reexport::Router, shutdown: CancellationToken) -> std::io::Result<()> {
@@ -525,7 +574,7 @@ fn print_status(st: &ScopeStatus) {
         "acquire {}  {}  depth {} pts  averages {}",
         st.acquire.acq_type,
         format_si(st.acquire.sample_rate, "Sa/s"),
-        st.acquire.memory_depth,
+        st.acquire.memory_depth.map(|d| d.to_string()).unwrap_or_else(|| "?".into()),
         st.acquire.averages
     );
 }

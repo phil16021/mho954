@@ -1,5 +1,6 @@
 //! Typed access to the MHO900 SCPI command set.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -96,7 +97,12 @@ pub struct Scope {
     pub raw_chunk_points: usize,
     /// Set when an unknown raw query left the scope unresponsive.
     raw_blocked: bool,
+    /// `:MEAS:ITEM?` commands already issued; the first query of an item often returns 9.9E37.
+    measured: HashSet<String>,
 }
+
+/// Maximum RAW record accepted (500 Mpts with the RLU-05 option).
+const MAX_RAW_POINTS: usize = 500_000_000;
 
 impl Scope {
     pub fn open(conn: &Connection) -> Result<Scope> {
@@ -112,21 +118,52 @@ impl Scope {
 
     pub fn from_transport(transport: Box<dyn Transport>) -> Result<Scope> {
         let mut scpi = Scpi::new(transport);
-        // No unconditional device clear: over USB/IP it is suspected of desynchronising the
-        // bulk pipes. A failed first query has already triggered a clear; retry once.
-        let idn = match scpi.query("*IDN?") {
-            Ok(r) => r,
+        // No unconditional device clear. A failed or garbled first answer gets one recovery
+        // and a second attempt.
+        let first = scpi.query("*IDN?").map_err(DriverError::from).and_then(|r| Idn::parse(&r));
+        let idn = match first {
+            Ok(idn) => idn,
             Err(e) => {
                 tracing::warn!("first *IDN? failed ({e}), retrying");
-                scpi.query("*IDN?")?
+                scpi.recover();
+                Idn::parse(&scpi.query("*IDN?")?)?
             }
         };
-        let idn = Idn::parse(&idn)?;
         info!(model = %idn.model, serial = %idn.serial, firmware = %idn.firmware, via = %scpi.describe(), "connected");
-        if !idn.model.starts_with("MHO") && !idn.model.starts_with("DHO") {
-            tracing::warn!(model = %idn.model, "not an MHO/DHO scope; commands may not match");
+        let known = idn.model.starts_with("MHO9") || idn.model == "MHO98";
+        if !known && std::env::var_os("MHO954_ALLOW_ANY_MODEL").is_none() {
+            return Err(DriverError::Unsupported(format!(
+                "{} {} is not an MHO900-series scope; set MHO954_ALLOW_ANY_MODEL=1 to try anyway",
+                idn.manufacturer, idn.model
+            )));
         }
-        Ok(Scope { scpi, idn, wav: WavSettings::default(), raw_chunk_points: 250_000, raw_blocked: false })
+        Ok(Scope {
+            scpi,
+            idn,
+            wav: WavSettings::default(),
+            raw_chunk_points: 250_000,
+            raw_blocked: false,
+            measured: HashSet::new(),
+        })
+    }
+
+    /// Discards stale entries in the error queue so they are not attributed to the next change.
+    fn drain_errors(&mut self) -> Result<()> {
+        let old = self.scpi.errors()?;
+        if !old.is_empty() {
+            debug!(?old, "discarding stale error queue entries");
+        }
+        Ok(())
+    }
+
+    /// Runs `f`, forgetting the cached `:WAVeform` settings if it fails (the scope may have
+    /// rejected a source change).
+    fn wav_guard<R>(&mut self, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
+        let r = f(self);
+        if r.is_err() {
+            self.wav = WavSettings::default();
+        }
+        r
     }
 
     pub fn idn(&self) -> &Idn {
@@ -224,6 +261,9 @@ impl Scope {
 
     pub fn set_channel(&mut self, n: u8, u: &ChannelUpdate) -> Result<ChannelState> {
         Self::check_channel(n)?;
+        self.drain_errors()?;
+        // Display changes can invalidate the cached waveform source.
+        self.wav = WavSettings::default();
         let p = format!(":CHAN{n}");
         // Probe ratio first: it rescales V/div and offset.
         if let Some(v) = u.probe {
@@ -271,6 +311,7 @@ impl Scope {
     }
 
     pub fn set_timebase(&mut self, u: &TimebaseUpdate) -> Result<TimebaseState> {
+        self.drain_errors()?;
         if let Some(m) = &u.mode {
             self.scpi.write(&format!(":TIM:MODE {}", token("mode", m)?))?;
         }
@@ -302,6 +343,7 @@ impl Scope {
     }
 
     pub fn set_trigger(&mut self, u: &TriggerUpdate) -> Result<TriggerState> {
+        self.drain_errors()?;
         if let Some(m) = &u.mode {
             self.scpi.write(&format!(":TRIG:MODE {}", token("mode", m)?))?;
         }
@@ -338,13 +380,18 @@ impl Scope {
     pub fn acquire(&mut self) -> Result<AcquireState> {
         Ok(AcquireState {
             sample_rate: self.scpi.query_f64(":ACQ:SRAT?")?,
-            memory_depth: self.scpi.query_f64(":ACQ:MDEP?").unwrap_or(f64::NAN),
+            memory_depth: match self.scpi.query_f64(":ACQ:MDEP?") {
+                Ok(v) => Some(v),
+                Err(mho_scpi::ScpiError::Parse { .. }) => None,
+                Err(e) => return Err(e.into()),
+            },
             acq_type: AcquireType::from_scpi(&self.scpi.query(":ACQ:TYPE?")?)?,
             averages: self.scpi.query_f64(":ACQ:AVER?")? as u32,
         })
     }
 
     pub fn set_acquire(&mut self, u: &AcquireUpdate) -> Result<AcquireState> {
+        self.drain_errors()?;
         if let Some(t) = u.acq_type {
             self.scpi.write(&format!(":ACQ:TYPE {}", t.scpi()))?;
         }
@@ -366,15 +413,22 @@ impl Scope {
     /// Queries one `:MEASure:ITEM?`. `source2` is required for delay/phase items.
     pub fn measure(&mut self, item: &str, source: &str, source2: Option<&str>) -> Result<Measurement> {
         let it = find_item(item)?;
-        let src = normalize_source(source)?;
+        let src = measure_source(source)?;
         let cmd = if it.dual_source {
             let s2 = source2
                 .ok_or_else(|| DriverError::Invalid(format!("{} needs a second source", it.long)))?;
-            format!(":MEAS:ITEM? {},{},{}", it.token, src, normalize_source(s2)?)
+            format!(":MEAS:ITEM? {},{},{}", it.token, src, measure_source(s2)?)
         } else {
             format!(":MEAS:ITEM? {},{}", it.token, src)
         };
-        let raw = self.scpi.query_f64(&cmd)?;
+        let mut raw = self.scpi.query_f64(&cmd)?;
+        if valid_value(raw).is_none() && self.measured.insert(cmd.clone()) {
+            // The scope creates the measurement on first use and reports 9.9E37 until it has
+            // been evaluated once.
+            std::thread::sleep(Duration::from_millis(150));
+            raw = self.scpi.query_f64(&cmd)?;
+        }
+        self.measured.insert(cmd);
         Ok(Measurement { item: it.long.to_string(), source: src, value: valid_value(raw), unit: it.unit.to_string() })
     }
 
@@ -385,6 +439,10 @@ impl Scope {
     // ---- waveforms ----------------------------------------------------------------------
 
     fn configure_wav(&mut self, source: &str, mode: WaveMode) -> Result<()> {
+        self.wav_guard(|s| s.configure_wav_inner(source, mode))
+    }
+
+    fn configure_wav_inner(&mut self, source: &str, mode: WaveMode) -> Result<()> {
         if self.wav.source.as_deref() != Some(source) {
             self.scpi.write(&format!(":WAV:SOUR {source}"))?;
             self.wav.source = Some(source.to_string());
@@ -403,14 +461,14 @@ impl Scope {
     pub fn preamble(&mut self, source: &str, mode: WaveMode) -> Result<Preamble> {
         let src = normalize_source(source)?;
         self.configure_wav(&src, mode)?;
-        Preamble::parse(&self.scpi.query(":WAV:PRE?")?)
+        self.wav_guard(|s| Preamble::parse(&s.scpi.query(":WAV:PRE?")?))
     }
 
     /// Reads waveform data for an already configured source (see [`Self::preamble`]).
     fn read_words(&mut self, cmd: &str, progress: &mut dyn FnMut(usize, usize)) -> Result<Vec<u16>> {
         let bytes = self.scpi.query_block_progress(cmd, progress)?;
         if bytes.len() % 2 != 0 {
-            return Err(DriverError::Invalid(format!("odd WORD data length {}", bytes.len())));
+            return Err(DriverError::Protocol(format!("odd WORD data length {}", bytes.len())));
         }
         Ok(bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])).collect())
     }
@@ -419,12 +477,14 @@ impl Scope {
     pub fn screen_waveform(&mut self, source: &str, preamble: Option<Preamble>) -> Result<Waveform> {
         let src = normalize_source(source)?;
         self.configure_wav(&src, WaveMode::Normal)?;
-        let preamble = match preamble {
-            Some(p) => p,
-            None => Preamble::parse(&self.scpi.query(":WAV:PRE?")?)?,
-        };
-        let raw = self.read_words(":WAV:DATA?", &mut |_, _| {})?;
-        Ok(Waveform { source: src, preamble, raw })
+        self.wav_guard(|s| {
+            let preamble = match preamble {
+                Some(p) => p,
+                None => Preamble::parse(&s.scpi.query(":WAV:PRE?")?)?,
+            };
+            let raw = s.read_words(":WAV:DATA?", &mut |_, _| {})?;
+            Ok(Waveform { source: src, preamble, raw })
+        })
     }
 
     /// Full acquisition memory (`RAW`). The scope must be stopped; downloads in chunks of
@@ -432,16 +492,23 @@ impl Scope {
     pub fn raw_waveform(&mut self, source: &str, progress: &mut dyn FnMut(usize, usize)) -> Result<Waveform> {
         let status = self.trigger_status()?;
         if status != "STOP" {
-            return Err(DriverError::Invalid(format!(
+            return Err(DriverError::State(format!(
                 "RAW readout needs a stopped acquisition (trigger status is {status}); send STOP or SINGLE first"
             )));
         }
         let src = normalize_source(source)?;
         self.configure_wav(&src, WaveMode::Raw)?;
+        self.wav_guard(|s| s.raw_download(src, progress))
+    }
+
+    fn raw_download(&mut self, src: String, progress: &mut dyn FnMut(usize, usize)) -> Result<Waveform> {
         let preamble = Preamble::parse(&self.scpi.query(":WAV:PRE?")?)?;
         let total = preamble.points;
+        if total > MAX_RAW_POINTS {
+            return Err(DriverError::Protocol(format!("preamble reports {total} points")));
+        }
         let chunk = self.raw_chunk_points.max(1000);
-        let mut raw = Vec::with_capacity(total);
+        let mut raw = Vec::with_capacity(total.min(16_000_000));
         let timeout = self.scpi.timeout().max(Duration::from_secs(10));
         self.scpi.with_timeout(timeout, |scpi| {
             let mut start = 1usize;
@@ -452,10 +519,20 @@ impl Scope {
                 scpi.write(&format!(":WAV:STAR {start}"))?;
                 let done = raw.len();
                 let bytes = scpi.query_block_progress(":WAV:DATA?", &mut |got, _| progress(done + got / 2, total))?;
+                let expected = 2 * (stop - start + 1);
+                if bytes.len() != expected {
+                    return Err(mho_scpi::ScpiError::parse(
+                        ":WAV:DATA?",
+                        format!("RAW chunk {start}..{stop}: {} bytes, expected {expected}", bytes.len()),
+                    ));
+                }
                 raw.extend(bytes.chunks_exact(2).map(|b| u16::from_le_bytes([b[0], b[1]])));
                 debug!(start, stop, got = raw.len(), "raw chunk");
                 start = stop + 1;
             }
+            // Leave the read window covering the whole record again.
+            scpi.write(":WAV:STAR 1")?;
+            scpi.write(&format!(":WAV:STOP {total}"))?;
             Ok(())
         })?;
         progress(raw.len(), total);
@@ -467,7 +544,7 @@ impl Scope {
     pub fn screenshot(&mut self) -> Result<Vec<u8>> {
         let png = self.scpi.with_timeout(Duration::from_secs(15), |s| s.query_block(":DISP:DATA? PNG"))?;
         if !png.starts_with(b"\x89PNG") {
-            return Err(DriverError::Invalid("screenshot is not a PNG".into()));
+            return Err(DriverError::Protocol("screenshot is not a PNG".into()));
         }
         Ok(png)
     }
@@ -623,6 +700,9 @@ impl Scope {
         if cmd.is_empty() {
             return Err(DriverError::Invalid("empty command".into()));
         }
+        if cmd.chars().any(|c| c.is_control()) {
+            return Err(DriverError::Invalid("one command per request; control characters are not allowed".into()));
+        }
         if self.raw_blocked {
             match self.scpi.query("*IDN?") {
                 Ok(_) => self.raw_blocked = false,
@@ -635,8 +715,12 @@ impl Scope {
         }
         let scpi = self.scpi();
         if cmd.contains('?') {
-            match scpi.with_timeout(timeout, |s| s.query(cmd)) {
-                Ok(r) => Ok(Some(r)),
+            match scpi.with_timeout(timeout, |s| s.query_auto(cmd)) {
+                Ok(mho_scpi::Response::Line(r)) => Ok(Some(r)),
+                Ok(mho_scpi::Response::Block(b)) => {
+                    let head: String = b.iter().take(32).map(|x| format!("{x:02x}")).collect();
+                    Ok(Some(format!("<binary block, {} bytes: {head}…>", b.len())))
+                }
                 Err(e) if e.is_timeout() => {
                     // The transport has sent a device clear; verify the scope recovered.
                     let healthy = self.scpi.query("*IDN?").is_ok();
@@ -654,6 +738,16 @@ impl Scope {
             Ok(None)
         }
     }
+}
+
+/// Measurement sources: analog channels and math. Digital channels need the logic probe and
+/// are not offered (an unanswered query would block the scope).
+fn measure_source(s: &str) -> Result<String> {
+    let src = normalize_source(s)?;
+    if src.starts_with('D') {
+        return Err(DriverError::Unsupported(format!("{src}: digital measurement sources are not supported")));
+    }
+    Ok(src)
 }
 
 fn on_off(v: bool) -> &'static str {

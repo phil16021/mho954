@@ -14,6 +14,7 @@ pub struct LocalBackend {
     device: Device,
     hub: LiveHub,
     allow_raw_scpi: bool,
+    live_stop: tokio_util::sync::CancellationToken,
 }
 
 impl LocalBackend {
@@ -21,8 +22,15 @@ impl LocalBackend {
     pub fn start(connection: Connection, allow_raw_scpi: bool, live: LiveConfig) -> Self {
         let device = Device::spawn(connection);
         let hub = LiveHub::new(live);
-        tokio::spawn(run_loop(device.clone(), hub.clone()));
-        LocalBackend { device, hub, allow_raw_scpi }
+        let live_stop = tokio_util::sync::CancellationToken::new();
+        tokio::spawn(run_loop(device.clone(), hub.clone(), live_stop.clone()));
+        LocalBackend { device, hub, allow_raw_scpi, live_stop }
+    }
+
+    /// Stops the live loop and closes the scope connection cleanly (see [`Device::shutdown`]).
+    pub async fn shutdown(&self) {
+        self.live_stop.cancel();
+        self.device.shutdown().await;
     }
 
     pub fn device(&self) -> &Device {

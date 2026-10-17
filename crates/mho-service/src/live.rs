@@ -143,8 +143,8 @@ struct Cache {
     trigger_status: String,
 }
 
-/// Runs until the hub is dropped by all owners (never, in practice).
-pub(crate) async fn run_loop(device: Device, hub: LiveHub) {
+/// Runs until `stop` is cancelled.
+pub(crate) async fn run_loop(device: Device, hub: LiveHub, stop: tokio_util::sync::CancellationToken) {
     let mut cache = Cache::default();
     let mut seq: u64 = 0;
     let mut last_frame = Instant::now();
@@ -152,9 +152,15 @@ pub(crate) async fn run_loop(device: Device, hub: LiveHub) {
     let mut last_measure: Option<Instant> = None;
 
     loop {
+        if stop.is_cancelled() {
+            return;
+        }
         let cfg = hub.config();
         if !cfg.enabled || !hub.has_subscribers() {
-            tokio::time::sleep(Duration::from_millis(200)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(200)) => {}
+                _ = stop.cancelled() => return,
+            }
             continue;
         }
         let started = Instant::now();
@@ -217,7 +223,10 @@ pub(crate) async fn run_loop(device: Device, hub: LiveHub) {
                 cache = Cache::default();
                 warn!("live acquisition: {e}");
                 hub.errors.send_replace(Some(e.message.clone()));
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+                    _ = stop.cancelled() => return,
+                }
                 continue;
             }
         }
@@ -252,7 +261,10 @@ pub(crate) async fn run_loop(device: Device, hub: LiveHub) {
         let target_fps = if cache.trigger_status == "STOP" { cfg.stopped_fps } else { cfg.max_fps };
         let interval = Duration::from_secs_f64(1.0 / target_fps.clamp(0.1, 1000.0));
         if let Some(rest) = interval.checked_sub(started.elapsed()) {
-            tokio::time::sleep(rest).await;
+            tokio::select! {
+                _ = tokio::time::sleep(rest) => {}
+                _ = stop.cancelled() => return,
+            }
         } else {
             // Always yield so control requests get a turn on the device queue.
             tokio::task::yield_now().await;

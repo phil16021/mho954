@@ -173,8 +173,8 @@ pub struct TriggerUpdate {
 pub struct AcquireState {
     /// Samples per second.
     pub sample_rate: f64,
-    /// Memory depth in points.
-    pub memory_depth: f64,
+    /// Memory depth in points (`None` if the scope reported something unparsable).
+    pub memory_depth: Option<f64>,
     pub acq_type: AcquireType,
     pub averages: u32,
 }
