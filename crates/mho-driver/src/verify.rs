@@ -134,6 +134,26 @@ const FIXED: &[Fixed] = &[
     q("bus.data", ":BUS1:DATA?", "guide 3.4.6 (block + text)"),
     c("bus.data", ":BUS1:EVEN OFF", "restore"),
     c("bus.data", ":BUS1:DISP OFF", "restore"),
+    // Peak results with FFT and peak search on; restored afterwards.
+    c(
+        "math.peaks",
+        ":MATH1:OPER FFT",
+        "math 1 as FFT (guide 3.16.2)",
+    ),
+    c("math.peaks", ":MATH1:DISP ON", "math 1 on"),
+    c(
+        "math.peaks",
+        ":MATH1:FFT:SEAR:ENAB ON",
+        "peak search on (guide 3.16.25)",
+    ),
+    q(
+        "math.peaks",
+        ":MATH1:FFT:SEAR:RES?",
+        "guide 3.16.30 (several lines)",
+    ),
+    c("math.peaks", ":MATH1:FFT:SEAR:ENAB OFF", "restore"),
+    c("math.peaks", ":MATH1:DISP OFF", "restore"),
+    c("math.peaks", ":MATH1:OPER ADD", "restore"),
 ];
 
 /// All candidates: the fixed list plus every query of every settings group

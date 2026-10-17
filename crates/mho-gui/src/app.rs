@@ -29,12 +29,26 @@ const V_DIVS: f64 = 8.0;
 /// Decoder rows shown in the GUI table / labels drawn on the plot.
 const MAX_DECODE_ROWS: usize = 2000;
 const MAX_DECODE_MARKS: usize = 300;
+const MATH_SCALE_REFRESH: std::time::Duration = std::time::Duration::from_secs(10);
 
 fn channel_color(source: &str) -> Color32 {
+    if let Some(n) = source
+        .strip_prefix("MATH")
+        .and_then(|d| d.parse::<usize>().ok())
+    {
+        return MATH_COLORS[(n.clamp(1, 4)) - 1];
+    }
     channel_of(source)
         .map(|n| CH_COLORS[(n - 1) as usize])
         .unwrap_or(Color32::LIGHT_GRAY)
 }
+
+const MATH_COLORS: [Color32; 4] = [
+    Color32::from_rgb(255, 150, 40),
+    Color32::from_rgb(140, 230, 110),
+    Color32::from_rgb(230, 230, 230),
+    Color32::from_rgb(190, 130, 255),
+];
 
 /// Next value in a 1-2-5 sequence.
 fn step_125(v: f64, up: bool) -> f64 {
@@ -75,6 +89,10 @@ pub struct ScopeApp {
     y_mode: YMode,
     show_fft: bool,
     show_decoder: bool,
+    /// Last request of each math channel's scale (re-read periodically: it may change on
+    /// the scope).
+    math_requested: std::collections::HashMap<u8, std::time::Instant>,
+    peaks_math: u8,
     decoder_bus: u8,
     fft_source: String,
     fft_window: Window,
@@ -123,6 +141,8 @@ impl ScopeApp {
             y_mode: YMode::Divisions,
             show_fft: false,
             show_decoder: false,
+            math_requested: Default::default(),
+            peaks_math: 1,
             decoder_bus: 1,
             fft_source: "CHAN1".into(),
             fft_window: Window::Hann,
@@ -153,6 +173,8 @@ impl ScopeApp {
             groups: sh.groups.clone(),
             group_values: sh.group_values.clone(),
             stats: sh.stats.clone(),
+            math_scale: sh.math_scale.clone(),
+            scope_peaks: sh.scope_peaks.clone(),
             decode: sh.decode.clone(),
             measurements: sh.measurements.clone(),
             live_error: sh.live_error.clone(),
@@ -1315,6 +1337,7 @@ impl ScopeApp {
         let traces = &frame.traces;
         let trig = status.map(|s| s.trigger.clone());
         let (cursor_a, cursor_b) = (self.cursor_a, self.cursor_b);
+        let math_scale = &s.math_scale;
         // Decoded events as labels along the top edge.
         let marks: Vec<(f64, String)> = match (&s.decode, self.show_decoder) {
             (Some((_, t)), true) => t
@@ -1344,6 +1367,10 @@ impl ScopeApp {
                         let v = w.preamble.volts(w.raw[i]);
                         let y = match (y_mode, &cs) {
                             (YMode::Divisions, Some(c)) => (v + c.offset) / c.scale,
+                            (YMode::Divisions, None) => match math_scale.get(&w.source) {
+                                Some((scale, offset)) => (v + offset) / scale,
+                                None => v,
+                            },
                             _ => v,
                         };
                         [w.preamble.time(i), y]
@@ -1485,7 +1512,85 @@ impl ScopeApp {
         });
     }
 
-    fn fft_plot(&mut self, ui: &mut egui::Ui, frame: &Frame) {
+    /// Reads scale/offset of displayed math traces (for the division view).
+    fn track_math_scale(&mut self, s: &Snapshot) {
+        let Some(frame) = &s.frame else { return };
+        for t in &frame.traces {
+            let Some(n) = t
+                .source
+                .strip_prefix("MATH")
+                .and_then(|d| d.parse::<u8>().ok())
+            else {
+                continue;
+            };
+            if self
+                .math_requested
+                .get(&n)
+                .is_some_and(|t| t.elapsed() < MATH_SCALE_REFRESH)
+            {
+                continue;
+            }
+            self.math_requested.insert(n, std::time::Instant::now());
+            self.client.op(
+                format!("math {n} scale"),
+                move |api| async move { api.group_get("math".into(), Some(n)).await },
+                move |sh: &mut Shared, m: ParamMap| {
+                    let num = |k: &str| match m.get(k) {
+                        Some(mho_driver::params::ParamValue::Real(x)) => Some(*x),
+                        _ => None,
+                    };
+                    if let (Some(scale), Some(offset)) = (num("scale"), num("offset"))
+                        && scale > 0.0
+                    {
+                        sh.math_scale.insert(format!("MATH{n}"), (scale, offset));
+                    }
+                },
+            );
+        }
+    }
+
+    fn read_scope_peaks(&self) {
+        let n = self.peaks_math;
+        self.client.op(
+            format!("math {n} peaks"),
+            move |api| async move { api.fft_peaks(n).await },
+            move |sh: &mut Shared, p: Vec<mho_dsp::ScopePeak>| sh.scope_peaks = Some((n, p)),
+        );
+    }
+
+    fn fft_plot(&mut self, ui: &mut egui::Ui, frame: &Frame, s: &Snapshot) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Scope FFT").strong()).on_hover_text(
+                "peak table of the scope's own FFT (math channel as FFT with peak search)",
+            );
+            for n in 1..=4u8 {
+                ui.selectable_value(&mut self.peaks_math, n, format!("M{n}"));
+            }
+            if ui.button("Peaks").clicked() {
+                self.read_scope_peaks();
+            }
+            if ui.button("Setup…").clicked() {
+                self.open_settings("math.fft", Some(self.peaks_math), true);
+            }
+            if let Some((n, peaks)) = &s.scope_peaks {
+                ui.label(
+                    RichText::new(format!("MATH{n}:")).color(channel_color(&format!("MATH{n}"))),
+                );
+                if peaks.is_empty() {
+                    ui.label("no peaks");
+                }
+                for p in peaks {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} {}",
+                            format_si(p.frequency, "Hz"),
+                            p.amplitude_text
+                        ))
+                        .monospace(),
+                    );
+                }
+            }
+        });
         ui.horizontal(|ui| {
             ui.label(RichText::new("FFT").strong());
             for w in frame.traces.iter().filter(|w| w.has_data()) {
@@ -1552,6 +1657,8 @@ struct Snapshot {
     group_values: Option<(String, u8, ParamMap)>,
     stats: Vec<MeasureStats>,
     decode: Option<(u8, Arc<DecodeTable>)>,
+    math_scale: std::collections::HashMap<String, (f64, f64)>,
+    scope_peaks: Option<(u8, Vec<mho_dsp::ScopePeak>)>,
     measurements: Option<Arc<mho_service::MeasureSnapshot>>,
     live_error: Option<String>,
     ws_connected: bool,
@@ -1579,6 +1686,7 @@ pub(crate) fn parse_si(s: &str) -> Option<f64> {
 impl eframe::App for ScopeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let s = self.snapshot();
+        self.track_math_scale(&s);
         let local: Vec<(String, Measurements)> = s
             .frame
             .as_ref()
@@ -1625,7 +1733,7 @@ impl eframe::App for ScopeApp {
             if self.show_fft
                 && let Some(f) = &s.frame
             {
-                self.fft_plot(ui, f);
+                self.fft_plot(ui, f, &s);
             }
         });
     }

@@ -33,6 +33,10 @@ pub struct Shared {
     pub stats: Vec<mho_driver::MeasureStats>,
     /// Last decoder event table: `(bus, table)`.
     pub decode: Option<(u8, Arc<mho_dsp::DecodeTable>)>,
+    /// `(scale, offset)` per math source (`MATH1`..) for the division view.
+    pub math_scale: std::collections::HashMap<String, (f64, f64)>,
+    /// Scope FFT peak table: `(math channel, peaks)`.
+    pub scope_peaks: Option<(u8, Vec<mho_dsp::ScopePeak>)>,
     pub live_error: Option<String>,
     pub ws_connected: bool,
     pub busy: usize,
@@ -123,8 +127,12 @@ impl Client {
                                 let mut sh = this.lock();
                                 match ev {
                                     LiveEvent::Frame(f) => {
-                                        let shown: Vec<&str> =
-                                            f.traces.iter().map(|t| t.source.as_str()).collect();
+                                        let shown: Vec<&str> = f
+                                            .traces
+                                            .iter()
+                                            .map(|t| t.source.as_str())
+                                            .filter(|s| s.starts_with("CHAN"))
+                                            .collect();
                                         let known = sh.status.as_ref().map(|st| {
                                             st.channels
                                                 .iter()

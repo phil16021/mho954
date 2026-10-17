@@ -282,6 +282,10 @@ impl ScopeApi for RemoteBackend {
         self.get(&format!("/bus/{bus}/data")).await
     }
 
+    async fn fft_peaks(&self, math: u8) -> ApiResult<Vec<mho_dsp::ScopePeak>> {
+        self.get(&format!("/math/{math}/peaks")).await
+    }
+
     async fn modules(&self) -> ApiResult<Modules> {
         self.get("/modules").await
     }

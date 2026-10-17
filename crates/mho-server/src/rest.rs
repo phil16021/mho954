@@ -83,6 +83,7 @@ pub fn routes() -> Router {
         .route("/counter", get(counter))
         .route("/dvm", get(dvm))
         .route("/bus/{n}/data", get(bus_data))
+        .route("/math/{n}/peaks", get(math_peaks))
         .route("/groups", get(groups))
         .route("/groups/{id}", get(group_get).put(group_set))
         .route("/openapi.json", get(openapi_json))
@@ -136,7 +137,8 @@ pub fn doc_routes() -> Router {
         measure_action,
         counter,
         dvm,
-        bus_data
+        bus_data,
+        math_peaks
     ),
     components(schemas(ApiError, ErrorKind))
 )]
@@ -637,6 +639,17 @@ async fn bus_data(
     } else {
         Json(table).into_response()
     })
+}
+
+/// Peak table of the scope's FFT on math channel `n` (group `math.fft` with
+/// `peak_search=true`). For a spectrum computed here from waveform data see `/fft`.
+#[utoipa::path(get, path = "/api/v1/math/{n}/peaks", params(("n" = u8, Path)),
+    responses((status = 200, body = Vec<mho_dsp::ScopePeak>)))]
+async fn math_peaks(
+    State(s): State<AppState>,
+    Path(n): Path<u8>,
+) -> HttpResult<Json<Vec<mho_dsp::ScopePeak>>> {
+    Ok(Json(s.backend.fft_peaks(n).await?))
 }
 
 /// Digital voltmeter reading (enable it via group `dvm`).

@@ -877,6 +877,49 @@ async fn protocol_decoder() {
     assert_eq!(v["table"]["rows"].as_array().unwrap().len(), 2);
     let r = m.call("decode_bus", serde_json::json!({"bus": 1})).await;
     assert_eq!(r["isError"], true, "{r}");
+
+    // math: FFT peak table through REST, client backend and MCP
+    assert_eq!(get(&format!("{v1}/math/1/peaks")).await.status(), 409);
+    assert_eq!(get(&format!("{v1}/math/0/peaks")).await.status(), 400);
+    let r = c
+        .put(format!("{v1}/groups/math.fft?instance=1&activate=true"))
+        .json(&serde_json::json!({"source": "CHAN1", "peak_search": true, "peaks": 4}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    let p: serde_json::Value = get(&format!("{v1}/math/1/peaks"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(p.as_array().unwrap().len(), 4, "{p}");
+    assert!(
+        (p[0]["frequency"].as_f64().unwrap() - 1e3).abs() < 100.0,
+        "{p}"
+    );
+    assert_eq!(api.fft_peaks(1).await.unwrap().len(), 4);
+    let r = m
+        .call("scope_fft_peaks", serde_json::json!({"math": 1}))
+        .await;
+    assert_eq!(r["isError"], false, "{r}");
+    assert!(text_of(&r).contains("amplitude_text"));
+    // a math channel as waveform (screen only)
+    c.put(format!("{v1}/groups/math?instance=3&activate=true"))
+        .json(&serde_json::json!({"operator": "ADD", "source1": "CHAN1", "source2": "CHAN2"}))
+        .send()
+        .await
+        .unwrap();
+    let w: serde_json::Value = get(&format!("{v1}/waveform/MATH3"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(w["source"], "MATH3");
+    assert_eq!(
+        get(&format!("{v1}/waveform/MATH3?mode=raw")).await.status(),
+        400
+    );
     shutdown.cancel();
 }
 

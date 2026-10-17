@@ -59,3 +59,40 @@ fn decoder_setup_and_event_table() {
     assert_eq!(s.idn().model, "MHO954");
     assert!(s.scpi().query("*IDN?").unwrap().contains("MHO954"));
 }
+
+#[test]
+fn math_channel_and_fft_peaks() {
+    let mut s = Scope::open(&Connection::Sim).unwrap();
+    assert!(s.displayed_math().unwrap().is_empty());
+    let mut v = ParamMap::new();
+    v.insert("operator".into(), ParamValue::Text("SUBTract".into()));
+    v.insert("source1".into(), ParamValue::Text("CHAN2".into()));
+    v.insert("source2".into(), ParamValue::Text("CHAN2".into()));
+    v.insert("scale".into(), ParamValue::Real(0.5));
+    let state = s.group_set("math", Some(2), &v, true).unwrap().unwrap();
+    assert_eq!(state["operator"], ParamValue::Text("SUBT".into()));
+    assert_eq!(state["display"], ParamValue::Bool(true));
+    assert_eq!(s.displayed_math().unwrap(), [2]);
+    // CH2 - CH2 = 0 (noise is drawn per operand, so allow a little)
+    let w = s.screen_waveform("MATH2", None).unwrap();
+    let a = w.analyze();
+    assert!(a.vpp < 0.2, "{a:?}");
+    assert!(matches!(
+        s.raw_waveform("MATH2", &mut |_, _| {}),
+        Err(DriverError::Invalid(_))
+    ));
+
+    // FFT with peak search: refused while off, then CH2's 5 kHz sine is the top peak
+    assert!(matches!(s.fft_peaks(1), Err(DriverError::State(_))));
+    let mut f = ParamMap::new();
+    f.insert("source".into(), ParamValue::Text("CHANnel2".into()));
+    f.insert("peak_search".into(), ParamValue::Bool(true));
+    f.insert("peaks".into(), ParamValue::Int(3));
+    s.group_set("math.fft", Some(1), &f, true).unwrap();
+    let p = s.fft_peaks(1).unwrap();
+    assert_eq!(p.len(), 3, "{p:?}");
+    assert!((p[0].frequency - 5e3).abs() < 200.0, "{p:?}");
+    // FFT results are not time-domain traces
+    assert_eq!(s.displayed_math().unwrap(), [2]);
+    assert!(s.scpi().query("*IDN?").unwrap().contains("MHO954"));
+}

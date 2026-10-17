@@ -230,6 +230,11 @@ pub(crate) async fn run_loop(
                             c.traces.push((src, pre));
                         }
                     }
+                    for n in scope.displayed_math()? {
+                        let src = format!("MATH{n}");
+                        let pre = scope.preamble(&src, WaveMode::Normal)?;
+                        c.traces.push((src, pre));
+                    }
                     c.refreshed = Some(Instant::now());
                     c.epoch = epoch;
                 }

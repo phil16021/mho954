@@ -158,6 +158,8 @@ pub trait ScopeApi: Send + Sync + 'static {
     async fn dvm_value(&self) -> ApiResult<Option<f64>>;
     /// Event table of protocol decoder `bus` (1..4); configure it with groups `bus`, `bus.*`.
     async fn decode_bus(&self, bus: u8) -> ApiResult<mho_dsp::DecodeTable>;
+    /// Peak table of the scope's FFT on math channel `math` (1..4).
+    async fn fft_peaks(&self, math: u8) -> ApiResult<Vec<mho_dsp::ScopePeak>>;
     /// Hardware modules (logic analyzer, function generator).
     async fn modules(&self) -> ApiResult<mho_driver::Modules>;
     /// Catalogue of table-driven settings groups (trigger types, decoders, …).

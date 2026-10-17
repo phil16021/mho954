@@ -117,6 +117,12 @@ pub struct DecodeArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct MathArg {
+    /// Math channel 1..4.
+    pub math: u8,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct ActionArg {
     /// reset_statistics | clear_all | clear_totalizer
     pub action: String,
@@ -423,6 +429,16 @@ impl McpScope {
             "total_events": total,
             "table": table,
         }))
+    }
+
+    #[tool(
+        description = "Read the peak table of the scope's own FFT on math channel 1..4 (frequency in \
+        Hz, amplitude in dBV or V). Set it up first with configure_settings group `math.fft`, \
+        activate=true, values {source, window, span, center, peak_search: true, peaks}. \
+        fft_peaks computes a spectrum here from waveform data instead."
+    )]
+    async fn scope_fft_peaks(&self, Parameters(p): Parameters<MathArg>) -> ToolResult {
+        ok_json(&try_api!(self.api.fft_peaks(p.math).await))
     }
 
     #[tool(description = "Read the digital voltmeter (enable/configure it with group `dvm`).")]

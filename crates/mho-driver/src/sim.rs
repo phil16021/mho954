@@ -340,7 +340,14 @@ impl SimTransport {
                 let y_inc = c.scale / CODES_PER_DIV;
                 (y_inc, -(c.offset / y_inc).round())
             }
-            None => (1.0, 0.0),
+            None => match Self::math_index(src) {
+                Some(m) => {
+                    let (scale, offset) = self.math_scale(m);
+                    let y_inc = scale / CODES_PER_DIV;
+                    (y_inc, -(offset / y_inc).round())
+                }
+                None => (1.0, 0.0),
+            },
         };
         (points, x_inc, x_org, y_inc, y_org)
     }
@@ -362,6 +369,9 @@ impl SimTransport {
         x_inc: f64,
         x_org: f64,
     ) -> Vec<f64> {
+        if let Some(m) = Self::math_index(src) {
+            return self.math_samples(m, first, count, x_inc, x_org);
+        }
         let Some(n) = Self::channel_index(src) else {
             return vec![0.0; count];
         };
@@ -382,6 +392,107 @@ impl SimTransport {
                     v = -v;
                 }
                 v + noise_amp * self.noise()
+            })
+            .collect()
+    }
+
+    fn math_index(src: &str) -> Option<u8> {
+        src.strip_prefix("MATH")
+            .and_then(|d| d.parse::<u8>().ok())
+            .filter(|n| (1..=4).contains(n))
+    }
+
+    fn param_or(&self, key: &str, default: &str) -> String {
+        self.params
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| default.into())
+            .to_ascii_uppercase()
+    }
+
+    /// `(scale, offset)` of math channel `m`.
+    fn math_scale(&self, m: u8) -> (f64, f64) {
+        let scale = self
+            .param_or(&format!(":MATH{m}:SCAL"), "1")
+            .parse::<f64>()
+            .ok()
+            .filter(|s| *s > 0.0)
+            .unwrap_or(1.0);
+        let offset = self
+            .param_or(&format!(":MATH{m}:OFFS"), "0")
+            .parse::<f64>()
+            .unwrap_or(0.0);
+        (scale, offset)
+    }
+
+    /// Result of math channel `m` (channel operands only; others count as 0 V).
+    fn math_samples(
+        &mut self,
+        m: u8,
+        first: usize,
+        count: usize,
+        x_inc: f64,
+        x_org: f64,
+    ) -> Vec<f64> {
+        let op = self.param_or(&format!(":MATH{m}:OPER"), "ADD");
+        let s1 = self.param_or(&format!(":MATH{m}:SOUR1"), "CHAN1");
+        let s2 = self.param_or(&format!(":MATH{m}:SOUR2"), "CHAN1");
+        let mut operand = |s: &str| {
+            if Self::channel_index(s).is_some() {
+                self.samples(s, first, count, x_inc, x_org)
+            } else {
+                vec![0.0; count]
+            }
+        };
+        let a = operand(&s1);
+        let b = operand(&s2);
+        match op.as_str() {
+            "ADD" => a.iter().zip(&b).map(|(x, y)| x + y).collect(),
+            "SUBT" => a.iter().zip(&b).map(|(x, y)| x - y).collect(),
+            "MULT" => a.iter().zip(&b).map(|(x, y)| x * y).collect(),
+            "DIV" => a
+                .iter()
+                .zip(&b)
+                .map(|(x, y)| if *y == 0.0 { 0.0 } else { x / y })
+                .collect(),
+            "ABS" => a.iter().map(|x| x.abs()).collect(),
+            "SQRT" => a.iter().map(|x| x.max(0.0).sqrt()).collect(),
+            "INTG" => a
+                .iter()
+                .scan(0.0, |acc, x| {
+                    *acc += x * x_inc;
+                    Some(*acc)
+                })
+                .collect(),
+            "DIFF" => {
+                let mut d: Vec<f64> = a.windows(2).map(|w| (w[1] - w[0]) / x_inc).collect();
+                d.push(d.last().copied().unwrap_or(0.0));
+                d
+            }
+            _ => a,
+        }
+    }
+
+    /// `:MATH<n>:FFT:SEARch:RES?` lines for the FFT source of math channel `m`.
+    fn fft_peak_lines(&mut self, m: u8) -> Vec<String> {
+        let src = self.param_or(&format!(":MATH{m}:FFT:SOUR"), "CHAN1");
+        let num = self
+            .param_or(&format!(":MATH{m}:FFT:SEAR:NUM"), "5")
+            .parse::<usize>()
+            .unwrap_or(5);
+        let (x_inc, x_org) = self.screen_timing();
+        let v = self.samples(&src, 0, SCREEN_POINTS, x_inc, x_org);
+        mho_dsp::spectrum(&v, x_inc, mho_dsp::Window::Hann)
+            .peaks(num)
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                format!(
+                    "{},{},{:.2}dBV",
+                    i + 1,
+                    mho_dsp::format_si(p.frequency, "Hz").replace([' ', 'µ'], ""),
+                    p.dbv
+                )
             })
             .collect()
     }
@@ -528,6 +639,8 @@ impl SimTransport {
         use crate::params::ParamKind::*;
         match spec.kind {
             Real { unit: "s", .. } => "1.000000E-6".into(),
+            Real { .. } if spec.node.ends_with(":SCAL") => "1.000000E0".into(),
+            Real { unit: "Hz", .. } => "1.000000E6".into(),
             Real { .. } | SourceLevel { .. } | Keyed { .. } => "0.000000".into(),
             Int { min, .. } => min.to_string(),
             Enum(v) => crate::params::short_form(v[0]).to_string(),
@@ -572,6 +685,26 @@ impl SimTransport {
                 _ => return false,
             };
             self.respond(r);
+            return true;
+        }
+        if let Some(m) = hdr
+            .strip_prefix(":MATH")
+            .and_then(|r| r.strip_suffix(":FFT:SEAR:RES"))
+            .and_then(|d| d.parse::<u8>().ok())
+        {
+            let on = self.param_or(&format!(":MATH{m}:FFT:SEAR:ENAB"), "0");
+            if on != "ON" && on != "1" {
+                // Conservative: treat like an unknown query while the search is off.
+                return false;
+            }
+            let lines = self.fft_peak_lines(m);
+            for l in lines {
+                self.pending.extend_from_slice(l.as_bytes());
+                self.pending.push(b'\n');
+            }
+            if self.pending.is_empty() {
+                self.pending.push(b'\n');
+            }
             return true;
         }
         if let Some(n) = hdr

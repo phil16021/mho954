@@ -16,6 +16,8 @@ pub const MAX_BLOCK: usize = 1_200_000_000;
 const MAX_EMPTY_READS: u32 = 4;
 /// Text accepted after a definite block in [`Scpi::query_block_message`].
 const MAX_TAIL: usize = 64 * 1024;
+/// Quiet time that ends a multi-line answer on transports without end-of-message marks.
+pub const LINE_GAP: Duration = Duration::from_millis(150);
 
 /// A response whose shape was detected from its first byte.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -292,6 +294,64 @@ impl Scpi {
         r
     }
 
+    /// Sends a query whose answer may span several lines (e.g. `:MATH<n>:FFT:SEARch:RES?`)
+    /// and returns all of them.
+    ///
+    /// The message ends with the USBTMC end-of-message mark; on transports without one (TCP)
+    /// after a pause of [`LINE_GAP`] following a complete line.
+    pub fn query_lines(&mut self, cmd: &str) -> Result<Vec<String>> {
+        let start = Instant::now();
+        self.discard_stale();
+        self.send(cmd)?;
+        let eom = self.transport.reports_eom();
+        let r = self.guard(cmd, |s| {
+            let mut empty = 0;
+            // First complete line (or an empty message).
+            while !s.rx.contains(&b'\n') {
+                if s.rx.len() > MAX_TAIL {
+                    return Err(ScpiError::parse(cmd, "response exceeds limit"));
+                }
+                if s.fill(s.chunk)? == 0 {
+                    if s.rx_end && s.rx.is_empty() {
+                        return Ok(Vec::new());
+                    }
+                    empty += 1;
+                    if empty >= MAX_EMPTY_READS {
+                        return Err(ScpiError::parse(cmd, "no data in response"));
+                    }
+                }
+            }
+            if eom {
+                while !s.rx_end {
+                    if s.rx.len() > MAX_TAIL {
+                        return Err(ScpiError::parse(cmd, "response exceeds limit"));
+                    }
+                    if s.fill(s.chunk)? == 0 {
+                        empty += 1;
+                        if empty >= MAX_EMPTY_READS {
+                            return Err(ScpiError::parse(cmd, "no end of message"));
+                        }
+                    }
+                }
+            } else {
+                let normal = s.transport.timeout();
+                s.transport.set_timeout(LINE_GAP).map_err(ScpiError::Io)?;
+                // A timeout here just means the answer is complete.
+                while s.rx.len() <= MAX_TAIL && matches!(s.fill(s.chunk), Ok(n) if n > 0) {}
+                s.transport.set_timeout(normal).map_err(ScpiError::Io)?;
+            }
+            let text = String::from_utf8_lossy(&std::mem::take(&mut s.rx)).into_owned();
+            s.rx_end = false;
+            Ok(text
+                .split('\n')
+                .map(|l| l.trim_end_matches('\r').to_string())
+                .filter(|l| !l.is_empty())
+                .collect())
+        });
+        self.last_duration = start.elapsed();
+        r
+    }
+
     /// Drains the error queue (`:SYSTem:ERRor?`) and returns all non-zero entries.
     pub fn errors(&mut self) -> Result<Vec<(i32, String)>> {
         let mut out = Vec::new();
@@ -551,6 +611,34 @@ mod tests {
         );
         // Missing terminator: gives up instead of hanging.
         assert!(s.query_block_message(":BUS1:DATA?").is_err());
+    }
+
+    #[test]
+    fn multi_line_answers() {
+        let mock = MockTransport::new()
+            .with_max_read(7)
+            .expect(
+                ":MATH1:FFT:SEAR:RES?",
+                b"1,2.5MHz,-24.98dBV\n2,3.5MHz,-27.8dBV\n",
+            )
+            .expect("*IDN?", b"X\n")
+            .expect(":MATH1:FFT:SEAR:RES?", b"\n");
+        let mut s = Scpi::new(Box::new(mock.clone()));
+        assert_eq!(
+            s.query_lines(":MATH1:FFT:SEAR:RES?").unwrap(),
+            ["1,2.5MHz,-24.98dBV", "2,3.5MHz,-27.8dBV"]
+        );
+        assert_eq!(s.query("*IDN?").unwrap(), "X");
+        assert!(s.query_lines(":MATH1:FFT:SEAR:RES?").unwrap().is_empty());
+        assert!(mock.is_done());
+
+        let stream = MockTransport::new()
+            .stream_mode()
+            .expect(":MATH1:FFT:SEAR:RES?", b"1,1kHz,-3dBV\n2,3kHz,-12dBV\n")
+            .expect("*IDN?", b"X\n");
+        let mut s = Scpi::new(Box::new(stream));
+        assert_eq!(s.query_lines(":MATH1:FFT:SEAR:RES?").unwrap().len(), 2);
+        assert_eq!(s.query("*IDN?").unwrap(), "X");
     }
 
     #[test]

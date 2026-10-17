@@ -210,6 +210,10 @@ impl ScopeApi for LocalBackend {
         self.device.call(move |s| s.bus_data(bus)).await
     }
 
+    async fn fft_peaks(&self, math: u8) -> ApiResult<Vec<mho_dsp::ScopePeak>> {
+        self.device.call(move |s| s.fft_peaks(math)).await
+    }
+
     async fn modules(&self) -> ApiResult<Modules> {
         if let Some(m) = *self.modules.lock().unwrap() {
             return Ok(m);

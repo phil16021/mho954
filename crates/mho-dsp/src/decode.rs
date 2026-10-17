@@ -132,6 +132,38 @@ pub fn decode_csv(table: &DecodeTable) -> String {
     out
 }
 
+/// One entry of the scope's FFT peak table (`:MATH<n>:FFT:SEARch:RES?`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct ScopePeak {
+    pub rank: u32,
+    /// Hz.
+    pub frequency: f64,
+    /// In the FFT's unit (dBV or V), SI prefix applied.
+    pub amplitude: f64,
+    /// Amplitude as printed, e.g. `-24.98dBV`.
+    pub amplitude_text: String,
+}
+
+/// Parses peak lines like `1,2.50000MHz,-24.98dBV`. Malformed lines are skipped.
+pub fn parse_fft_peaks(lines: &[String]) -> Vec<ScopePeak> {
+    lines
+        .iter()
+        .flat_map(|l| l.split(';'))
+        .filter_map(|l| {
+            let mut f = l.split(',').map(str::trim);
+            let rank = f.next()?.parse::<u32>().ok()?;
+            let frequency = parse_si_value(f.next()?)?;
+            let amp = f.next()?;
+            Some(ScopePeak {
+                rank,
+                frequency,
+                amplitude: parse_si_value(amp)?,
+                amplitude_text: amp.to_string(),
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +200,27 @@ mod tests {
         let t = parse_decode_table("SPI\nTime,MISO,MOSI,\n");
         assert_eq!(t.columns.len(), 3);
         assert!(t.rows.is_empty());
+    }
+
+    #[test]
+    fn fft_peaks() {
+        let lines: Vec<String> = [
+            "1,2.50000MHz,-24.98dBV",
+            "2,3.50000MHz,-27.84dBV",
+            "garbage",
+            "5,6.50125MHz,-32.34dBV",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let p = parse_fft_peaks(&lines);
+        assert_eq!(p.len(), 3);
+        assert_eq!(p[0].rank, 1);
+        assert_eq!(p[0].frequency, 2.5e6);
+        assert_eq!(p[0].amplitude, -24.98);
+        assert_eq!(p[2].amplitude_text, "-32.34dBV");
+        let v = parse_fft_peaks(&["1,1kHz,12.5mV".to_string()]);
+        assert_eq!(v[0].amplitude, 12.5e-3);
     }
 
     #[test]

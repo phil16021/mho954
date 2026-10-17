@@ -537,6 +537,20 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 }
             }
         }
+        Command::Peaks { math } => {
+            let peaks = api.fft_peaks(math).await?;
+            if peaks.is_empty() {
+                println!("no peaks");
+            }
+            for p in peaks {
+                println!(
+                    "{:>2}  {:>14}  {}",
+                    p.rank,
+                    format_si(p.frequency, "Hz"),
+                    p.amplitude_text
+                );
+            }
+        }
         Command::Decode { bus, csv, output } => {
             let table = api.decode_bus(bus).await?;
             if let Some(path) = output {

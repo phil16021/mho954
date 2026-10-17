@@ -647,6 +647,60 @@ impl Scope {
         Ok(mho_dsp::parse_decode_table(&String::from_utf8_lossy(&data)))
     }
 
+    /// Peak table of the FFT on math channel `n` (FFT operator and peak search must be on).
+    pub fn fft_peaks(&mut self, n: u8) -> Result<Vec<mho_dsp::ScopePeak>> {
+        if !(1..=4).contains(&n) {
+            return Err(DriverError::Invalid(format!("math {n} outside 1..=4")));
+        }
+        if !self.may_query(":MATH1:FFT:SEAR:RES?") {
+            return Err(DriverError::Unsupported(
+                ":MATH<n>:FFT:SEARch:RES? has not been verified on this instrument yet \
+                 (run `mho954 verify math.peaks`)"
+                    .into(),
+            ));
+        }
+        // An unanswered query costs a lot here, so the preconditions are checked first.
+        if self.may_query(":MATH1:FFT:SEAR:ENAB?") {
+            let state = self.scpi.query_many(&[
+                format!(":MATH{n}:DISP?"),
+                format!(":MATH{n}:OPER?"),
+                format!(":MATH{n}:FFT:SEAR:ENAB?"),
+            ])?;
+            let on = |s: &str| s.trim() == "1" || s.trim().eq_ignore_ascii_case("ON");
+            if !on(&state[0]) || !state[1].trim().eq_ignore_ascii_case("FFT") || !on(&state[2]) {
+                return Err(DriverError::State(format!(
+                    "math {n} must be an FFT with peak search on \
+                     (group `math.fft`, activate=true, peak_search=true)"
+                )));
+            }
+        }
+        let lines = self.scpi.query_lines(&format!(":MATH{n}:FFT:SEAR:RES?"))?;
+        Ok(mho_dsp::parse_fft_peaks(&lines))
+    }
+
+    /// Math channels shown in the time domain (FFT results are left out: their x axis is
+    /// frequency). Empty until the math queries are verified on the instrument.
+    pub fn displayed_math(&mut self) -> Result<Vec<u8>> {
+        if !self.may_query(":MATH1:DISP?") || !self.may_query(":MATH1:OPER?") {
+            return Ok(Vec::new());
+        }
+        let disp = self.scpi.query_many(
+            &(1..=4)
+                .map(|n| format!(":MATH{n}:DISP?"))
+                .collect::<Vec<_>>(),
+        )?;
+        let mut out = Vec::new();
+        for (n, d) in (1..=4u8).zip(&disp) {
+            if d.trim() == "1" || d.trim().eq_ignore_ascii_case("ON") {
+                let op = self.scpi.query(&format!(":MATH{n}:OPER?"))?;
+                if !op.trim().eq_ignore_ascii_case("FFT") {
+                    out.push(n);
+                }
+            }
+        }
+        Ok(out)
+    }
+
     pub fn measure_many(&mut self, items: &[String], source: &str) -> Result<Vec<Measurement>> {
         items
             .iter()
@@ -732,6 +786,11 @@ impl Scope {
         source: &str,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<Waveform> {
+        if normalize_source(source)?.starts_with("MATH") {
+            return Err(DriverError::Invalid(
+                "math channels can only be read from the screen (mode norm)".into(),
+            ));
+        }
         let status = self.trigger_status()?;
         if status != "STOP" {
             return Err(DriverError::State(format!(

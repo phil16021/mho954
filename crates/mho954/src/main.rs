@@ -152,6 +152,8 @@ pub enum Command {
     },
     /// Digital voltmeter reading (configure with `set dvm enable=true ...`).
     Dvm,
+    /// Peak table of the scope's FFT on math channel 1..4 (`set math.fft --activate peak_search=true`).
+    Peaks { math: u8 },
     /// Decoded events of protocol decoder 1..4 (set it up with `set bus.rs232 --activate ...`).
     Decode {
         bus: u8,

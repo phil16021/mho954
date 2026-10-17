@@ -8,7 +8,10 @@ pub mod fft;
 pub mod measure;
 
 pub use decimate::{MinMax, minmax_decimate};
-pub use decode::{DecodeRow, DecodeTable, decode_csv, parse_decode_table, parse_si_value};
+pub use decode::{
+    DecodeRow, DecodeTable, ScopePeak, decode_csv, parse_decode_table, parse_fft_peaks,
+    parse_si_value,
+};
 pub use fft::{Spectrum, SpectrumPeak, Window, spectrum};
 pub use measure::{Measurements, analyze};
 
