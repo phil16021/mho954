@@ -208,6 +208,13 @@ impl UsbTmcUserTransport {
         Ok(())
     }
 
+    /// Drops alignment padding if it was sent. The MHO954 omits it; the transfer then ends
+    /// with a short packet, so any padding would already be in `rx`.
+    fn drop_padding(&mut self, padding: usize) {
+        let k = padding.min(self.rx.len());
+        self.rx.drain(..k);
+    }
+
     fn skip(&mut self, mut n: usize, deadline: Instant) -> io::Result<()> {
         while n > 0 {
             if self.rx.is_empty() {
@@ -239,7 +246,8 @@ impl UsbTmcUserTransport {
             if h[1] != expected {
                 debug!(tag = h[1], expected, size, "usb: skipping stale reply");
                 self.rx.drain(..HEADER);
-                self.skip(size + padding, deadline)?;
+                self.skip(size, deadline)?;
+                self.drop_padding(padding);
                 continue;
             }
             self.rx.drain(..HEADER);
@@ -277,7 +285,7 @@ impl Transport for UsbTmcUserTransport {
             }
         };
         if cur.remaining == 0 {
-            self.skip(cur.padding, deadline)?;
+            self.drop_padding(cur.padding);
             self.current = None;
             return Ok(ReadChunk { n: 0, end: cur.eom });
         }
@@ -292,7 +300,7 @@ impl Transport for UsbTmcUserTransport {
         cur.remaining -= n;
         let mut end = false;
         if cur.remaining == 0 {
-            self.skip(cur.padding, deadline)?;
+            self.drop_padding(cur.padding);
             self.current = None;
             end = cur.eom;
         } else {
