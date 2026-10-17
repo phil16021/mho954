@@ -4,6 +4,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
+use mho_driver::params::{GroupInfo, ParamMap};
 use mho_driver::*;
 use mho_dsp::{Measurements, SpectrumPeak, Window};
 use mho_service::live::{LiveConfig, encode_frame};
@@ -75,6 +76,9 @@ pub fn routes() -> Router {
         .route("/scpi", post(scpi))
         .route("/live", get(live_get).put(live_put))
         .route("/network", get(network).put(set_network))
+        .route("/modules", get(modules))
+        .route("/groups", get(groups))
+        .route("/groups/{id}", get(group_get).put(group_set))
         .route("/openapi.json", get(openapi_json))
 }
 
@@ -510,4 +514,53 @@ async fn set_network(
     Json(u): Json<NetworkUpdate>,
 ) -> HttpResult<Json<NetworkState>> {
     Ok(Json(s.backend.set_network(u).await?))
+}
+
+/// Hardware modules: logic analyzer, function generator (`:SYST:MOD?`).
+#[utoipa::path(get, path = "/api/v1/modules", responses((status = 200, body = Modules)))]
+async fn modules(State(s): State<AppState>) -> HttpResult<Json<Modules>> {
+    Ok(Json(s.backend.modules().await?))
+}
+
+/// Catalogue of settings groups (trigger types, decoders, math, …) with parameter ranges,
+/// hardware availability and whether the group was verified on the instrument.
+#[utoipa::path(get, path = "/api/v1/groups", responses((status = 200, body = Vec<GroupInfo>)))]
+async fn groups(State(s): State<AppState>) -> HttpResult<Json<Vec<GroupInfo>>> {
+    Ok(Json(s.backend.groups().await?))
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+struct GroupQuery {
+    /// Instance for groups that exist several times (e.g. decoder 1..4).
+    instance: Option<u8>,
+    /// Also activate the group (e.g. switch the trigger type).
+    #[serde(default)]
+    activate: bool,
+}
+
+/// Reads a settings group (403-style refusal if not yet verified on the instrument).
+#[utoipa::path(get, path = "/api/v1/groups/{id}", params(("id" = String, Path), GroupQuery),
+    responses((status = 200, body = ParamMap)))]
+async fn group_get(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<GroupQuery>,
+) -> HttpResult<Json<ParamMap>> {
+    Ok(Json(s.backend.group_get(id, q.instance).await?))
+}
+
+/// Writes parameters of a settings group; returns the new state if the group may be read.
+#[utoipa::path(put, path = "/api/v1/groups/{id}", params(("id" = String, Path), GroupQuery),
+    request_body = ParamMap, responses((status = 200, body = Option<ParamMap>)))]
+async fn group_set(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<GroupQuery>,
+    Json(values): Json<ParamMap>,
+) -> HttpResult<Json<Option<ParamMap>>> {
+    Ok(Json(
+        s.backend
+            .group_set(id, q.instance, values, q.activate)
+            .await?,
+    ))
 }

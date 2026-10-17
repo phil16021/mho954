@@ -112,5 +112,719 @@
     "group": "measure",
     "outcome": "ok",
     "detail": ""
+  },
+  {
+    "command": ":TRIG:PULS:SOUR?",
+    "group": "trigger.pulse",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:PULS:POL?",
+    "group": "trigger.pulse",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIG:PULS:WHEN?",
+    "group": "trigger.pulse",
+    "outcome": "ok",
+    "detail": "GRE"
+  },
+  {
+    "command": ":TRIG:PULS:LWID?",
+    "group": "trigger.pulse",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":TRIG:PULS:UWID?",
+    "group": "trigger.pulse",
+    "outcome": "ok",
+    "detail": "2.000000E-6"
+  },
+  {
+    "command": ":TRIG:PULS:LEV?",
+    "group": "trigger.pulse",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:SLOP:SOUR?",
+    "group": "trigger.slope",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:SLOP:POL?",
+    "group": "trigger.slope",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIG:SLOP:WHEN?",
+    "group": "trigger.slope",
+    "outcome": "ok",
+    "detail": "GRE"
+  },
+  {
+    "command": ":TRIG:SLOP:TLOW?",
+    "group": "trigger.slope",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":TRIG:SLOP:TUPP?",
+    "group": "trigger.slope",
+    "outcome": "ok",
+    "detail": "2.000000E-6"
+  },
+  {
+    "command": ":TRIG:SLOP:WIND?",
+    "group": "trigger.slope",
+    "outcome": "ok",
+    "detail": "TA"
+  },
+  {
+    "command": ":TRIG:SLOP:ALEV?",
+    "group": "trigger.slope",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:SLOP:BLEV?",
+    "group": "trigger.slope",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:VID:SOUR?",
+    "group": "trigger.video",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:VID:POL?",
+    "group": "trigger.video",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIG:VID:MODE?",
+    "group": "trigger.video",
+    "outcome": "ok",
+    "detail": "ALIN"
+  },
+  {
+    "command": ":TRIG:VID:LINE?",
+    "group": "trigger.video",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":TRIG:VID:STAN?",
+    "group": "trigger.video",
+    "outcome": "ok",
+    "detail": "NTSC"
+  },
+  {
+    "command": ":TRIG:VID:LEV?",
+    "group": "trigger.video",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:PATT:PATT?",
+    "group": "trigger.pattern",
+    "outcome": "ok",
+    "detail": "X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X,X"
+  },
+  {
+    "command": ":TRIG:PATT:SOUR?",
+    "group": "trigger.pattern",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:PATT:LEV? CHAN1",
+    "group": "trigger.pattern",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:DUR:SOUR?",
+    "group": "trigger.duration",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:DUR:TYPE?",
+    "group": "trigger.duration",
+    "outcome": "ok",
+    "detail": "X,X,X,X"
+  },
+  {
+    "command": ":TRIG:DUR:WHEN?",
+    "group": "trigger.duration",
+    "outcome": "ok",
+    "detail": "GRE"
+  },
+  {
+    "command": ":TRIG:DUR:TLOW?",
+    "group": "trigger.duration",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":TRIG:DUR:TUPP?",
+    "group": "trigger.duration",
+    "outcome": "ok",
+    "detail": "2.000000E-6"
+  },
+  {
+    "command": ":TRIG:DUR:LEV? CHAN1",
+    "group": "trigger.duration",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:TIM:SOUR?",
+    "group": "trigger.timeout",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:TIM:SLOP?",
+    "group": "trigger.timeout",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIG:TIM:TIME?",
+    "group": "trigger.timeout",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":TRIG:TIM:LEV?",
+    "group": "trigger.timeout",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:RUNT:SOUR?",
+    "group": "trigger.runt",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:RUNT:POL?",
+    "group": "trigger.runt",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIG:RUNT:WHEN?",
+    "group": "trigger.runt",
+    "outcome": "ok",
+    "detail": "NONE"
+  },
+  {
+    "command": ":TRIG:RUNT:WLOW?",
+    "group": "trigger.runt",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":TRIG:RUNT:WUPP?",
+    "group": "trigger.runt",
+    "outcome": "ok",
+    "detail": "2.000000E-6"
+  },
+  {
+    "command": ":TRIG:RUNT:ALEV?",
+    "group": "trigger.runt",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:RUNT:BLEV?",
+    "group": "trigger.runt",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:WIND:SOUR?",
+    "group": "trigger.window",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:WIND:SLOP?",
+    "group": "trigger.window",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIG:WIND:POS?",
+    "group": "trigger.window",
+    "outcome": "ok",
+    "detail": "ENT"
+  },
+  {
+    "command": ":TRIG:WIND:TIME?",
+    "group": "trigger.window",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":TRIG:WIND:ALEV?",
+    "group": "trigger.window",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:WIND:BLEV?",
+    "group": "trigger.window",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:DEL:SA?",
+    "group": "trigger.delay",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:DEL:ASL?",
+    "group": "trigger.delay",
+    "outcome": "ok",
+    "detail": "NEG"
+  },
+  {
+    "command": ":TRIG:DEL:SB?",
+    "group": "trigger.delay",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":TRIG:DEL:BSL?",
+    "group": "trigger.delay",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIG:DEL:TYPE?",
+    "group": "trigger.delay",
+    "outcome": "ok",
+    "detail": "GRE"
+  },
+  {
+    "command": ":TRIG:DEL:TLOW?",
+    "group": "trigger.delay",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":TRIG:DEL:TUPP?",
+    "group": "trigger.delay",
+    "outcome": "ok",
+    "detail": "2.000000E-6"
+  },
+  {
+    "command": ":TRIG:DEL:ALEV?",
+    "group": "trigger.delay",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:DEL:BLEV?",
+    "group": "trigger.delay",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:SHOL:DSRC?",
+    "group": "trigger.setup_hold",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":TRIG:SHOL:CSRC?",
+    "group": "trigger.setup_hold",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:SHOL:SLOP?",
+    "group": "trigger.setup_hold",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIG:SHOL:PATT?",
+    "group": "trigger.setup_hold",
+    "outcome": "ok",
+    "detail": "H"
+  },
+  {
+    "command": ":TRIG:SHOL:TYPE?",
+    "group": "trigger.setup_hold",
+    "outcome": "ok",
+    "detail": "SET"
+  },
+  {
+    "command": ":TRIG:SHOL:STIM?",
+    "group": "trigger.setup_hold",
+    "outcome": "ok",
+    "detail": "2.000000E-6"
+  },
+  {
+    "command": ":TRIG:SHOL:HTIM?",
+    "group": "trigger.setup_hold",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":TRIG:SHOL:DLEV?",
+    "group": "trigger.setup_hold",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:SHOL:CLEV?",
+    "group": "trigger.setup_hold",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:NEDG:SOUR?",
+    "group": "trigger.nth_edge",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:NEDG:SLOP?",
+    "group": "trigger.nth_edge",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIG:NEDG:IDLE?",
+    "group": "trigger.nth_edge",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":TRIG:NEDG:EDGE?",
+    "group": "trigger.nth_edge",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":TRIG:NEDG:LEV?",
+    "group": "trigger.nth_edge",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:RS232:SOUR?",
+    "group": "trigger.rs232",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:RS232:LEV?",
+    "group": "trigger.rs232",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:RS232:POL?",
+    "group": "trigger.rs232",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIG:RS232:WHEN?",
+    "group": "trigger.rs232",
+    "outcome": "ok",
+    "detail": "STAR"
+  },
+  {
+    "command": ":TRIG:RS232:DATA?",
+    "group": "trigger.rs232",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIG:RS232:BAUD?",
+    "group": "trigger.rs232",
+    "outcome": "ok",
+    "detail": "9600"
+  },
+  {
+    "command": ":TRIG:RS232:WIDT?",
+    "group": "trigger.rs232",
+    "outcome": "ok",
+    "detail": "8"
+  },
+  {
+    "command": ":TRIG:RS232:STOP?",
+    "group": "trigger.rs232",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":TRIG:RS232:PAR?",
+    "group": "trigger.rs232",
+    "outcome": "ok",
+    "detail": "NONE"
+  },
+  {
+    "command": ":TRIG:IIC:SCL?",
+    "group": "trigger.i2c",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:IIC:CLEV?",
+    "group": "trigger.i2c",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:IIC:SDA?",
+    "group": "trigger.i2c",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":TRIG:IIC:DLEV?",
+    "group": "trigger.i2c",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:IIC:WHEN?",
+    "group": "trigger.i2c",
+    "outcome": "ok",
+    "detail": "STAR"
+  },
+  {
+    "command": ":TRIG:IIC:AWID?",
+    "group": "trigger.i2c",
+    "outcome": "ok",
+    "detail": "7"
+  },
+  {
+    "command": ":TRIG:IIC:ADDR?",
+    "group": "trigger.i2c",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIG:IIC:DIR?",
+    "group": "trigger.i2c",
+    "outcome": "ok",
+    "detail": "WRIT"
+  },
+  {
+    "command": ":TRIG:IIC:DBYT?",
+    "group": "trigger.i2c",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":TRIG:IIC:DATA?",
+    "group": "trigger.i2c",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIG:SPI:CLK?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:SPI:CLEV?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:SPI:SLOP?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIG:SPI:MISO?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":TRIG:SPI:DLEV?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:SPI:WHEN?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "CS"
+  },
+  {
+    "command": ":TRIG:SPI:CS?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "CHAN3"
+  },
+  {
+    "command": ":TRIG:SPI:SLEV?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:SPI:MODE?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "LOW"
+  },
+  {
+    "command": ":TRIG:SPI:TIM?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":TRIG:SPI:WIDT?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "8"
+  },
+  {
+    "command": ":TRIG:SPI:DATA?",
+    "group": "trigger.spi",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIG:CAN:BAUD?",
+    "group": "trigger.can",
+    "outcome": "ok",
+    "detail": "1000000"
+  },
+  {
+    "command": ":TRIG:CAN:SOUR?",
+    "group": "trigger.can",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:CAN:STYP?",
+    "group": "trigger.can",
+    "outcome": "ok",
+    "detail": "H"
+  },
+  {
+    "command": ":TRIG:CAN:WHEN?",
+    "group": "trigger.can",
+    "outcome": "ok",
+    "detail": "SOF"
+  },
+  {
+    "command": ":TRIG:CAN:SPO?",
+    "group": "trigger.can",
+    "outcome": "ok",
+    "detail": "50"
+  },
+  {
+    "command": ":TRIG:CAN:EXT?",
+    "group": "trigger.can",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIG:CAN:DEF?",
+    "group": "trigger.can",
+    "outcome": "ok",
+    "detail": "DATA"
+  },
+  {
+    "command": ":TRIG:CAN:DWID?",
+    "group": "trigger.can",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":TRIG:CAN:DATA?",
+    "group": "trigger.can",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIG:CAN:LEV?",
+    "group": "trigger.can",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:LIN:SOUR?",
+    "group": "trigger.lin",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIG:LIN:LEV?",
+    "group": "trigger.lin",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIG:LIN:STAN?",
+    "group": "trigger.lin",
+    "outcome": "ok",
+    "detail": "BOTH"
+  },
+  {
+    "command": ":TRIG:LIN:BAUD?",
+    "group": "trigger.lin",
+    "outcome": "ok",
+    "detail": "9600"
+  },
+  {
+    "command": ":TRIG:LIN:SAMP?",
+    "group": "trigger.lin",
+    "outcome": "ok",
+    "detail": "50"
+  },
+  {
+    "command": ":TRIG:LIN:WHEN?",
+    "group": "trigger.lin",
+    "outcome": "ok",
+    "detail": "SYNC"
+  },
+  {
+    "command": ":TRIG:LIN:ERR?",
+    "group": "trigger.lin",
+    "outcome": "ok",
+    "detail": "SYNC"
+  },
+  {
+    "command": ":TRIG:LIN:ID?",
+    "group": "trigger.lin",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIG:LIN:DATA?",
+    "group": "trigger.lin",
+    "outcome": "ok",
+    "detail": "XXXXXXXX"
   }
 ]

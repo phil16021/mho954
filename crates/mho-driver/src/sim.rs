@@ -198,6 +198,8 @@ pub struct SimTransport {
     hung: bool,
     /// Length of `pending` when the current message arrived (compound answers).
     message_start: usize,
+    /// Values of table-driven settings (`crate::params`), keyed by node (+ source).
+    params: std::collections::HashMap<String, String>,
     /// `:MEAS:ITEM?` item/source pairs seen; the first query of each returns 9.9E37.
     measured: std::collections::HashSet<String>,
     errors: Vec<(i32, String)>,
@@ -237,6 +239,7 @@ impl SimTransport {
             hung: false,
             measured: Default::default(),
             message_start: 0,
+            params: Default::default(),
             errors: Vec::new(),
             pending: Vec::new(),
             rng: 0x2545_F491_4F6C_DD1D,
@@ -504,7 +507,45 @@ impl SimTransport {
     }
 
     /// Returns `false` for unknown queries.
+    /// Finds a table-driven parameter by its node.
+    fn param_spec(hdr: &str) -> Option<crate::params::ParamSpec> {
+        crate::params::GROUPS
+            .iter()
+            .flat_map(|g| g.params.iter())
+            .find(|p| p.node == hdr)
+            .copied()
+    }
+
+    fn param_default(spec: &crate::params::ParamSpec) -> String {
+        use crate::params::ParamKind::*;
+        match spec.kind {
+            Real { unit: "s", .. } => "1.000000E-6".into(),
+            Real { .. } | SourceLevel { .. } => "0.000000".into(),
+            Int { min, .. } => min.to_string(),
+            Enum(v) => crate::params::short_form(v[0]).to_string(),
+            Bool => "0".into(),
+            Source { .. } => "CHAN1".into(),
+            Text { .. } => "XXXXXXXX".into(),
+            Pattern { count, .. } => vec!["X"; count].join(","),
+        }
+    }
+
+    /// Returns `false` for unknown queries.
     fn query(&mut self, hdr: &str, args: &str) -> bool {
+        if let Some(spec) = Self::param_spec(hdr) {
+            let key = if args.is_empty() {
+                hdr.to_string()
+            } else {
+                format!("{hdr} {}", args.to_ascii_uppercase())
+            };
+            let v = self
+                .params
+                .get(&key)
+                .cloned()
+                .unwrap_or_else(|| Self::param_default(&spec));
+            self.respond(v);
+            return true;
+        }
         let fmt_f = |v: f64| format!("{v:.6E}");
         let on = |b: bool| if b { "1" } else { "0" }.to_string();
         if let Some((n, prop)) = parse_chan(hdr) {
@@ -652,6 +693,18 @@ impl SimTransport {
     }
 
     fn command(&mut self, hdr: &str, args: &str) -> Result<(), String> {
+        if let Some(spec) = Self::param_spec(hdr) {
+            if let crate::params::ParamKind::SourceLevel { .. } = spec.kind {
+                let (src, v) = args.split_once(',').ok_or("missing source")?;
+                self.params.insert(
+                    format!("{hdr} {}", src.trim().to_ascii_uppercase()),
+                    v.trim().to_string(),
+                );
+            } else {
+                self.params.insert(hdr.to_string(), args.trim().to_string());
+            }
+            return Ok(());
+        }
         let num = || {
             args.parse::<f64>()
                 .map_err(|_| format!("bad number {args:?}"))

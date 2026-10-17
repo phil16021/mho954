@@ -390,6 +390,15 @@ pub fn validate_ipv4(s: &str, mask: bool) -> Result<String> {
         .join("."))
 }
 
+/// Hardware modules reported by `:SYSTem:MODules?`.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema,
+)]
+pub struct Modules {
+    pub logic_analyzer: bool,
+    pub function_generator: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct OptionInfo {
     pub name: String,

@@ -452,6 +452,73 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
             println!("setup restored from {}", file.display());
         }
         Command::Fw { cmd: FwCmd::Status } => fw_status(api, cfg).await?,
+        Command::Groups { prefix, params } => {
+            for g in api.groups().await? {
+                if prefix.as_deref().is_some_and(|p| !g.id.starts_with(p)) {
+                    continue;
+                }
+                let flags = format!(
+                    "{}{}",
+                    if g.verified { "" } else { " [unverified]" },
+                    if g.available {
+                        ""
+                    } else {
+                        " [hardware missing]"
+                    }
+                );
+                let inst = g
+                    .instances
+                    .map(|(a, b)| format!(" (instances {a}..{b})"))
+                    .unwrap_or_default();
+                println!("{:<22} {}{inst}{flags}", g.id, g.title);
+                if params {
+                    for p in &g.params {
+                        let range = match (p.min, p.max) {
+                            (Some(a), Some(b)) => {
+                                format!(" {a}..{b}{}", p.unit.as_deref().unwrap_or(""))
+                            }
+                            _ => String::new(),
+                        };
+                        let values = if p.values.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" {{{}}}", p.values.join("|"))
+                        };
+                        println!(
+                            "    {:<14} {:<12}{range}{values}  {}",
+                            p.name, p.kind, p.help
+                        );
+                    }
+                }
+            }
+        }
+        Command::Get { group, instance } => {
+            for (k, v) in api.group_get(group, instance).await? {
+                println!("{k:<14} {}", show_value(&v));
+            }
+        }
+        Command::Set {
+            group,
+            values,
+            instance,
+            activate,
+        } => {
+            let mut map = mho_driver::params::ParamMap::new();
+            for kv in values {
+                let (k, v) = kv
+                    .split_once('=')
+                    .with_context(|| format!("expected key=value, got {kv:?}"))?;
+                map.insert(k.trim().to_string(), parse_value(v.trim()));
+            }
+            match api.group_set(group, instance, map, activate).await? {
+                Some(state) => {
+                    for (k, v) in state {
+                        println!("{k:<14} {}", show_value(&v));
+                    }
+                }
+                None => println!("applied (group not yet verified for reading)"),
+            }
+        }
         Command::Net { cmd } => match cmd.unwrap_or(NetCmd::Show) {
             NetCmd::Show => print_network(&api.network().await?),
             NetCmd::Set(a) => {
@@ -1188,16 +1255,21 @@ async fn verify_cmd(
     output: Option<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
     use mho_driver::verify::{
-        CANDIDATES, Kind, Outcome, UNKNOWN_QUERY_BUDGET, VerifyResult, check,
+        Kind, Outcome, UNKNOWN_QUERY_BUDGET, VerifyResult, candidates, check,
     };
+    let all = candidates();
     if list {
         for g in mho_driver::verify::groups() {
-            let cmds: Vec<&str> = CANDIDATES
+            let cmds: Vec<&str> = all
                 .iter()
                 .filter(|c| c.group == g)
-                .map(|c| c.command)
+                .map(|c| c.command.as_str())
                 .collect();
-            println!("{g:<10} {}", cmds.join("  "));
+            println!(
+                "{g:<22} {:>2}  {}",
+                cmds.len(),
+                cmds.iter().take(3).copied().collect::<Vec<_>>().join("  ")
+            );
         }
         return Ok(());
     }
@@ -1216,10 +1288,14 @@ async fn verify_cmd(
     }
     ensure_no_daemon(cli, cfg).await?;
 
-    let selected: Vec<_> = CANDIDATES
-        .iter()
-        .filter(|c| groups.is_empty() || groups.iter().any(|g| g == c.group))
-        .copied()
+    let selected: Vec<_> = all
+        .into_iter()
+        .filter(|c| {
+            groups.is_empty()
+                || groups
+                    .iter()
+                    .any(|g| *g == c.group || c.group.starts_with(&format!("{g}.")))
+        })
         .collect();
     if selected.is_empty() {
         bail!("no candidates for {groups:?} (see `mho954 verify --list`)");
@@ -1275,4 +1351,49 @@ async fn verify_cmd(
         bail!(msg);
     }
     Ok(())
+}
+
+fn show_value(v: &mho_driver::params::ParamValue) -> String {
+    use mho_driver::params::ParamValue::*;
+    match v {
+        Bool(b) => b.to_string(),
+        Int(i) => i.to_string(),
+        Real(x) => format!("{x:e}"),
+        Text(t) => t.clone(),
+    }
+}
+
+/// `true`/`false`, integers, reals (with SI prefixes like `2u`, `1.5m`, `10k`) or text.
+fn parse_value(s: &str) -> mho_driver::params::ParamValue {
+    use mho_driver::params::ParamValue;
+    match s.to_ascii_lowercase().as_str() {
+        "true" => return ParamValue::Bool(true),
+        "false" => return ParamValue::Bool(false),
+        _ => {}
+    }
+    if let Ok(i) = s.parse::<u64>() {
+        return ParamValue::Int(i);
+    }
+    if let Ok(x) = s.parse::<f64>() {
+        return ParamValue::Real(x);
+    }
+    // Exponent of the SI prefix; dividing by 10^k for small units keeps 5u exactly 5e-6.
+    let (num, exp) = match s.chars().last() {
+        Some('p') => (&s[..s.len() - 1], -12),
+        Some('n') => (&s[..s.len() - 1], -9),
+        Some('u') => (&s[..s.len() - 1], -6),
+        Some('µ') => (&s[..s.len() - 'µ'.len_utf8()], -6),
+        Some('m') => (&s[..s.len() - 1], -3),
+        Some('k') => (&s[..s.len() - 1], 3),
+        Some('M') => (&s[..s.len() - 1], 6),
+        _ => ("", 0),
+    };
+    match num.parse::<f64>() {
+        Ok(x) if !num.is_empty() => ParamValue::Real(if exp < 0 {
+            x / 10f64.powi(-exp)
+        } else {
+            x * 10f64.powi(exp)
+        }),
+        _ => ParamValue::Text(s.to_string()),
+    }
 }

@@ -133,6 +133,31 @@ pub enum Command {
         #[command(subcommand)]
         cmd: Option<commands::NetCmd>,
     },
+    /// List settings groups (trigger types, decoders, …), optionally by prefix.
+    Groups {
+        prefix: Option<String>,
+        /// Show the parameters of each group.
+        #[arg(long)]
+        params: bool,
+    },
+    /// Read a settings group, e.g. `get trigger.pulse`.
+    Get {
+        group: String,
+        /// Instance (decoder/math 1..4).
+        #[arg(short = 'n', long)]
+        instance: Option<u8>,
+    },
+    /// Change a settings group, e.g. `set trigger.pulse --activate when=GREater lower=2u`.
+    Set {
+        group: String,
+        /// key=value pairs; numbers accept SI prefixes (2u, 1.5m, 10k).
+        values: Vec<String>,
+        #[arg(short = 'n', long)]
+        instance: Option<u8>,
+        /// Also activate the group (e.g. switch to this trigger type).
+        #[arg(long)]
+        activate: bool,
+    },
     /// Firmware information and update procedure.
     Fw {
         #[command(subcommand)]

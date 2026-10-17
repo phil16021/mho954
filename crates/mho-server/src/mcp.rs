@@ -107,6 +107,32 @@ pub struct FftArgs {
     pub raw: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GroupsArgs {
+    /// Only groups whose id starts with this, e.g. `trigger` or `bus`.
+    pub prefix: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GroupArgs {
+    /// Group id from list_settings_groups, e.g. `trigger.pulse`.
+    pub group: String,
+    /// Instance for repeated groups (decoder 1..4, math 1..4).
+    pub instance: Option<u8>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConfigureGroup {
+    /// Group id from list_settings_groups, e.g. `trigger.pulse`.
+    pub group: String,
+    pub instance: Option<u8>,
+    /// Parameter values by name, e.g. {"polarity": "NEGative", "lower": 2e-6}.
+    pub values: mho_driver::params::ParamMap,
+    /// Also activate the group (e.g. make this the active trigger type).
+    #[serde(default)]
+    pub activate: bool,
+}
+
 #[derive(Serialize)]
 struct WaveformSummary {
     source: String,

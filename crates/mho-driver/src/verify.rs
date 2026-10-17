@@ -25,17 +25,24 @@ pub enum Kind {
     Command,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Candidate {
-    pub group: &'static str,
-    pub command: &'static str,
+    pub group: String,
+    pub command: String,
     pub kind: Kind,
     /// Guide reference or reason.
-    pub note: &'static str,
+    pub note: String,
 }
 
-const fn q(group: &'static str, command: &'static str, note: &'static str) -> Candidate {
-    Candidate {
+struct Fixed {
+    group: &'static str,
+    command: &'static str,
+    kind: Kind,
+    note: &'static str,
+}
+
+const fn q(group: &'static str, command: &'static str, note: &'static str) -> Fixed {
+    Fixed {
         group,
         command,
         kind: Kind::Query,
@@ -43,8 +50,8 @@ const fn q(group: &'static str, command: &'static str, note: &'static str) -> Ca
     }
 }
 
-const fn c(group: &'static str, command: &'static str, note: &'static str) -> Candidate {
-    Candidate {
+const fn c(group: &'static str, command: &'static str, note: &'static str) -> Fixed {
+    Fixed {
         group,
         command,
         kind: Kind::Command,
@@ -52,8 +59,8 @@ const fn c(group: &'static str, command: &'static str, note: &'static str) -> Ca
     }
 }
 
-/// All candidates. Commands that change settings restore the default afterwards.
-pub const CANDIDATES: &[Candidate] = &[
+/// Hand-picked candidates. Commands that change settings restore the default afterwards.
+const FIXED: &[Fixed] = &[
     q("options", ":SYST:OPT:STAT? BWU05T08", "guide 3.24.18"),
     q("options", ":SYST:OPT:STAT? BWU03T05", "guide 3.24.18"),
     q("options", ":SYST:OPT:STAT? BWU03T08", "guide 3.24.18"),
@@ -91,9 +98,38 @@ pub const CANDIDATES: &[Candidate] = &[
     ),
 ];
 
-pub fn groups() -> Vec<&'static str> {
-    let mut g: Vec<&str> = CANDIDATES.iter().map(|c| c.group).collect();
-    g.dedup();
+/// All candidates: the fixed list plus every query of every settings group
+/// ([`crate::params::GROUPS`]); the group id (e.g. `trigger.pulse`) is the verify group.
+pub fn candidates() -> Vec<Candidate> {
+    let mut out: Vec<Candidate> = FIXED
+        .iter()
+        .map(|f| Candidate {
+            group: f.group.into(),
+            command: f.command.into(),
+            kind: f.kind,
+            note: f.note.into(),
+        })
+        .collect();
+    for g in crate::params::GROUPS {
+        for q in crate::params::verification_queries(g) {
+            out.push(Candidate {
+                group: g.id.into(),
+                command: q,
+                kind: Kind::Query,
+                note: g.title.into(),
+            });
+        }
+    }
+    out
+}
+
+pub fn groups() -> Vec<String> {
+    let mut g: Vec<String> = Vec::new();
+    for c in candidates() {
+        if !g.contains(&c.group) {
+            g.push(c.group);
+        }
+    }
     g
 }
 
@@ -123,7 +159,7 @@ pub struct VerifyResult {
 pub fn check(scope: &mut Scope, cand: &Candidate) -> Result<VerifyResult> {
     let timeout = Duration::from_millis(1500);
     let (outcome, detail) = match cand.kind {
-        Kind::Query => match scope.raw(cand.command, timeout) {
+        Kind::Query => match scope.raw(&cand.command, timeout) {
             Ok(r) => (Outcome::Ok, r.unwrap_or_default()),
             Err(e) if e.to_string().contains("power-cycle") => {
                 (Outcome::ScopeUnresponsive, e.to_string())
@@ -131,7 +167,7 @@ pub fn check(scope: &mut Scope, cand: &Candidate) -> Result<VerifyResult> {
             Err(e) if e.to_string().contains("no answer") => (Outcome::NoAnswer, e.to_string()),
             Err(e) => return Err(e),
         },
-        Kind::Command => match scope.raw(cand.command, timeout) {
+        Kind::Command => match scope.raw(&cand.command, timeout) {
             Ok(_) => (Outcome::Ok, String::new()),
             Err(crate::DriverError::Device(msg)) => (Outcome::Rejected, msg),
             Err(e) => return Err(e),
@@ -143,8 +179,8 @@ pub fn check(scope: &mut Scope, cand: &Candidate) -> Result<VerifyResult> {
         Err(_) => Outcome::ScopeUnresponsive,
     };
     Ok(VerifyResult {
-        command: cand.command.into(),
-        group: cand.group.into(),
+        command: cand.command.clone(),
+        group: cand.group.clone(),
         outcome,
         detail,
     })

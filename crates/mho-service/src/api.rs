@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::live::LiveConfig;
+use mho_driver::params::{GroupInfo, ParamMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -136,6 +137,21 @@ pub trait ScopeApi: Send + Sync + 'static {
     async fn setup_save(&self) -> ApiResult<Vec<u8>>;
     async fn setup_load(&self, blob: Vec<u8>) -> ApiResult<()>;
     async fn scpi(&self, request: ScpiRequest) -> ApiResult<ScpiResponse>;
+    /// Hardware modules (logic analyzer, function generator).
+    async fn modules(&self) -> ApiResult<mho_driver::Modules>;
+    /// Catalogue of table-driven settings groups (trigger types, decoders, …).
+    async fn groups(&self) -> ApiResult<Vec<GroupInfo>>;
+    /// Reads a settings group (only groups verified on the instrument).
+    async fn group_get(&self, id: String, instance: Option<u8>) -> ApiResult<ParamMap>;
+    /// Writes parameters of a group; `activate` also selects it (e.g. the trigger type).
+    /// Returns the new state if the group may be read.
+    async fn group_set(
+        &self,
+        id: String,
+        instance: Option<u8>,
+        values: ParamMap,
+        activate: bool,
+    ) -> ApiResult<Option<ParamMap>>;
     async fn network(&self) -> ApiResult<NetworkState>;
     async fn set_network(&self, update: NetworkUpdate) -> ApiResult<NetworkState>;
     async fn live_config(&self) -> ApiResult<LiveConfig>;

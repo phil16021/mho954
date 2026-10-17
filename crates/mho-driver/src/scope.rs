@@ -12,6 +12,7 @@ use crate::error::{DriverError, Result};
 use crate::measure::{find_item, valid_value};
 use crate::model::*;
 use crate::options::OPTIONS;
+use crate::params::{self, ParamMap, ParamValue};
 use crate::sim::SimTransport;
 
 /// Where to find the scope.
@@ -869,6 +870,120 @@ impl Scope {
         self.network()
     }
 
+    // ---- capabilities and setting groups --------------------------------------------------
+
+    /// Hardware modules (`:SYST:MOD?`, verified): logic analyzer and function generator.
+    pub fn modules(&mut self) -> Result<Modules> {
+        let a = self.scpi.query(":SYST:MOD?")?;
+        let f: Vec<&str> = a.split(',').map(str::trim).collect();
+        Ok(Modules {
+            logic_analyzer: f.first() == Some(&"1"),
+            function_generator: f.get(1) == Some(&"1"),
+        })
+    }
+
+    /// Reads all parameters of a settings group. Refuses groups whose queries have not been
+    /// confirmed on the instrument unless `allow_unverified` (an unknown query blocks the scope).
+    pub fn group_get(
+        &mut self,
+        id: &str,
+        instance: Option<u8>,
+        allow_unverified: bool,
+    ) -> Result<ParamMap> {
+        let g = params::find_group(id)?;
+        let n = check_instance(g, instance)?;
+        if !allow_unverified && !params::group_verified(g) {
+            return Err(DriverError::Unsupported(format!(
+                "{} has not been verified on this instrument yet (run `mho954 verify {}`)",
+                g.id, g.id
+            )));
+        }
+        let plain: Vec<&params::ParamSpec> = g
+            .params
+            .iter()
+            .filter(|p| !matches!(p.kind, params::ParamKind::SourceLevel { .. }))
+            .collect();
+        let cmds: Vec<String> = plain
+            .iter()
+            .map(|p| params::query_for(p, n, None))
+            .collect();
+        let answers = self.scpi.query_many(&cmds)?;
+        let mut out = ParamMap::new();
+        for (p, a) in plain.iter().zip(&answers) {
+            out.insert(p.name.to_string(), params::decode(p, a)?);
+        }
+        for p in g.params {
+            if let params::ParamKind::SourceLevel { source_param } = p.kind {
+                let source = match out.get(source_param) {
+                    Some(ParamValue::Text(s)) => s.clone(),
+                    _ => "CHAN1".into(),
+                };
+                let a = self.scpi.query(&params::query_for(p, n, Some(&source)))?;
+                out.insert(p.name.to_string(), params::decode(p, &a)?);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Writes the given parameters (all validated first). `select` also activates the group
+    /// (e.g. switches the trigger type). Returns the group's state if it may be read.
+    pub fn group_set(
+        &mut self,
+        id: &str,
+        instance: Option<u8>,
+        values: &ParamMap,
+        select: bool,
+    ) -> Result<Option<ParamMap>> {
+        let g = params::find_group(id)?;
+        let n = check_instance(g, instance)?;
+        let mut cmds = Vec::new();
+        for (name, v) in values {
+            let spec = g.params.iter().find(|p| p.name == name).ok_or_else(|| {
+                DriverError::Invalid(format!("{}: unknown parameter {name:?}", g.id))
+            })?;
+            let encoded = params::encode(spec, v)?;
+            let source = match spec.kind {
+                params::ParamKind::SourceLevel { source_param } => match values.get(source_param) {
+                    Some(src) => {
+                        let sp = g
+                            .params
+                            .iter()
+                            .find(|p| p.name == source_param)
+                            .expect("checked in tables");
+                        Some(params::encode(sp, src)?)
+                    }
+                    None => {
+                        return Err(DriverError::Invalid(format!(
+                            "{name}: give `{source_param}` too (the level belongs to a source)"
+                        )));
+                    }
+                },
+                _ => None,
+            };
+            cmds.push(params::write_command(spec, n, &encoded, source.as_deref()));
+        }
+        self.drain_errors()?;
+        if select && let Some(sel) = g.select {
+            self.scpi.write(sel)?;
+        }
+        for c in &cmds {
+            self.scpi.write(c)?;
+        }
+        if !self.scpi.errors()?.is_empty() {
+            // Interdependent limits (lower ≤ upper) can reject the first pass; the second pass
+            // sees the already updated counterpart.
+            for c in &cmds {
+                self.scpi.write(c)?;
+            }
+            self.check_errors()?;
+        }
+        if params::group_verified(g) {
+            Ok(Some(self.group_get(id, instance, false)?))
+        } else {
+            Ok(None)
+        }
+    }
+
     // ---- raw SCPI -----------------------------------------------------------------------
 
     /// Sends arbitrary SCPI. Queries (containing `?`) return the response line; commands
@@ -926,6 +1041,19 @@ impl Scope {
             self.check_errors()?;
             Ok(None)
         }
+    }
+}
+
+fn check_instance(g: &params::Group, instance: Option<u8>) -> Result<u8> {
+    match (g.instances, instance) {
+        (None, None) => Ok(1),
+        (None, Some(_)) => Err(DriverError::Invalid(format!("{} has no instances", g.id))),
+        (Some((lo, _)), None) => Ok(lo),
+        (Some((lo, hi)), Some(n)) if (lo..=hi).contains(&n) => Ok(n),
+        (Some((lo, hi)), Some(n)) => Err(DriverError::Invalid(format!(
+            "{}: instance {n} outside {lo}..={hi}",
+            g.id
+        ))),
     }
 }
 

@@ -255,6 +255,42 @@ impl ScopeApi for RemoteBackend {
         self.send(Method::POST, "/scpi", &request).await
     }
 
+    async fn modules(&self) -> ApiResult<Modules> {
+        self.get("/modules").await
+    }
+
+    async fn groups(&self) -> ApiResult<Vec<mho_driver::params::GroupInfo>> {
+        self.get("/groups").await
+    }
+
+    async fn group_get(
+        &self,
+        id: String,
+        instance: Option<u8>,
+    ) -> ApiResult<mho_driver::params::ParamMap> {
+        let mut rb = self.req(Method::GET, &format!("/groups/{id}"));
+        if let Some(n) = instance {
+            rb = rb.query(&[("instance", n)]);
+        }
+        self.json(rb).await
+    }
+
+    async fn group_set(
+        &self,
+        id: String,
+        instance: Option<u8>,
+        values: mho_driver::params::ParamMap,
+        activate: bool,
+    ) -> ApiResult<Option<mho_driver::params::ParamMap>> {
+        let mut rb = self
+            .req(Method::PUT, &format!("/groups/{id}"))
+            .query(&[("activate", activate)]);
+        if let Some(n) = instance {
+            rb = rb.query(&[("instance", n)]);
+        }
+        self.json(rb.json(&values)).await
+    }
+
     async fn network(&self) -> ApiResult<NetworkState> {
         self.get("/network").await
     }

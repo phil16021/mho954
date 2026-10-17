@@ -7,6 +7,7 @@ mod error;
 pub mod measure;
 pub mod model;
 pub mod options;
+pub mod params;
 mod scope;
 pub mod sim;
 pub mod verify;

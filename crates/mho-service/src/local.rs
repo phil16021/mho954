@@ -15,6 +15,8 @@ pub struct LocalBackend {
     hub: LiveHub,
     allow_raw_scpi: bool,
     live_stop: tokio_util::sync::CancellationToken,
+    /// `:SYST:MOD?` is constant for a scope; cached after the first query.
+    modules: std::sync::Arc<std::sync::Mutex<Option<Modules>>>,
 }
 
 impl LocalBackend {
@@ -33,6 +35,7 @@ impl LocalBackend {
             hub,
             allow_raw_scpi,
             live_stop,
+            modules: Default::default(),
         }
     }
 
@@ -181,6 +184,52 @@ impl ScopeApi for LocalBackend {
             .call_mut(move |s| s.raw(&req.command, timeout))
             .await?;
         Ok(ScpiResponse { response })
+    }
+
+    async fn modules(&self) -> ApiResult<Modules> {
+        if let Some(m) = *self.modules.lock().unwrap() {
+            return Ok(m);
+        }
+        let m = self.device.call(|s| s.modules()).await?;
+        *self.modules.lock().unwrap() = Some(m);
+        Ok(m)
+    }
+
+    async fn groups(&self) -> ApiResult<Vec<mho_driver::params::GroupInfo>> {
+        let m = self.modules().await.unwrap_or_default();
+        Ok(mho_driver::params::GROUPS
+            .iter()
+            .map(|g| {
+                let available = match g.requires {
+                    mho_driver::params::Requires::Nothing => true,
+                    mho_driver::params::Requires::LogicAnalyzer => m.logic_analyzer,
+                    mho_driver::params::Requires::FunctionGenerator => m.function_generator,
+                };
+                mho_driver::params::describe(g, available)
+            })
+            .collect())
+    }
+
+    async fn group_get(
+        &self,
+        id: String,
+        instance: Option<u8>,
+    ) -> ApiResult<mho_driver::params::ParamMap> {
+        self.device
+            .call(move |s| s.group_get(&id, instance, false))
+            .await
+    }
+
+    async fn group_set(
+        &self,
+        id: String,
+        instance: Option<u8>,
+        values: mho_driver::params::ParamMap,
+        activate: bool,
+    ) -> ApiResult<Option<mho_driver::params::ParamMap>> {
+        self.device
+            .call_mut(move |s| s.group_set(&id, instance, &values, activate))
+            .await
     }
 
     async fn network(&self) -> ApiResult<NetworkState> {
