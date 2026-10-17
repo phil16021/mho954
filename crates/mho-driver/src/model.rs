@@ -390,6 +390,29 @@ pub fn validate_ipv4(s: &str, mask: bool) -> Result<String> {
         .join("."))
 }
 
+/// Statistics of one measurement (`:MEASure:STATistic:ITEM?`); `None` = invalid (9.9E37).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct MeasureStats {
+    pub item: String,
+    pub source: String,
+    pub unit: String,
+    pub current: Option<f64>,
+    pub average: Option<f64>,
+    pub minimum: Option<f64>,
+    pub maximum: Option<f64>,
+    pub deviation: Option<f64>,
+    pub count: Option<f64>,
+}
+
+scpi_enum!(
+    /// Measurement housekeeping actions.
+    MeasureAction {
+        ResetStatistics => "RESET_STATISTICS" | "RESET",
+        ClearAll => "CLEAR_ALL" | "CLEAR" | "DELETE",
+        ClearTotalizer => "CLEAR_TOTALIZER" | "TOTALIZER"
+    }
+);
+
 /// Hardware modules reported by `:SYSTem:MODules?`.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema,

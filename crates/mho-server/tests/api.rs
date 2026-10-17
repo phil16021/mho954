@@ -720,3 +720,148 @@ async fn every_mcp_tool() {
     std::fs::remove_file(saved).unwrap();
     shutdown.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn settings_groups_stats_counter() {
+    let (url, shutdown) = start(false).await;
+    let v1 = format!("{url}/api/v1");
+    let c = reqwest::Client::new();
+
+    let groups: serde_json::Value = get(&format!("{v1}/groups")).await.json().await.unwrap();
+    let ids: Vec<&str> = groups
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| g["id"].as_str().unwrap())
+        .collect();
+    for id in [
+        "trigger.pulse",
+        "trigger.lin",
+        "measure.setup",
+        "counter",
+        "dvm",
+    ] {
+        assert!(ids.contains(&id), "{id} missing");
+    }
+    let pulse = groups
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["id"] == "trigger.pulse")
+        .unwrap();
+    assert_eq!(pulse["verified"], true);
+
+    // write + read back, activate switches the trigger mode
+    let r: serde_json::Value = c
+        .put(format!("{v1}/groups/trigger.pulse?activate=true"))
+        .json(
+            &serde_json::json!({"when": "GLESs", "lower": 2e-6, "upper": 5e-6, "polarity": "NEG"}),
+        )
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(r["when"], "GLES");
+    assert_eq!(r["polarity"], "NEG");
+    let tr: serde_json::Value = get(&format!("{v1}/trigger")).await.json().await.unwrap();
+    assert_eq!(tr["mode"], "PULS");
+    // validation errors
+    let bad = c
+        .put(format!("{v1}/groups/trigger.pulse"))
+        .json(&serde_json::json!({"lower": 50.0}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 400);
+    let bad = c
+        .put(format!("{v1}/groups/trigger.pulse"))
+        .json(&serde_json::json!({"nope": 1}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 400);
+    assert_eq!(get(&format!("{v1}/groups/no.such")).await.status(), 400);
+
+    // statistics, counter, actions
+    let st: serde_json::Value = get(&format!("{v1}/measure/stats?item=FREQ&source=CHAN2"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert!((st["average"].as_f64().unwrap() - 5e3).abs() < 50.0, "{st}");
+    let off: serde_json::Value = get(&format!("{v1}/counter")).await.json().await.unwrap();
+    assert!(off.is_null());
+    c.put(format!("{v1}/groups/counter"))
+        .json(&serde_json::json!({"enable": true, "source": "CHAN1"}))
+        .send()
+        .await
+        .unwrap();
+    let on: serde_json::Value = get(&format!("{v1}/counter")).await.json().await.unwrap();
+    assert!((on.as_f64().unwrap() - 1e3).abs() < 10.0, "{on}");
+    for a in ["reset_statistics", "clear_all", "clear_totalizer"] {
+        assert_eq!(
+            c.post(format!("{v1}/measure/actions/{a}"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            204,
+            "{a}"
+        );
+    }
+    assert_eq!(
+        c.post(format!("{v1}/measure/actions/bogus"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        400
+    );
+    // DVM reading is not verified on the instrument yet → refused, never sent
+    assert_eq!(get(&format!("{v1}/dvm")).await.status(), 400);
+    shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_settings_tools() {
+    let (url, shutdown) = start(false).await;
+    let mut m = Mcp::connect(&url).await;
+    let r = m
+        .call(
+            "list_settings_groups",
+            serde_json::json!({"prefix": "trigger"}),
+        )
+        .await;
+    assert!(text_of(&r).contains("trigger.runt"));
+    assert!(!text_of(&r).contains("\"counter\""));
+    let r = m
+        .call(
+            "configure_settings",
+            serde_json::json!({"group": "trigger.runt", "values": {"when": "LESS", "upper": 3e-6}, "activate": true}),
+        )
+        .await;
+    assert_eq!(r["isError"], false, "{r}");
+    let r = m
+        .call("get_settings", serde_json::json!({"group": "trigger.runt"}))
+        .await;
+    assert!(text_of(&r).contains("\"LESS\""));
+    let r = m
+        .call(
+            "measurement_statistics",
+            serde_json::json!({"item": "VPP", "source": "CHAN2"}),
+        )
+        .await;
+    assert!(text_of(&r).contains("average"));
+    let r = m.call("read_counter", serde_json::json!({})).await;
+    assert_eq!(r["isError"], false);
+    let r = m
+        .call(
+            "measurement_action",
+            serde_json::json!({"action": "reset_statistics"}),
+        )
+        .await;
+    assert_eq!(r["isError"], false);
+    shutdown.cancel();
+}

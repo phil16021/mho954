@@ -492,6 +492,55 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 }
             }
         }
+        Command::Stats {
+            item,
+            source,
+            source2,
+            reset,
+        } => {
+            if reset {
+                api.measure_action(mho_driver::MeasureAction::ResetStatistics)
+                    .await?;
+            }
+            let st = api
+                .measure_stats(mho_service::StatsRequest {
+                    item,
+                    source,
+                    source2,
+                })
+                .await?;
+            let f = |v: Option<f64>| {
+                v.map(|v| format_si(v, &st.unit))
+                    .unwrap_or_else(|| "---".into())
+            };
+            println!("{} {}", st.item, st.source);
+            println!("  current  {}", f(st.current));
+            println!("  average  {}", f(st.average));
+            println!("  min/max  {} / {}", f(st.minimum), f(st.maximum));
+            println!("  std dev  {}", f(st.deviation));
+            println!(
+                "  count    {}",
+                st.count
+                    .map(|c| format!("{c:.0}"))
+                    .unwrap_or_else(|| "---".into())
+            );
+        }
+        Command::Counter { clear_total } => {
+            if clear_total {
+                api.measure_action(mho_driver::MeasureAction::ClearTotalizer)
+                    .await?;
+            }
+            match api.counter_value().await? {
+                Some(v) => println!("{v}"),
+                None => {
+                    println!("--- (counter off or no signal; `mho954 set counter enable=true`)")
+                }
+            }
+        }
+        Command::Dvm => match api.dvm_value().await? {
+            Some(v) => println!("{}", format_si(v, "V")),
+            None => println!("---"),
+        },
         Command::Get { group, instance } => {
             for (k, v) in api.group_get(group, instance).await? {
                 println!("{k:<14} {}", show_value(&v));

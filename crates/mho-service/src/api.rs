@@ -100,6 +100,17 @@ pub struct MeasureRequest {
     pub source2: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema, utoipa::IntoParams)]
+pub struct StatsRequest {
+    /// Measurement item, e.g. `VPP` (see `/api/v1/measure/items`).
+    pub item: String,
+    /// `CHAN1`..`CHAN4`, `MATH1`.., also `1`..`4`.
+    pub source: String,
+    /// Second source for delay/phase items.
+    #[serde(default)]
+    pub source2: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct ScpiRequest {
     pub command: String,
@@ -137,6 +148,14 @@ pub trait ScopeApi: Send + Sync + 'static {
     async fn setup_save(&self) -> ApiResult<Vec<u8>>;
     async fn setup_load(&self, blob: Vec<u8>) -> ApiResult<()>;
     async fn scpi(&self, request: ScpiRequest) -> ApiResult<ScpiResponse>;
+    /// Statistics (current/avg/min/max/deviation/count) of one measurement.
+    async fn measure_stats(&self, request: StatsRequest) -> ApiResult<mho_driver::MeasureStats>;
+    /// Reset statistics, clear all measurements or the counter's totalizer.
+    async fn measure_action(&self, action: mho_driver::MeasureAction) -> ApiResult<()>;
+    /// Hardware frequency counter (`None` = no valid reading).
+    async fn counter_value(&self) -> ApiResult<Option<f64>>;
+    /// Digital voltmeter (must be enabled via group `dvm`).
+    async fn dvm_value(&self) -> ApiResult<Option<f64>>;
     /// Hardware modules (logic analyzer, function generator).
     async fn modules(&self) -> ApiResult<mho_driver::Modules>;
     /// Catalogue of table-driven settings groups (trigger types, decoders, …).

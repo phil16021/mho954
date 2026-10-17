@@ -507,6 +507,93 @@ impl Scope {
         })
     }
 
+    /// Statistics of a measurement. Enables statistics for the item first (set form, no
+    /// query) and retries once if the scope has not evaluated it yet.
+    pub fn measure_stats(
+        &mut self,
+        item: &str,
+        source: &str,
+        source2: Option<&str>,
+    ) -> Result<MeasureStats> {
+        let it = find_item(item)?;
+        let src = measure_source(source)?;
+        let tail = if it.dual_source {
+            let s2 = source2.ok_or_else(|| {
+                DriverError::Invalid(format!("{} needs a second source", it.long))
+            })?;
+            format!("{},{},{}", it.token, src, measure_source(s2)?)
+        } else {
+            format!("{},{}", it.token, src)
+        };
+        let key = format!(":MEAS:STAT:ITEM {tail}");
+        if !self.measured.contains(&key) {
+            self.scpi.write(&key)?;
+        }
+        let kinds = ["CURR", "AVER", "MIN", "MAX", "DEV", "CNT"];
+        let cmds: Vec<String> = kinds
+            .iter()
+            .map(|k| format!(":MEAS:STAT:ITEM? {k},{tail}"))
+            .collect();
+        // Not as one compound query: the MHO954 then answers every position with the value of
+        // the last statistic (verified on hardware).
+        let read = |scpi: &mut mho_scpi::Scpi| -> Result<Vec<String>> {
+            cmds.iter()
+                .map(|c| scpi.query(c).map_err(DriverError::from))
+                .collect()
+        };
+        let mut a = read(&mut self.scpi)?;
+        let first_invalid = a
+            .first()
+            .and_then(|v| v.parse::<f64>().ok())
+            .and_then(valid_value)
+            .is_none();
+        if first_invalid && self.measured.insert(key.clone()) {
+            std::thread::sleep(Duration::from_millis(150));
+            a = read(&mut self.scpi)?;
+        }
+        self.measured.insert(key);
+        let v = |i: usize| a[i].trim().parse::<f64>().ok().and_then(valid_value);
+        Ok(MeasureStats {
+            item: it.long.into(),
+            source: src,
+            unit: it.unit.into(),
+            current: v(0),
+            average: v(1),
+            minimum: v(2),
+            maximum: v(3),
+            deviation: v(4),
+            count: v(5),
+        })
+    }
+
+    pub fn measure_action(&mut self, action: MeasureAction) -> Result<()> {
+        self.scpi.write(match action {
+            MeasureAction::ResetStatistics => ":MEAS:STAT:RES",
+            MeasureAction::ClearAll => ":MEAS:DEL",
+            MeasureAction::ClearTotalizer => ":COUN:TOT:CLE",
+        })?;
+        if action == MeasureAction::ClearAll {
+            self.measured.clear();
+        }
+        self.check_errors()
+    }
+
+    /// Hardware frequency counter reading (`None` when off or no signal).
+    pub fn counter_value(&mut self) -> Result<Option<f64>> {
+        Ok(valid_value(self.scpi.query_f64(":COUN:CURR?")?))
+    }
+
+    /// Voltmeter reading. `:DVM:CURR?` went unanswered with the DVM switched off, so it is only
+    /// queried while the DVM is enabled.
+    pub fn dvm_value(&mut self) -> Result<Option<f64>> {
+        if !self.scpi.query_bool(":DVM:ENAB?")? {
+            return Err(DriverError::State(
+                "the DVM is off; enable it first (group `dvm`, enable=true)".into(),
+            ));
+        }
+        Ok(valid_value(self.scpi.query_f64(":DVM:CURR?")?))
+    }
+
     pub fn measure_many(&mut self, items: &[String], source: &str) -> Result<Vec<Measurement>> {
         items
             .iter()

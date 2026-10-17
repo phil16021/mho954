@@ -96,6 +96,38 @@ const FIXED: &[Fixed] = &[
         ":MEAS:ITEM VPP,CHAN1",
         "set form creates the measurement",
     ),
+    q(
+        "measure.stats",
+        ":MEAS:STAT:ITEM? CURR,VPP,CHAN1",
+        "guide 3.17.8",
+    ),
+    q(
+        "measure.stats",
+        ":MEAS:STAT:ITEM? DEV,VPP,CHAN1",
+        "guide 3.17.8",
+    ),
+    q(
+        "measure.stats",
+        ":MEAS:STAT:ITEM? AVER,VPP,CHAN1",
+        "guide 3.17.8",
+    ),
+    q(
+        "measure.stats",
+        ":MEAS:STAT:ITEM? MIN,VPP,CHAN1",
+        "guide 3.17.8",
+    ),
+    q(
+        "measure.stats",
+        ":MEAS:STAT:ITEM? MAX,VPP,CHAN1",
+        "guide 3.17.8",
+    ),
+    q(
+        "measure.stats",
+        ":MEAS:STAT:ITEM? CNT,VPP,CHAN1",
+        "guide 3.17.8",
+    ),
+    q("counter.value", ":COUN:CURR?", "guide 3.7.1"),
+    q("dvm.value", ":DVM:CURR?", "guide 3.10.1"),
 ];
 
 /// All candidates: the fixed list plus every query of every settings group

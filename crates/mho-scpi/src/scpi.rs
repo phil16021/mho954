@@ -126,7 +126,8 @@ impl Scpi {
 
     /// Sends several queries in one message (`a?;b?;c?`) and returns the answers. The MHO954
     /// answers compound queries with one line, values separated by `;` (verified on hardware).
-    /// Answers must not contain `;` themselves.
+    /// Answers must not contain `;` themselves. Only for plain queries: compound
+    /// `:MEAS:STAT:ITEM? type,…` queries all return the last statistic on the MHO954.
     pub fn query_many(&mut self, cmds: &[String]) -> Result<Vec<String>> {
         let joined = cmds.join(";");
         let line = self.query(&joined)?;

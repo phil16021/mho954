@@ -826,5 +826,215 @@
     "group": "trigger.lin",
     "outcome": "ok",
     "detail": "XXXXXXXX"
+  },
+  {
+    "command": ":MEAS:STAT:ITEM? CURR,VPP,CHAN1",
+    "group": "measure.stats",
+    "outcome": "ok",
+    "detail": "9.9000E+37"
+  },
+  {
+    "command": ":MEAS:STAT:ITEM? DEV,VPP,CHAN1",
+    "group": "measure.stats",
+    "outcome": "ok",
+    "detail": "0.0000E+00"
+  },
+  {
+    "command": ":COUN:CURR?",
+    "group": "counter.value",
+    "outcome": "ok",
+    "detail": "9.90E+37"
+  },
+  {
+    "command": ":DVM:CURR?",
+    "group": "dvm.value",
+    "outcome": "no_answer",
+    "detail": "invalid argument: no answer to `:DVM:CURR?` (unknown query?)"
+  },
+  {
+    "command": ":MEAS:SOUR?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":MEAS:AMS?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "OFF"
+  },
+  {
+    "command": ":MEAS:STAT:COUN?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "1000"
+  },
+  {
+    "command": ":MEAS:STAT:DISP?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":MEAS:THR:SOUR?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":MEAS:THR:TYPE?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "PERC"
+  },
+  {
+    "command": ":MEAS:SET:MAX?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "9.000000E+01"
+  },
+  {
+    "command": ":MEAS:SET:MID?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "5.000000E+01"
+  },
+  {
+    "command": ":MEAS:SET:MIN?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "1.000000E+01"
+  },
+  {
+    "command": ":MEAS:SET:DSA?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":MEAS:SET:DSB?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":MEAS:SET:PSA?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":MEAS:SET:PSB?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":MEAS:AREA?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "MAIN"
+  },
+  {
+    "command": ":MEAS:TYPE?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "THR"
+  },
+  {
+    "command": ":MEAS:CREG:CAX?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "-6.000000E-6"
+  },
+  {
+    "command": ":MEAS:CREG:CBX?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "6.000000E-6"
+  },
+  {
+    "command": ":MEAS:CREG:CABX?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":MEAS:IND?",
+    "group": "measure.setup",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":COUN:ENAB?",
+    "group": "counter",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":COUN:SOUR?",
+    "group": "counter",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":COUN:MODE?",
+    "group": "counter",
+    "outcome": "ok",
+    "detail": "FREQ"
+  },
+  {
+    "command": ":COUN:NDIG?",
+    "group": "counter",
+    "outcome": "ok",
+    "detail": "4"
+  },
+  {
+    "command": ":COUN:TOT:ENAB?",
+    "group": "counter",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":DVM:ENAB?",
+    "group": "dvm",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":DVM:SOUR?",
+    "group": "dvm",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":DVM:MODE?",
+    "group": "dvm",
+    "outcome": "ok",
+    "detail": "ACRM"
+  },
+  {
+    "command": ":MEAS:STAT:ITEM? AVER,VPP,CHAN1",
+    "group": "measure.stats",
+    "outcome": "ok",
+    "detail": "9.9000E+37"
+  },
+  {
+    "command": ":MEAS:STAT:ITEM? MIN,VPP,CHAN1",
+    "group": "measure.stats",
+    "outcome": "ok",
+    "detail": "9.9000E+37"
+  },
+  {
+    "command": ":MEAS:STAT:ITEM? MAX,VPP,CHAN1",
+    "group": "measure.stats",
+    "outcome": "ok",
+    "detail": "9.9000E+37"
+  },
+  {
+    "command": ":MEAS:STAT:ITEM? CNT,VPP,CHAN1",
+    "group": "measure.stats",
+    "outcome": "ok",
+    "detail": "0.0000E+00"
   }
 ]

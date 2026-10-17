@@ -108,6 +108,12 @@ pub struct FftArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct ActionArg {
+    /// reset_statistics | clear_all | clear_totalizer
+    pub action: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct GroupsArgs {
     /// Only groups whose id starts with this, e.g. `trigger` or `bus`.
     pub prefix: Option<String>,
@@ -328,6 +334,73 @@ impl McpScope {
     )]
     async fn configure_network(&self, Parameters(p): Parameters<NetworkUpdate>) -> ToolResult {
         ok_json(&try_api!(self.api.set_network(p).await))
+    }
+
+    #[tool(
+        description = "List settings groups beyond the basic channel/timebase/edge trigger: all trigger \
+        types (pulse, slope, runt, window, timeout, pattern, delay, setup/hold, nth edge, RS232, I2C, SPI, CAN, \
+        LIN), measurement setup, counter, voltmeter, decoders, math, cursors, display… with each parameter's \
+        range and accepted values. `verified` groups can be read; `available` tells whether the hardware exists."
+    )]
+    async fn list_settings_groups(&self, Parameters(p): Parameters<GroupsArgs>) -> ToolResult {
+        let mut groups = try_api!(self.api.groups().await);
+        if let Some(prefix) = p.prefix {
+            groups.retain(|g| g.id.starts_with(&prefix));
+        }
+        ok_json(&groups)
+    }
+
+    #[tool(description = "Read the current values of a settings group (see list_settings_groups).")]
+    async fn get_settings(&self, Parameters(p): Parameters<GroupArgs>) -> ToolResult {
+        ok_json(&try_api!(self.api.group_get(p.group, p.instance).await))
+    }
+
+    #[tool(
+        description = "Change parameters of a settings group, e.g. group `trigger.pulse` with values \
+        {\"source\": \"CHAN1\", \"when\": \"GREater\", \"lower\": 1e-6} and activate=true to make it the \
+        active trigger. Values are validated against the ranges from list_settings_groups."
+    )]
+    async fn configure_settings(&self, Parameters(p): Parameters<ConfigureGroup>) -> ToolResult {
+        ok_json(&try_api!(
+            self.api
+                .group_set(p.group, p.instance, p.values, p.activate)
+                .await
+        ))
+    }
+
+    #[tool(
+        description = "Statistics of one scope measurement over many acquisitions: current, average, \
+        minimum, maximum, standard deviation and count, e.g. item VPP on CHAN1. Values are null while invalid."
+    )]
+    async fn measurement_statistics(
+        &self,
+        Parameters(p): Parameters<mho_service::StatsRequest>,
+    ) -> ToolResult {
+        ok_json(&try_api!(self.api.measure_stats(p).await))
+    }
+
+    #[tool(
+        description = "Measurement housekeeping: action reset_statistics, clear_all (remove all \
+        measurements from the screen) or clear_totalizer (frequency counter)."
+    )]
+    async fn measurement_action(&self, Parameters(p): Parameters<ActionArg>) -> ToolResult {
+        let action =
+            try_api!(mho_driver::MeasureAction::from_scpi(&p.action).map_err(ApiError::from));
+        try_api!(self.api.measure_action(action).await);
+        ok_json(&serde_json::json!({ "done": p.action }))
+    }
+
+    #[tool(
+        description = "Read the hardware frequency counter (configure it with group `counter`; null = no \
+        valid reading)."
+    )]
+    async fn read_counter(&self) -> ToolResult {
+        ok_json(&serde_json::json!({ "value": try_api!(self.api.counter_value().await) }))
+    }
+
+    #[tool(description = "Read the digital voltmeter (enable/configure it with group `dvm`).")]
+    async fn read_dvm(&self) -> ToolResult {
+        ok_json(&serde_json::json!({ "value": try_api!(self.api.dvm_value().await) }))
     }
 
     #[tool(

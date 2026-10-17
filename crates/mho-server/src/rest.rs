@@ -10,6 +10,7 @@ use mho_dsp::{Measurements, SpectrumPeak, Window};
 use mho_service::live::{LiveConfig, encode_frame};
 use mho_service::{
     ApiError, ErrorKind, Frame, MeasureRequest, ScopeApi, ScpiRequest, ScpiResponse, ServiceInfo,
+    StatsRequest,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, OpenApi, ToSchema};
@@ -77,6 +78,10 @@ pub fn routes() -> Router {
         .route("/live", get(live_get).put(live_put))
         .route("/network", get(network).put(set_network))
         .route("/modules", get(modules))
+        .route("/measure/stats", get(measure_stats))
+        .route("/measure/actions/{action}", post(measure_action))
+        .route("/counter", get(counter))
+        .route("/dvm", get(dvm))
         .route("/groups", get(groups))
         .route("/groups/{id}", get(group_get).put(group_set))
         .route("/openapi.json", get(openapi_json))
@@ -121,7 +126,15 @@ pub fn doc_routes() -> Router {
         live_get,
         live_put,
         network,
-        set_network
+        set_network,
+        modules,
+        groups,
+        group_get,
+        group_set,
+        measure_stats,
+        measure_action,
+        counter,
+        dvm
     ),
     components(schemas(ApiError, ErrorKind))
 )]
@@ -563,4 +576,38 @@ async fn group_set(
             .group_set(id, q.instance, values, q.activate)
             .await?,
     ))
+}
+
+/// Statistics (current, average, min, max, deviation, count) of one measurement.
+#[utoipa::path(get, path = "/api/v1/measure/stats", params(StatsRequest),
+    responses((status = 200, body = MeasureStats)))]
+async fn measure_stats(
+    State(s): State<AppState>,
+    Query(q): Query<StatsRequest>,
+) -> HttpResult<Json<MeasureStats>> {
+    Ok(Json(s.backend.measure_stats(q).await?))
+}
+
+/// `reset_statistics`, `clear_all` (remove all measurements) or `clear_totalizer`.
+#[utoipa::path(post, path = "/api/v1/measure/actions/{action}", params(("action" = String, Path)),
+    responses((status = 204)))]
+async fn measure_action(
+    State(s): State<AppState>,
+    Path(a): Path<String>,
+) -> HttpResult<StatusCode> {
+    let action = MeasureAction::from_scpi(&a).map_err(ApiError::from)?;
+    s.backend.measure_action(action).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Hardware frequency counter reading (`null` = off or no signal).
+#[utoipa::path(get, path = "/api/v1/counter", responses((status = 200, body = Option<f64>)))]
+async fn counter(State(s): State<AppState>) -> HttpResult<Json<Option<f64>>> {
+    Ok(Json(s.backend.counter_value().await?))
+}
+
+/// Digital voltmeter reading (enable it via group `dvm`).
+#[utoipa::path(get, path = "/api/v1/dvm", responses((status = 200, body = Option<f64>)))]
+async fn dvm(State(s): State<AppState>) -> HttpResult<Json<Option<f64>>> {
+    Ok(Json(s.backend.dvm_value().await?))
 }

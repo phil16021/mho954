@@ -186,6 +186,32 @@ impl ScopeApi for LocalBackend {
         Ok(ScpiResponse { response })
     }
 
+    async fn measure_stats(&self, r: StatsRequest) -> ApiResult<MeasureStats> {
+        self.device
+            .call(move |s| s.measure_stats(&r.item, &r.source, r.source2.as_deref()))
+            .await
+    }
+
+    async fn measure_action(&self, action: MeasureAction) -> ApiResult<()> {
+        self.device
+            .call_mut(move |s| s.measure_action(action))
+            .await
+    }
+
+    async fn counter_value(&self) -> ApiResult<Option<f64>> {
+        self.device.call(|s| s.counter_value()).await
+    }
+
+    async fn dvm_value(&self) -> ApiResult<Option<f64>> {
+        if !mho_driver::params::query_verified(":DVM:CURR?") {
+            return Err(ApiError::new(
+                ErrorKind::InvalidArgument,
+                "the DVM reading has not been verified on this instrument yet (run `mho954 verify dvm.value` with the DVM enabled)",
+            ));
+        }
+        self.device.call(|s| s.dvm_value()).await
+    }
+
     async fn modules(&self) -> ApiResult<Modules> {
         if let Some(m) = *self.modules.lock().unwrap() {
             return Ok(m);

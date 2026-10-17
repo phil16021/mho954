@@ -108,6 +108,9 @@ Utility → About.
 | `:SYST:OPT:STAT? <token>` für alle 11 Tokens (BWU05T08 … BND) | beantwortet, alle `0` (keine Option installiert) |
 | `:SYST:MOD?` | `1,0,0,0,0` → Logikanalysator-Hardware vorhanden, Funktionsgenerator (DG) nicht |
 | `*ESR?`, `*STB?`, `*CLS` | beantwortet bzw. angenommen |
+| Compound mit parametrierten Abfragen `:MEAS:STAT:ITEM? CURR,…;:MEAS:STAT:ITEM? AVER,…` | **falsch**: Jede Position liefert den Wert der letzten Teilabfrage → Statistik einzeln abfragen |
+| `:MEAS:STAT:ITEM? <CURR\|AVER\|MIN\|MAX\|DEV\|CNT>,<item>,<src>` einzeln | korrekt (z. B. VRMS CH3: 1,21 mV / 1,23 mV / 1,05 mV / 1,35 mV / 39,5 µV / 1000) |
+| `:DVM:CURR?` bei ausgeschaltetem DVM | **keine Antwort** (kostet Budget) → wird nur bei eingeschaltetem DVM abgefragt |
 | Compound `:TIM:SCAL?;:CHAN1:SCAL?` | eine Zeile, Werte mit `;` getrennt. Das Scope braucht aber ~20 ms je Teilabfrage (10 Abfragen: 0,2 s statt 0,25 s); der Gewinn ist also klein |
 | `:WAV:SOUR D0` | **abgelehnt** (`-200 Command execute failed`) → Digitalkanäle nicht über `:WAV:DATA?` lesbar |
 | `:MEAS:ITEM VPP,CHAN1` (Set-Form) | angenommen (Messung anlegen ohne Abfrage) |

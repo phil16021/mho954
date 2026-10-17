@@ -44,9 +44,10 @@ pub enum ParamKind {
     /// SCPI long forms, e.g. `POSitive`; the short form is the leading upper-case part.
     Enum(&'static [&'static str]),
     Bool,
-    /// Analog channel (`CHAN1`..`CHAN4`), optionally also digital `D0`..`D15`.
+    /// Analog channel (`CHAN1`..`CHAN4`), optionally also digital `D0`..`D15` and `MATH1`..`MATH4`.
     Source {
         digital: bool,
+        math: bool,
     },
     /// Free text (labels), restricted to safe characters.
     Text {
@@ -157,7 +158,27 @@ const fn src(
     ParamSpec {
         name,
         node,
-        kind: ParamKind::Source { digital },
+        kind: ParamKind::Source {
+            digital,
+            math: false,
+        },
+        help,
+    }
+}
+/// Source that may also be a math channel (measurement settings).
+const fn src_math(
+    name: &'static str,
+    node: &'static str,
+    digital: bool,
+    help: &'static str,
+) -> ParamSpec {
+    ParamSpec {
+        name,
+        node,
+        kind: ParamKind::Source {
+            digital,
+            math: true,
+        },
         help,
     }
 }
@@ -676,6 +697,169 @@ pub const GROUPS: &[Group] = &[
             },
         ],
     },
+    Group {
+        id: "measure.setup",
+        title: "Measurement setup: thresholds, delay/phase sources, statistics, range",
+        select: None,
+        instances: None,
+        requires: Requires::Nothing,
+        params: &[
+            src_math(
+                "source",
+                ":MEAS:SOUR",
+                true,
+                "default source of new measurements",
+            ),
+            en(
+                "all_measure",
+                ":MEAS:AMS",
+                &["CHANnel1", "CHANnel2", "CHANnel3", "CHANnel4", "OFF"],
+                "all-measurement display for one channel",
+            ),
+            int(
+                "stat_count",
+                ":MEAS:STAT:COUN",
+                2,
+                100_000,
+                "statistics window (samples)",
+            ),
+            boolean(
+                "stat_display",
+                ":MEAS:STAT:DISP",
+                "show statistics on screen",
+            ),
+            src_math(
+                "threshold_source",
+                ":MEAS:THR:SOUR",
+                false,
+                "source the thresholds apply to",
+            ),
+            en(
+                "threshold_type",
+                ":MEAS:THR:TYPE",
+                &["PERCent", "ABSolute"],
+                "thresholds in % or volts",
+            ),
+            real(
+                "threshold_max",
+                ":MEAS:SET:MAX",
+                -1000.0,
+                1000.0,
+                "",
+                "upper threshold (% or V)",
+            ),
+            real(
+                "threshold_mid",
+                ":MEAS:SET:MID",
+                -1000.0,
+                1000.0,
+                "",
+                "middle threshold (% or V)",
+            ),
+            real(
+                "threshold_min",
+                ":MEAS:SET:MIN",
+                -1000.0,
+                1000.0,
+                "",
+                "lower threshold (% or V)",
+            ),
+            src_math(
+                "delay_a",
+                ":MEAS:SET:DSA",
+                true,
+                "delay measurement source A",
+            ),
+            src_math(
+                "delay_b",
+                ":MEAS:SET:DSB",
+                true,
+                "delay measurement source B",
+            ),
+            src_math(
+                "phase_a",
+                ":MEAS:SET:PSA",
+                true,
+                "phase measurement source A",
+            ),
+            src_math(
+                "phase_b",
+                ":MEAS:SET:PSB",
+                true,
+                "phase measurement source B",
+            ),
+            en(
+                "area",
+                ":MEAS:AREA",
+                &["MAIN", "ZOOM", "CURSor"],
+                "measurement range",
+            ),
+            en(
+                "type",
+                ":MEAS:TYPE",
+                &["THReshold", "RANGe", "AMPMethod"],
+                "settings page shown",
+            ),
+            real(
+                "region_a",
+                ":MEAS:CREG:CAX",
+                -1000.0,
+                1000.0,
+                "s",
+                "cursor region start (AREA CURSor)",
+            ),
+            real(
+                "region_b",
+                ":MEAS:CREG:CBX",
+                -1000.0,
+                1000.0,
+                "s",
+                "cursor region end (AREA CURSor)",
+            ),
+            boolean(
+                "region_link",
+                ":MEAS:CREG:CABX",
+                "move both region cursors together",
+            ),
+            boolean("indicator", ":MEAS:IND", "show measurement indicators"),
+        ],
+    },
+    Group {
+        id: "counter",
+        title: "Hardware frequency counter",
+        select: None,
+        instances: None,
+        requires: Requires::Nothing,
+        params: &[
+            boolean("enable", ":COUN:ENAB", "counter on/off"),
+            src("source", ":COUN:SOUR", true, "counted signal"),
+            en(
+                "mode",
+                ":COUN:MODE",
+                &["FREQuency", "PERiod", "TOTalize"],
+                "what is counted",
+            ),
+            int("digits", ":COUN:NDIG", 3, 6, "resolution"),
+            boolean("totalize", ":COUN:TOT:ENAB", "totalizer statistics"),
+        ],
+    },
+    Group {
+        id: "dvm",
+        title: "Digital voltmeter",
+        select: None,
+        instances: None,
+        requires: Requires::Nothing,
+        params: &[
+            boolean("enable", ":DVM:ENAB", "voltmeter on/off"),
+            src("source", ":DVM:SOUR", false, "measured channel"),
+            en(
+                "mode",
+                ":DVM:MODE",
+                &["ACRMs", "DC", "DCRMs"],
+                "AC RMS, DC mean or DC+AC RMS",
+            ),
+        ],
+    },
 ];
 
 // ---- lookup, verification ----------------------------------------------------------------------
@@ -728,6 +912,11 @@ fn verified() -> &'static HashSet<String> {
     })
 }
 
+/// `true` if this exact query was confirmed on the instrument.
+pub fn query_verified(query: &str) -> bool {
+    verified().contains(query)
+}
+
 /// `true` if every query of the group was confirmed on the instrument.
 pub fn group_verified(g: &Group) -> bool {
     verification_queries(g)
@@ -738,17 +927,30 @@ pub fn group_verified(g: &Group) -> bool {
 // ---- values ----------------------------------------------------------------------------------
 
 /// Short form of an SCPI long form: the leading run of non-lower-case characters.
-pub fn short_form(long: &str) -> &str {
+pub fn short_form(long: &str) -> String {
     let end = long
         .find(|c: char| c.is_ascii_lowercase())
         .unwrap_or(long.len());
-    &long[..end]
+    // A numeric suffix belongs to the short form too: CHANnel1 → CHAN1.
+    let digits: String = if end < long.len() {
+        long.chars()
+            .rev()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect()
+    } else {
+        String::new()
+    };
+    format!("{}{digits}", &long[..end])
 }
 
 fn enum_token(values: &[&str], input: &str) -> Option<String> {
     let u = input.trim().to_ascii_uppercase();
     values.iter().find_map(|long| {
         let short = short_form(long);
+        let short = short.as_str();
         let full = long.to_ascii_uppercase();
         // SCPI accepts the short form or the long form.
         (u == short || u == full).then(|| short.to_string())
@@ -808,18 +1010,20 @@ pub fn encode(spec: &ParamSpec, v: &ParamValue) -> Result<String> {
             Ok(if *i == 1 { "ON" } else { "OFF" }.into())
         }
         (ParamKind::Bool, _) => Err(invalid(spec, "expected true/false")),
-        (ParamKind::Source { digital }, ParamValue::Text(t)) => {
+        (ParamKind::Source { digital, math }, ParamValue::Text(t)) => {
             let s = crate::model::normalize_source(t)?;
-            if s.starts_with("CHAN") || (digital && s.starts_with('D')) {
+            if s.starts_with("CHAN")
+                || (digital && s.starts_with('D'))
+                || (math && s.starts_with("MATH"))
+            {
                 Ok(s)
             } else {
-                Err(invalid(
-                    spec,
-                    format!(
-                        "{s} not allowed (CHAN1..4{})",
-                        if digital { ", D0..D15" } else { "" }
-                    ),
-                ))
+                let extra = format!(
+                    "{}{}",
+                    if digital { ", D0..D15" } else { "" },
+                    if math { ", MATH1..4" } else { "" }
+                );
+                Err(invalid(spec, format!("{s} not allowed (CHAN1..4{extra})")))
             }
         }
         (ParamKind::Source { .. }, _) => Err(invalid(spec, "expected a source like CHAN1")),
@@ -972,10 +1176,13 @@ pub fn describe(g: &Group, available: bool) -> GroupInfo {
                         v.iter().map(|s| s.to_string()).collect(),
                     ),
                     ParamKind::Bool => ("bool", None, None, None, vec![]),
-                    ParamKind::Source { digital } => {
+                    ParamKind::Source { digital, math } => {
                         let mut v: Vec<String> = (1..=4).map(|n| format!("CHAN{n}")).collect();
                         if digital {
                             v.extend((0..16).map(|n| format!("D{n}")));
+                        }
+                        if math {
+                            v.extend((1..=4).map(|n| format!("MATH{n}")));
                         }
                         ("source", None, None, None, v)
                     }
@@ -1019,6 +1226,8 @@ mod tests {
         assert_eq!(short_form("720P60"), "720P60");
         assert_eq!(short_form("DATaframe"), "DAT");
         assert_eq!(short_form("1.5"), "1.5");
+        assert_eq!(short_form("CHANnel1"), "CHAN1");
+        assert_eq!(short_form("TOTalize"), "TOT");
     }
 
     #[test]

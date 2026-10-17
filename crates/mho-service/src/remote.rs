@@ -255,6 +255,29 @@ impl ScopeApi for RemoteBackend {
         self.send(Method::POST, "/scpi", &request).await
     }
 
+    async fn measure_stats(&self, r: StatsRequest) -> ApiResult<MeasureStats> {
+        let mut q = vec![("item", r.item), ("source", r.source)];
+        if let Some(s2) = r.source2 {
+            q.push(("source2", s2));
+        }
+        self.json(self.req(Method::GET, "/measure/stats").query(&q))
+            .await
+    }
+
+    async fn measure_action(&self, action: MeasureAction) -> ApiResult<()> {
+        let name = action.scpi().to_ascii_lowercase();
+        self.empty(self.req(Method::POST, &format!("/measure/actions/{name}")))
+            .await
+    }
+
+    async fn counter_value(&self) -> ApiResult<Option<f64>> {
+        self.get("/counter").await
+    }
+
+    async fn dvm_value(&self) -> ApiResult<Option<f64>> {
+        self.get("/dvm").await
+    }
+
     async fn modules(&self) -> ApiResult<Modules> {
         self.get("/modules").await
     }

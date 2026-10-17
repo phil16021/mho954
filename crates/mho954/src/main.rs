@@ -133,6 +133,25 @@ pub enum Command {
         #[command(subcommand)]
         cmd: Option<commands::NetCmd>,
     },
+    /// Statistics of a measurement, e.g. `stats VPP -s 1`.
+    Stats {
+        item: String,
+        #[arg(short, long, default_value = "CHAN1")]
+        source: String,
+        #[arg(long)]
+        source2: Option<String>,
+        /// Reset the statistics first.
+        #[arg(long)]
+        reset: bool,
+    },
+    /// Hardware frequency counter reading (configure with `set counter enable=true ...`).
+    Counter {
+        /// Clear the totalizer.
+        #[arg(long)]
+        clear_total: bool,
+    },
+    /// Digital voltmeter reading (configure with `set dvm enable=true ...`).
+    Dvm,
     /// List settings groups (trigger types, decoders, …), optionally by prefix.
     Groups {
         prefix: Option<String>,

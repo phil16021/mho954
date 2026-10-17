@@ -672,6 +672,54 @@ impl SimTransport {
                 self.respond_block(&blob);
                 return true;
             }
+            ":MEAS:STAT:ITEM" => {
+                let parts: Vec<&str> = args.split(',').map(str::trim).collect();
+                if parts.len() < 3 {
+                    return false;
+                }
+                match self.measure(parts[1], &parts[2].to_ascii_uppercase()) {
+                    Some(v) if v.abs() < 9e37 => match parts[0].to_ascii_uppercase().as_str() {
+                        "CNT" => "1.000000E+03".into(),
+                        "DEV" => format!("{:.4E}", v.abs() * 0.01),
+                        _ => format!("{v:.4E}"),
+                    },
+                    Some(_) => "9.9000E+37".into(),
+                    None => return false,
+                }
+            }
+            ":COUN:CURR" => {
+                let src = self
+                    .params
+                    .get(":COUN:SOUR")
+                    .cloned()
+                    .unwrap_or_else(|| "CHAN1".into());
+                let on = self
+                    .params
+                    .get(":COUN:ENAB")
+                    .is_some_and(|v| v == "ON" || v == "1");
+                if on {
+                    let f = self.measure("FREQ", &src).unwrap_or(9.9e37);
+                    format!("{f:.6E}")
+                } else {
+                    "9.90E+37".into()
+                }
+            }
+            ":DVM:CURR" => {
+                let src = self
+                    .params
+                    .get(":DVM:SOUR")
+                    .cloned()
+                    .unwrap_or_else(|| "CHAN1".into());
+                let on = self
+                    .params
+                    .get(":DVM:ENAB")
+                    .is_some_and(|v| v == "ON" || v == "1");
+                if !on {
+                    // Like the real scope: no answer while the DVM is off.
+                    return false;
+                }
+                format!("{:.6E}", self.measure("VRMS", &src).unwrap_or(9.9e37))
+            }
             ":MEAS:ITEM" => {
                 let mut parts = args.split(',').map(str::trim);
                 let (Some(item), Some(src)) = (parts.next(), parts.next()) else {
@@ -777,6 +825,8 @@ impl SimTransport {
                     return Err("all IP configuration modes off".into());
                 }
                 s.lan = p.clone();
+            }
+            ":MEAS:STAT:ITEM" | ":MEAS:ITEM" | ":MEAS:STAT:RES" | ":MEAS:DEL" | ":COUN:TOT:CLE" => {
             }
             ":SYST:SET" => {}
             ":SYST:OPT:INST" => return Err("invalid license key".into()),
