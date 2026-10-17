@@ -17,6 +17,17 @@ MHO954 (Serie `MHO9X000000000`, `*IDN?`-Firmware `00.01.00`, USB über USB/IP vo
 | `:SYST:VERS?` | `3.0` (SCPI-Version, nicht die Firmware) | Gerät, Guide |
 | LAN | `:LAN:STAT?` → `UNLINK`, `:LAN:IPAD?` → `0.0.0.0` (kein Kabel) | Gerät |
 
+| Desync „wrong bTag“ | Nach Probe + Bench (alle erfolgreich) bekam der nächste Prozess beim Öffnen die Antwort einer *früheren* Anfrage (`wrong bTag: 172 != 204`, Abstand konstant 32); jede neue Anfrage hing danach eine Antwort hinterher. Ein Read ohne Anfrage → Timeout, danach keine Antwort mehr (Neustart nötig). Ursache unbewiesen; Verdacht: Clear-Halt (`usb_clear_halt`) über USB/IP setzt die Data-Toggles auf dem Windows-Host nicht zurück | Gerät |
+
+## Messwerte am Gerät (USB/IP, 4080-Byte-Reads)
+
+| Vorgang | Zeit |
+|---|---|
+| `*IDN?` | 24,9 ms (23,4–27,3) |
+| Bildschirm-Wellenform 1 Kanal, Preamble gecacht | 28,2 ms → ≈ 35 fps |
+| `:MEAS:ITEM? VPP` | 24–130 ms |
+| Screenshot PNG 1024×600 (≈ 84 kB) | 285–320 ms, ≈ 0,3 MB/s |
+
 ## Wellenformen
 
 | Thema | Befund | Quelle |
