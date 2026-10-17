@@ -3,10 +3,12 @@ use std::sync::Arc;
 
 use eframe::egui::{self, Color32, RichText};
 use egui_plot::{GridMark, HLine, Legend, Line, LineStyle, Plot, PlotBounds, PlotPoints, VLine};
+use mho_driver::params::{GroupInfo, ParamMap};
 use mho_driver::*;
 use mho_dsp::{Measurements, Window, format_si};
-use mho_service::{Frame, LiveConfig, MeasureSpec, ScopeApi};
+use mho_service::{Frame, LiveConfig, MeasureSpec, ScopeApi, StatsRequest};
 
+use crate::settings::SettingsPanel;
 use crate::state::{Client, Shared};
 
 /// Rigol channel colours.
@@ -80,6 +82,10 @@ pub struct ScopeApp {
     raw_source: String,
     last_x_range: Option<(f64, f64)>,
     net_form: NetForm,
+    settings: SettingsPanel,
+    groups_requested: bool,
+    /// Forces the settings section open on the next frame.
+    settings_open: Option<bool>,
 }
 
 /// Editable copy of the LAN settings.
@@ -121,6 +127,9 @@ impl ScopeApp {
             raw_source: "CHAN1".into(),
             last_x_range: None,
             net_form: NetForm::default(),
+            settings: SettingsPanel::default(),
+            groups_requested: false,
+            settings_open: None,
         }
     }
 
@@ -132,6 +141,9 @@ impl ScopeApp {
             info: sh.info.clone(),
             live: sh.live.clone(),
             network: sh.network.clone(),
+            groups: sh.groups.clone(),
+            group_values: sh.group_values.clone(),
+            stats: sh.stats.clone(),
             measurements: sh.measurements.clone(),
             live_error: sh.live_error.clone(),
             ws_connected: sh.ws_connected,
@@ -412,35 +424,8 @@ impl ScopeApp {
 
         ui.separator();
         ui.label(RichText::new("Trigger").strong());
+        self.trigger_type(ui, s, &st.trigger.mode);
         let tr = &st.trigger;
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("trig_src")
-                .selected_text(&tr.edge_source)
-                .width(70.0)
-                .show_ui(ui, |ui| {
-                    for n in 1..=CHANNELS {
-                        let src = format!("CHAN{n}");
-                        if ui.selectable_label(tr.edge_source == src, &src).clicked() {
-                            self.set_trigger(TriggerUpdate {
-                                edge_source: Some(src),
-                                ..Default::default()
-                            });
-                        }
-                    }
-                });
-            for (slope, label) in [
-                (Slope::Positive, "Rise"),
-                (Slope::Negative, "Fall"),
-                (Slope::Either, "Both"),
-            ] {
-                if ui.selectable_label(tr.edge_slope == slope, label).clicked() {
-                    self.set_trigger(TriggerUpdate {
-                        edge_slope: Some(slope),
-                        ..Default::default()
-                    });
-                }
-            }
-        });
         ui.horizontal(|ui| {
             for sweep in TriggerSweep::ALL {
                 if ui
@@ -454,30 +439,61 @@ impl ScopeApp {
                 }
             }
         });
-        ui.horizontal(|ui| {
-            ui.label("level");
-            let scale = channel_of(&tr.edge_source)
-                .and_then(|n| st.channels.get((n - 1) as usize))
-                .map(|c| c.scale)
-                .unwrap_or(0.1);
-            let mut v = self.trig_level_edit.unwrap_or(tr.edge_level);
-            let r = ui.add(
-                egui::DragValue::new(&mut v)
-                    .speed(scale * 0.02)
-                    .custom_formatter(|v, _| format_si(v, "V"))
-                    .custom_parser(parse_si),
-            );
-            if r.changed() {
-                self.trig_level_edit = Some(v);
-            }
-            if (r.drag_stopped() || r.lost_focus()) && self.trig_level_edit.is_some() {
-                self.set_trigger(TriggerUpdate {
-                    edge_level: Some(v),
-                    ..Default::default()
-                });
-                self.trig_level_edit = None;
-            }
-        });
+        // Source, slope and level of the other types live in their settings group.
+        if tr.mode.eq_ignore_ascii_case("EDGE") {
+            ui.horizontal(|ui| {
+                egui::ComboBox::from_id_salt("trig_src")
+                    .selected_text(&tr.edge_source)
+                    .width(70.0)
+                    .show_ui(ui, |ui| {
+                        for n in 1..=CHANNELS {
+                            let src = format!("CHAN{n}");
+                            if ui.selectable_label(tr.edge_source == src, &src).clicked() {
+                                self.set_trigger(TriggerUpdate {
+                                    edge_source: Some(src),
+                                    ..Default::default()
+                                });
+                            }
+                        }
+                    });
+                for (slope, label) in [
+                    (Slope::Positive, "Rise"),
+                    (Slope::Negative, "Fall"),
+                    (Slope::Either, "Both"),
+                ] {
+                    if ui.selectable_label(tr.edge_slope == slope, label).clicked() {
+                        self.set_trigger(TriggerUpdate {
+                            edge_slope: Some(slope),
+                            ..Default::default()
+                        });
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("level");
+                let scale = channel_of(&tr.edge_source)
+                    .and_then(|n| st.channels.get((n - 1) as usize))
+                    .map(|c| c.scale)
+                    .unwrap_or(0.1);
+                let mut v = self.trig_level_edit.unwrap_or(tr.edge_level);
+                let r = ui.add(
+                    egui::DragValue::new(&mut v)
+                        .speed(scale * 0.02)
+                        .custom_formatter(|v, _| format_si(v, "V"))
+                        .custom_parser(parse_si),
+                );
+                if r.changed() {
+                    self.trig_level_edit = Some(v);
+                }
+                if (r.drag_stopped() || r.lost_focus()) && self.trig_level_edit.is_some() {
+                    self.set_trigger(TriggerUpdate {
+                        edge_level: Some(v),
+                        ..Default::default()
+                    });
+                    self.trig_level_edit = None;
+                }
+            });
+        }
 
         ui.separator();
         ui.label(RichText::new("Acquisition").strong());
@@ -569,6 +585,22 @@ impl ScopeApp {
         }
 
         ui.separator();
+        let settings = egui::CollapsingHeader::new(RichText::new("Advanced settings").strong())
+            .id_salt("advanced_settings")
+            .open(self.settings_open.take())
+            .show(ui, |ui| {
+                self.settings.ui(
+                    ui,
+                    &self.client,
+                    s.groups.as_deref(),
+                    s.group_values.as_ref(),
+                );
+            });
+        if settings.body_returned.is_some() {
+            self.load_groups();
+        }
+
+        ui.separator();
         egui::CollapsingHeader::new(RichText::new("Network (RJ45)").strong())
             .default_open(false)
             .show(ui, |ui| {
@@ -583,6 +615,140 @@ impl ScopeApp {
                 Color32::GRAY
             }));
         }
+    }
+
+    /// Loads the settings-group catalogue once.
+    fn load_groups(&mut self) {
+        if self.groups_requested {
+            return;
+        }
+        self.groups_requested = true;
+        self.client.op(
+            "settings catalogue",
+            |api| async move { api.groups().await },
+            |sh: &mut Shared, g: Vec<GroupInfo>| sh.groups = Some(g),
+        );
+    }
+
+    /// Trigger types other than EDGE are edited in the settings panel.
+    fn trigger_type(&mut self, ui: &mut egui::Ui, s: &Snapshot, mode: &str) {
+        let types: Vec<(&str, &str)> = mho_driver::params::GROUPS
+            .iter()
+            .filter_map(|g| Some((g.select?.strip_prefix(":TRIG:MODE ")?, g.id)))
+            .collect();
+        let current = mode.to_ascii_uppercase();
+        let matches = |token: &str| current.starts_with(token) || token.starts_with(&current);
+        ui.horizontal(|ui| {
+            ui.label("type");
+            egui::ComboBox::from_id_salt("trig_type")
+                .selected_text(&current)
+                .width(90.0)
+                .show_ui(ui, |ui| {
+                    if ui.selectable_label(matches("EDGE"), "EDGE").clicked() {
+                        self.set_trigger(TriggerUpdate {
+                            mode: Some("EDGE".into()),
+                            ..Default::default()
+                        });
+                    }
+                    for (token, id) in &types {
+                        if ui.selectable_label(matches(token), *token).clicked() {
+                            self.open_settings(s, id, true);
+                        }
+                    }
+                });
+            if let Some((_, id)) = types.iter().find(|(t, _)| matches(t))
+                && ui.small_button("edit…").clicked()
+            {
+                self.open_settings(s, id, false);
+            }
+        });
+    }
+
+    /// Opens the settings panel at group `id` (the catalogue is loaded on demand).
+    fn open_settings(&mut self, s: &Snapshot, id: &str, activate: bool) {
+        self.load_groups();
+        self.settings_open = Some(true);
+        match s
+            .groups
+            .as_ref()
+            .and_then(|g| g.iter().find(|g| g.id == id))
+        {
+            Some(g) => self.settings.open(&self.client, g, activate),
+            None => self.settings.selected = Some(id.to_string()),
+        }
+    }
+
+    /// Fetches statistics for every live measurement (one query per statistic).
+    fn load_stats(&self, live: &LiveConfig) {
+        let specs = live.measurements.clone();
+        self.client.op(
+            "statistics",
+            move |api| async move {
+                let mut out = Vec::new();
+                for m in specs {
+                    out.push(
+                        api.measure_stats(StatsRequest {
+                            item: m.item,
+                            source: m.source,
+                            source2: None,
+                        })
+                        .await?,
+                    );
+                }
+                Ok(out)
+            },
+            |sh: &mut Shared, v: Vec<MeasureStats>| sh.stats = v,
+        );
+    }
+
+    fn reset_stats(&self) {
+        self.client.op(
+            "reset statistics",
+            |api| async move { api.measure_action(MeasureAction::ResetStatistics).await },
+            |sh: &mut Shared, ()| {
+                sh.stats.clear();
+                sh.log("statistics reset", false);
+            },
+        );
+    }
+
+    fn stats_table(&self, ui: &mut egui::Ui, s: &Snapshot) {
+        if s.stats.is_empty() {
+            return;
+        }
+        let opt =
+            |v: Option<f64>, u: &str| v.map(|v| format_si(v, u)).unwrap_or_else(|| "---".into());
+        egui::Grid::new("meas_stats")
+            .striped(true)
+            .spacing([18.0, 2.0])
+            .show(ui, |ui| {
+                for h in [
+                    "statistics",
+                    "current",
+                    "average",
+                    "min",
+                    "max",
+                    "σ",
+                    "count",
+                ] {
+                    ui.label(RichText::new(h).strong());
+                }
+                ui.end_row();
+                for st in &s.stats {
+                    ui.label(
+                        RichText::new(format!("{} {}", st.source, st.item))
+                            .color(channel_color(&st.source)),
+                    );
+                    for v in [st.current, st.average, st.minimum, st.maximum, st.deviation] {
+                        ui.label(RichText::new(opt(v, &st.unit)).monospace());
+                    }
+                    ui.label(
+                        RichText::new(st.count.map(|c| format!("{c:.0}")).unwrap_or("---".into()))
+                            .monospace(),
+                    );
+                    ui.end_row();
+                }
+            });
     }
 
     fn load_network(&self) {
@@ -945,7 +1111,27 @@ impl ScopeApp {
                 });
                 self.set_live(cfg);
             }
+            if let Some(live) = &s.live
+                && !live.measurements.is_empty()
+            {
+                ui.separator();
+                if ui
+                    .button("statistics")
+                    .on_hover_text("read min/max/avg/σ/count of the scope measurements")
+                    .clicked()
+                {
+                    self.load_stats(live);
+                }
+                if ui
+                    .small_button("reset")
+                    .on_hover_text("reset statistics")
+                    .clicked()
+                {
+                    self.reset_stats();
+                }
+            }
         });
+        self.stats_table(ui, s);
     }
 
     fn scope_plot(&mut self, ui: &mut egui::Ui, s: &Snapshot, height: f32) {
@@ -1228,6 +1414,9 @@ struct Snapshot {
     info: Option<mho_service::ServiceInfo>,
     live: Option<LiveConfig>,
     network: Option<NetworkState>,
+    groups: Option<Vec<GroupInfo>>,
+    group_values: Option<(String, u8, ParamMap)>,
+    stats: Vec<MeasureStats>,
     measurements: Option<Arc<mho_service::MeasureSnapshot>>,
     live_error: Option<String>,
     ws_connected: bool,
@@ -1236,7 +1425,7 @@ struct Snapshot {
 }
 
 /// Parses numbers with optional SI prefix and unit, e.g. `1.5m`, `200 mV`, `2us`.
-fn parse_si(s: &str) -> Option<f64> {
+pub(crate) fn parse_si(s: &str) -> Option<f64> {
     let s = s.trim().trim_end_matches(['V', 's', 'S', 'z', 'H']).trim();
     let (num, mult) = match s.chars().last()? {
         'G' => (&s[..s.len() - 1], 1e9),

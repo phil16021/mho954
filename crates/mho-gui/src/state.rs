@@ -25,6 +25,12 @@ pub struct Shared {
     pub info: Option<ServiceInfo>,
     pub live: Option<LiveConfig>,
     pub network: Option<mho_driver::NetworkState>,
+    /// Settings-group catalogue (loaded once).
+    pub groups: Option<Vec<mho_driver::params::GroupInfo>>,
+    /// Last read values of a group: `(id, instance, values)`.
+    pub group_values: Option<(String, u8, mho_driver::params::ParamMap)>,
+    /// Statistics of the live measurements (fetched on request).
+    pub stats: Vec<mho_driver::MeasureStats>,
     pub live_error: Option<String>,
     pub ws_connected: bool,
     pub busy: usize,

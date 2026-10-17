@@ -1,6 +1,7 @@
 //! Live view: a thin eframe client of the `mho954` REST/WebSocket API.
 
 mod app;
+mod settings;
 mod state;
 
 use std::path::PathBuf;
