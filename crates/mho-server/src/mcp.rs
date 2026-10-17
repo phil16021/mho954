@@ -237,7 +237,9 @@ impl McpScope {
     }
 
     #[tool(description = "Send a raw SCPI command or query (MHO900 programming guide syntax). Queries contain '?'. \
-        Only available if the server was started with --allow-raw-scpi. Unknown queries time out.")]
+        Only available if the server was started with --allow-raw-scpi. Only send commands documented \
+        in the MHO900 programming guide: the scope does not answer unknown queries, and several of them \
+        in a row hang its firmware until it is power-cycled.")]
     async fn raw_scpi(&self, Parameters(p): Parameters<ScpiRequest>) -> ToolResult {
         ok_json(&try_api!(self.api.scpi(p).await))
     }

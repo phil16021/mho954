@@ -11,7 +11,9 @@
 //! * replies carrying an unknown bTag (left over from another process) and bytes that are not
 //!   a valid header are skipped,
 //! * bulk-IN transfers are never cancelled while the device may answer (no `usb_kill_urb`),
-//! * no CLEAR_FEATURE(ENDPOINT_HALT) is ever sent.
+//! * the device clear (INITIATE_CLEAR / CHECK_CLEAR_STATUS) is only sent after a timeout.
+//!   It is required: after an unknown query the MHO954 stops answering *any* query until it
+//!   receives a device clear, regardless of transport or process.
 
 use std::collections::VecDeque;
 use std::io;
@@ -19,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use nusb::MaybeFuture;
 use nusb::descriptors::TransferType;
-use nusb::transfer::{Bulk, Direction, In, Out};
+use nusb::transfer::{Bulk, ControlIn, ControlType, Direction, In, Out, Recipient};
 use tracing::{debug, info, warn};
 
 use crate::transport::{ReadChunk, Transport};
@@ -45,9 +47,15 @@ struct Current {
 }
 
 struct Endpoints {
+    interface: nusb::Interface,
     out: nusb::Endpoint<Bulk, Out>,
     inp: nusb::Endpoint<Bulk, In>,
 }
+
+const INITIATE_CLEAR: u8 = 5;
+const CHECK_CLEAR_STATUS: u8 = 6;
+const STATUS_SUCCESS: u8 = 0x01;
+const STATUS_PENDING: u8 = 0x02;
 
 pub struct UsbTmcUserTransport {
     device: nusb::Device,
@@ -136,7 +144,7 @@ impl UsbTmcUserTransport {
         Ok(UsbTmcUserTransport {
             device,
             interface_number,
-            eps: Some(Endpoints { out: ep_out, inp: ep_in }),
+            eps: Some(Endpoints { interface, out: ep_out, inp: ep_in }),
             rx: VecDeque::new(),
             // Start at a tag far from what the kernel driver or an earlier run likely used.
             tag: (std::process::id() % 200) as u8 + 30,
@@ -227,6 +235,40 @@ impl UsbTmcUserTransport {
         Ok(())
     }
 
+    fn class_in(&mut self, request: u8, length: u16) -> io::Result<Vec<u8>> {
+        let index = u16::from(self.interface_number);
+        let req = ControlIn { control_type: ControlType::Class, recipient: Recipient::Interface, request, value: 0, index, length };
+        self.eps().interface.control_in(req, Duration::from_secs(1)).wait().map_err(io::Error::other)
+    }
+
+    /// USBTMC device clear (USBTMC 1.0, 4.2.1.6/4.2.1.7) followed by the bulk-OUT halt clear the
+    /// specification requires.
+    fn device_clear(&mut self) -> io::Result<()> {
+        let st = self.class_in(INITIATE_CLEAR, 1)?;
+        if st.first() != Some(&STATUS_SUCCESS) {
+            return Err(io::Error::other(format!("INITIATE_CLEAR status {st:02x?}")));
+        }
+        for _ in 0..100 {
+            let st = self.class_in(CHECK_CLEAR_STATUS, 2)?;
+            match st.first() {
+                Some(&STATUS_PENDING) => {
+                    if st.get(1).is_some_and(|b| b & 1 != 0) {
+                        // Device still has bulk-IN data queued: read and discard it.
+                        let _ = self.fill(Instant::now() + Duration::from_millis(100));
+                        self.rx.clear();
+                    } else {
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                }
+                Some(&STATUS_SUCCESS) => break,
+                _ => return Err(io::Error::other(format!("CHECK_CLEAR_STATUS {st:02x?}"))),
+            }
+        }
+        self.eps().out.clear_halt().wait().map_err(io::Error::other)?;
+        info!("usb: device clear done");
+        Ok(())
+    }
+
     /// Waits for the reply header belonging to the outstanding request.
     fn await_header(&mut self, deadline: Instant) -> io::Result<Current> {
         let expected = self.outstanding.expect("request outstanding");
@@ -309,12 +351,13 @@ impl Transport for UsbTmcUserTransport {
         Ok(ReadChunk { n, end })
     }
 
-    /// Local resynchronisation only. The device keeps any outstanding request; its reply is
-    /// accepted (or skipped) by the next read. No class requests, no clear-halt.
+    /// Device clear: aborts the outstanding request and resets the scope's message exchange.
     fn clear(&mut self) -> io::Result<()> {
+        let r = self.device_clear();
         self.current = None;
+        self.outstanding = None;
         self.rx.clear();
-        Ok(())
+        r
     }
 
     fn set_timeout(&mut self, timeout: Duration) -> io::Result<()> {

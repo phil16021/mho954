@@ -10,7 +10,7 @@ MHO954 (Serie `MHO9X000000000`, `*IDN?`-Firmware `00.01.00`, USB über USB/IP vo
 |---|---|---|
 | USB | `1ab1:0452`, Kernel-Treiber `usbtmc`, `/dev/usbtmc0` bzw. udev-Symlink `/dev/usbtmc_MHO954` | Gerät |
 | Latenz | 24–37 ms pro Query, `:MEAS:ITEM?` ≈ 130 ms | Gerät |
-| Unbekannte Query | **keine Antwort**; danach blockiert der Message-Austausch, bis `USBTMC_IOCTL_CLEAR` gesendet wird | Gerät |
+| Unbekannte Query | **keine Antwort**; danach antwortet das Scope auf nichts mehr, bis ein USBTMC Device Clear (INITIATE_CLEAR) kommt. Einzelne Fälle erholen sich damit zuverlässig; **mehrere unbekannte Queries hintereinander** hängen die Firmware trotz Clear auf (Neustart nötig) | Gerät |
 | Recovery | `CLEAR_OUT_HALT` + `CLEAR_IN_HALT` + `CLEAR` stellt den Betrieb wieder her | Gerät |
 | `ABORT_BULK_IN` | hängt unter USB/IP (`vhci_hcd`) im Kernel (`usb_kill_urb`, Prozess in D-State) → **nie verwenden** | Gerät |
 | `*OPC?` | liefert `1` (anders als bei DHO800/900, wo es immer `0` liefert) | Gerät |
@@ -82,7 +82,7 @@ FRPHase FFPHase ACRMs.
 | `:LAN:STATus?` | `UNLINK`, `CONNECTED`, `INIT`, `IPCONFLICT`, `BUSY`, `CONFIGURED`, `DHCPFAILED`, `INVALIDIP`, `IPLOSE` | Guide, Gerät (`UNLINK`) |
 | `:LAN:MDNS`, `:LAN:HOST:NAME`, `:LAN:DESCription` | mDNS standardmäßig aus | Guide |
 | `:LAN:APPLy` | übernimmt alle `:LAN`-Änderungen | Guide |
-| WLAN | **keine SCPI-Befehle** im Guide (Feb. 2026); WLAN per USB-Dongle wird am Gerät eingerichtet | Guide |
+| WLAN | **keine SCPI-Befehle** im Guide (Feb. 2026). Am Gerät geprüft und unbeantwortet: `:WLAN:SSID?`, `:WLAN:STATus?`, `:WLAN:IPADdress?`, `:WIFI:STATus?`, `:SYSTem:WLAN:STATus?`, `:SYSTem:WIFI:STATus?`, `:LAN:WLAN:STATus?`, `:LAN:WIFI:SSID?` | Guide, Gerät |
 
 ## Firmware
 

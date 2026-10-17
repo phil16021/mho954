@@ -94,6 +94,8 @@ pub struct Scope {
     wav: WavSettings,
     /// Points per `:WAV:DATA?` request when downloading RAW memory.
     pub raw_chunk_points: usize,
+    /// Set when an unknown raw query left the scope unresponsive.
+    raw_blocked: bool,
 }
 
 impl Scope {
@@ -124,7 +126,7 @@ impl Scope {
         if !idn.model.starts_with("MHO") && !idn.model.starts_with("DHO") {
             tracing::warn!(model = %idn.model, "not an MHO/DHO scope; commands may not match");
         }
-        Ok(Scope { scpi, idn, wav: WavSettings::default(), raw_chunk_points: 250_000 })
+        Ok(Scope { scpi, idn, wav: WavSettings::default(), raw_chunk_points: 250_000, raw_blocked: false })
     }
 
     pub fn idn(&self) -> &Idn {
@@ -610,16 +612,42 @@ impl Scope {
     // ---- raw SCPI -----------------------------------------------------------------------
 
     /// Sends arbitrary SCPI. Queries (containing `?`) return the response line; commands
-    /// return `None` after checking the error queue. Uses a short timeout because the scope
-    /// does not answer unknown queries.
+    /// return `None` after checking the error queue.
+    ///
+    /// The MHO954 does not answer unknown queries and its firmware stops answering anything
+    /// after several of them in a row, even after a device clear. So after an unanswered query
+    /// the scope's health is checked with `*IDN?`, and further raw queries are refused until
+    /// that check succeeds.
     pub fn raw(&mut self, cmd: &str, timeout: Duration) -> Result<Option<String>> {
         let cmd = cmd.trim();
         if cmd.is_empty() {
             return Err(DriverError::Invalid("empty command".into()));
         }
+        if self.raw_blocked {
+            match self.scpi.query("*IDN?") {
+                Ok(_) => self.raw_blocked = false,
+                Err(_) => {
+                    return Err(DriverError::Device(
+                        "scope stopped answering after an unknown query; power-cycle it".into(),
+                    ));
+                }
+            }
+        }
         let scpi = self.scpi();
         if cmd.contains('?') {
-            Ok(Some(scpi.with_timeout(timeout, |s| s.query(cmd))?))
+            match scpi.with_timeout(timeout, |s| s.query(cmd)) {
+                Ok(r) => Ok(Some(r)),
+                Err(e) if e.is_timeout() => {
+                    // The transport has sent a device clear; verify the scope recovered.
+                    let healthy = self.scpi.query("*IDN?").is_ok();
+                    self.raw_blocked = !healthy;
+                    Err(DriverError::Invalid(format!(
+                        "no answer to `{cmd}` (unknown query?){}",
+                        if healthy { "" } else { "; the scope stopped responding — power-cycle it" }
+                    )))
+                }
+                Err(e) => Err(e.into()),
+            }
         } else {
             scpi.write(cmd)?;
             self.check_errors()?;
