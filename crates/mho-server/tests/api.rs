@@ -584,7 +584,7 @@ impl Mcp {
             .lines()
             .filter_map(|l| l.strip_prefix("data: "))
             .find(|l| l.starts_with('{'))
-            .unwrap_or_else(|| body.as_str());
+            .unwrap_or(body.as_str());
         let v: serde_json::Value =
             serde_json::from_str(line).unwrap_or_else(|e| panic!("{e}: {body}"));
         v["result"].clone()
