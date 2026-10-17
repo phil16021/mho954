@@ -147,6 +147,14 @@ impl Scope {
         if !(1..=4).contains(&bus) {
             return Err(DriverError::Invalid(format!("bus {bus} outside 1..=4")));
         }
+        // Refuse before reconfiguring the decoder if its event table may not be read yet.
+        if !self.may_query(":BUS1:DATA?") {
+            return Err(DriverError::Unsupported(
+                ":BUS<n>:DATA? has not been verified on this instrument yet \
+                 (run `mho954 verify bus.data`)"
+                    .into(),
+            ));
+        }
         if !self.modules()?.logic_analyzer {
             return Err(DriverError::Unsupported(
                 "this scope reports no logic analyzer hardware".into(),

@@ -139,7 +139,7 @@ impl Scope {
     }
 
     /// `query` may be sent: confirmed on the instrument, or the simulator is trusted.
-    fn may_query(&self, query: &str) -> bool {
+    pub(crate) fn may_query(&self, query: &str) -> bool {
         self.trust_unverified || params::query_verified(query)
     }
 
