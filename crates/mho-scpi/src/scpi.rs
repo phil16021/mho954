@@ -6,9 +6,9 @@ use crate::block::parse_block_header;
 use crate::error::{Result, ScpiError, is_timeout_io};
 use crate::transport::Transport;
 
-/// Default size of a single read request. Kept moderate: very large USBTMC requests are
-/// split by the kernel anyway and stress USB/IP links.
-pub const DEFAULT_CHUNK: usize = 256 * 1024;
+/// Default size of a single read request. Verified on the MHO954 over USB/IP: 1–64 KiB
+/// requests work, a 4 MiB request went unanswered and wedged the link.
+pub const DEFAULT_CHUNK: usize = 64 * 1024;
 
 /// SCPI session on top of a [`Transport`].
 ///
@@ -223,14 +223,12 @@ impl Scpi {
                 self.rx.clear();
                 return Ok(String::from_utf8_lossy(&line[..pos]).trim_end_matches('\r').to_string());
             }
-            if self.rx_end {
-                let line = std::mem::take(&mut self.rx);
-                return Ok(String::from_utf8_lossy(&line).trim_end().to_string());
-            }
+            // A short USBTMC read is not a reliable end-of-message marker (long responses arrive
+            // in several transfers), so only the '\n' terminator ends a line.
             if self.rx.len() > 16 * 1024 * 1024 {
                 return Err(ScpiError::parse(cmd, "response line exceeds 16 MiB"));
             }
-            self.fill(self.chunk.min(64 * 1024))?;
+            self.fill(self.chunk)?;
         }
     }
 
@@ -238,7 +236,6 @@ impl Scpi {
         let header = loop {
             match parse_block_header(&self.rx).map_err(|m| ScpiError::parse(cmd, m))? {
                 Some(h) => break h,
-                None if self.rx_end => return Err(ScpiError::parse(cmd, "response ended inside block header")),
                 None => {
                     self.fill(self.chunk)?;
                 }
@@ -253,23 +250,18 @@ impl Scpi {
         self.rx.reserve(total + 1 - self.rx.len().min(total + 1));
         progress(self.rx.len().saturating_sub(header.header_len).min(len), len);
         while self.rx.len() < total {
-            if self.rx_end {
-                return Err(ScpiError::parse(
-                    cmd,
-                    format!("block truncated: {} of {len} bytes", self.rx.len() - header.header_len),
-                ));
-            }
-            // +1 so the final request also covers the trailing '\n' and ends short (EOM).
+            // +1 so the final request also covers the trailing '\n'.
             let want = (total - self.rx.len() + 1).min(self.chunk);
             self.fill(want)?;
             progress((self.rx.len() - header.header_len).min(len), len);
         }
 
-        let has_terminator = self.rx.len() > total;
-        if !has_terminator && !self.rx_end {
-            // Stream transports: consume the '\n' that follows the block.
+        if self.rx.len() == total {
+            // Rigol terminates blocks with '\n'; consume it so it cannot leak into the next
+            // response. If none arrives the device is cleared, the data is still complete.
             if let Err(e) = self.fill(1) {
-                debug!("no block terminator: {e}");
+                debug!("no block terminator after `{cmd}`: {e}");
+                self.recover();
             }
         }
         let mut data = std::mem::take(&mut self.rx);
@@ -321,6 +313,20 @@ mod tests {
         });
         assert_eq!(data.unwrap(), b"0123456789");
         assert!(calls > 1);
+    }
+
+    #[test]
+    fn block_split_into_short_transfers() {
+        // The MHO954 sends large blocks in several USB transfers; each read ends "short".
+        let mut payload = b"#9000000010".to_vec();
+        payload.extend_from_slice(b"0123456789\n");
+        let mock = MockTransport::new()
+            .with_short_transfers(4)
+            .expect(":DISP:DATA? PNG", &payload)
+            .expect("*IDN?", b"long line that spans transfers\n");
+        let mut s = Scpi::new(Box::new(mock));
+        assert_eq!(s.query_block(":DISP:DATA? PNG").unwrap(), b"0123456789");
+        assert_eq!(s.query("*IDN?").unwrap(), "long line that spans transfers");
     }
 
     #[test]

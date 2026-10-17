@@ -6,8 +6,10 @@ use std::time::Duration;
 pub struct ReadChunk {
     /// Number of bytes written into the buffer.
     pub n: usize,
-    /// `true` if the transport knows that the device message is complete (USBTMC EOM).
-    /// Stream transports (TCP) always report `false` and rely on the `\n` terminator.
+    /// `true` if the read ended short (USBTMC). This does **not** reliably mean the device
+    /// message is complete — long responses span several transfers — so framing relies on
+    /// block lengths and the `\n` terminator; it only ends indefinite (`#0`) blocks.
+    /// Stream transports (TCP) always report `false`.
     pub end: bool,
 }
 

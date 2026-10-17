@@ -26,6 +26,7 @@ pub struct MockTransport {
     state: Arc<Mutex<State>>,
     max_read: Option<usize>,
     stream: bool,
+    short_transfers: bool,
 }
 
 impl MockTransport {
@@ -51,6 +52,14 @@ impl MockTransport {
     /// Limits each read to `n` bytes to exercise chunked reassembly.
     pub fn with_max_read(mut self, n: usize) -> Self {
         self.max_read = Some(n);
+        self
+    }
+
+    /// Deliver at most `n` bytes per read and flag every read as a short (ended) transfer,
+    /// like the real scope does for responses spanning several USB transfers.
+    pub fn with_short_transfers(mut self, n: usize) -> Self {
+        self.max_read = Some(n);
+        self.short_transfers = true;
         self
     }
 
@@ -104,7 +113,8 @@ impl Transport for MockTransport {
         let n = buf.len().min(s.pending.len()).min(self.max_read.unwrap_or(usize::MAX));
         buf[..n].copy_from_slice(&s.pending[..n]);
         s.pending.drain(..n);
-        Ok(ReadChunk { n, end: !self.stream && s.pending.is_empty() })
+        let end = !self.stream && (self.short_transfers || s.pending.is_empty());
+        Ok(ReadChunk { n, end })
     }
 
     fn clear(&mut self) -> io::Result<()> {

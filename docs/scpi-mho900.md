@@ -27,7 +27,9 @@ MHO954 (Serie `MHO9X000000000`, `*IDN?`-Firmware `00.01.00`, USB über USB/IP vo
 | NORMal | 1000 Punkte, `XINC = TimeScale/100` | Guide |
 | RAW | nur im STOP-Zustand; Bereich über `:WAV:STAR`/`:WAV:STOP`, jeder Block mit eigenem `#N`-Header | Guide |
 | Default-Format | `BYTE` (Treiber setzt immer `WORD`) | Guide |
-| `:WAV:DATA?` über USB/IP | **erster Versuch hing**; die Ursache ist noch offen (siehe unten) | Gerät |
+| `:WAV:DATA?` über USB/IP | funktioniert mit Leseanforderungen von 1–64 KiB (1000 Pkt. WORD in ~100 ms); eine 4-MiB-Anforderung blieb unbeantwortet | Gerät |
+| Große Antworten | kommen in mehreren USB-Transfers; ein kurzer Read ist **kein** Nachrichtenende (Screenshot: erster Read 24553 von 84109 Bytes) | Gerät |
+| Clear während Transfer | `CLEAR` mitten in einer laufenden Blockantwort hat die USB-Schnittstelle des Scopes blockiert (keine Antwort mehr, auch nach erneutem Clear) | Gerät |
 
 ## Kanäle / Erfassung / Trigger
 
@@ -68,9 +70,7 @@ Utility → About.
 
 ## Offene Punkte (nach Wiederanbindung des Geräts prüfen)
 
-- `:WAV:DATA?` im NORM/WORD-Modus über USB/IP: Beim ersten Test kam keine Antwort. Danach war
-  die USB/IP-Verbindung gestört, bis die Windows-Seite sie zurücksetzte. Mit `mho954 probe`
-  erneut testen. Die Leseanforderungen sind jetzt auf 256 KiB begrenzt, und `ABORT_*` wird nicht
-  mehr verwendet.
 - Durchsatz bei RAW-Transfers über USB/IP (`mho954 bench` im STOP-Zustand).
-- Ob die 12 Bit im WORD links- oder rechtsbündig liegen (`mho954 probe` meldet „low nibble used“).
+- 12-Bit-Ausrichtung im WORD: Das untere Nibble wird genutzt (Codes z. B. 39594..40710). Die Daten
+  sind also nicht einfach um 4 Bit links verschoben, die Preamble-Skalierung gilt direkt.
+- Screenshot mit dem korrigierten Blockleser erneut testen.
