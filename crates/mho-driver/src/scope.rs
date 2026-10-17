@@ -108,6 +108,8 @@ pub struct Scope {
     measured: HashSet<String>,
     /// Last full state per channel (for hidden channels in [`Self::status`]).
     chan_cache: [Option<ChannelState>; CHANNELS as usize],
+    /// Send queries that were not verified on the instrument (simulator only).
+    trust_unverified: bool,
 }
 
 /// Maximum RAW record accepted (500 Mpts with the RLU-05 option).
@@ -120,9 +122,25 @@ impl Scope {
             Connection::Usbtmc { path: Some(p) } => Box::new(UsbTmcTransport::open(p)?),
             Connection::Usbtmc { path: None } => Box::new(UsbTmcTransport::open_first()?),
             Connection::Tcp { addr } => Box::new(TcpTransport::connect(addr)?),
-            Connection::Sim => Box::new(SimTransport::from_env()),
+            Connection::Sim => {
+                let opts = crate::sim::SimOptions::from_env();
+                let strict = opts.strict;
+                let mut scope = Self::from_transport(Box::new(SimTransport::with_options(opts)))?;
+                scope.trust_unverified = !strict;
+                return Ok(scope);
+            }
         };
         Self::from_transport(transport)
+    }
+
+    /// `true` if queries not yet verified on the instrument are sent anyway (simulator).
+    pub fn trusts_unverified(&self) -> bool {
+        self.trust_unverified
+    }
+
+    /// `query` may be sent: confirmed on the instrument, or the simulator is trusted.
+    fn may_query(&self, query: &str) -> bool {
+        self.trust_unverified || params::query_verified(query)
     }
 
     pub fn from_transport(transport: Box<dyn Transport>) -> Result<Scope> {
@@ -157,6 +175,7 @@ impl Scope {
             raw_blocked: false,
             measured: HashSet::new(),
             chan_cache: Default::default(),
+            trust_unverified: false,
         })
     }
 
@@ -586,12 +605,46 @@ impl Scope {
     /// Voltmeter reading. `:DVM:CURR?` went unanswered with the DVM switched off, so it is only
     /// queried while the DVM is enabled.
     pub fn dvm_value(&mut self) -> Result<Option<f64>> {
+        if !self.may_query(":DVM:CURR?") {
+            return Err(DriverError::Unsupported(
+                "the DVM reading has not been verified on this instrument yet \
+                 (run `mho954 verify dvm.value` with the DVM enabled)"
+                    .into(),
+            ));
+        }
         if !self.scpi.query_bool(":DVM:ENAB?")? {
             return Err(DriverError::State(
                 "the DVM is off; enable it first (group `dvm`, enable=true)".into(),
             ));
         }
         Ok(valid_value(self.scpi.query_f64(":DVM:CURR?")?))
+    }
+
+    /// Reads the event table of decoder bus `n` (1..4). The decoder must be on; its event
+    /// table is switched on if needed (the data come from it).
+    pub fn bus_data(&mut self, n: u8) -> Result<mho_dsp::DecodeTable> {
+        if !(1..=4).contains(&n) {
+            return Err(DriverError::Invalid(format!("bus {n} outside 1..=4")));
+        }
+        if !self.may_query(":BUS1:DATA?") {
+            return Err(DriverError::Unsupported(
+                ":BUS<n>:DATA? has not been verified on this instrument yet \
+                 (run `mho954 verify bus.data`)"
+                    .into(),
+            ));
+        }
+        // An unanswered query costs a lot here, so the preconditions are checked first.
+        if self.may_query(":BUS1:DISP?") && !self.scpi.query_bool(&format!(":BUS{n}:DISP?"))? {
+            return Err(DriverError::State(format!(
+                "decoder {n} is off; enable it first (group `bus`, display=true)"
+            )));
+        }
+        if self.may_query(":BUS1:EVEN?") && !self.scpi.query_bool(&format!(":BUS{n}:EVEN?"))? {
+            self.scpi.write(&format!(":BUS{n}:EVEN ON"))?;
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        let data = self.scpi.query_block_message(&format!(":BUS{n}:DATA?"))?;
+        Ok(mho_dsp::parse_decode_table(&String::from_utf8_lossy(&data)))
     }
 
     pub fn measure_many(&mut self, items: &[String], source: &str) -> Result<Vec<Measurement>> {
@@ -979,7 +1032,7 @@ impl Scope {
     ) -> Result<ParamMap> {
         let g = params::find_group(id)?;
         let n = check_instance(g, instance)?;
-        if !allow_unverified && !params::group_verified(g) {
+        if !allow_unverified && !self.trust_unverified && !params::group_verified(g) {
             return Err(DriverError::Unsupported(format!(
                 "{} has not been verified on this instrument yet (run `mho954 verify {}`)",
                 g.id, g.id
@@ -1051,7 +1104,7 @@ impl Scope {
         }
         self.drain_errors()?;
         if select && let Some(sel) = g.select {
-            self.scpi.write(sel)?;
+            self.scpi.write(&sel.replace("{n}", &n.to_string()))?;
         }
         for c in &cmds {
             self.scpi.write(c)?;
@@ -1064,7 +1117,7 @@ impl Scope {
             }
             self.check_errors()?;
         }
-        if params::group_verified(g) {
+        if self.trust_unverified || params::group_verified(g) {
             Ok(Some(self.group_get(id, instance, false)?))
         } else {
             Ok(None)

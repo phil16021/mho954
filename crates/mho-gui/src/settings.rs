@@ -19,6 +19,8 @@ pub struct SettingsPanel {
     fields: BTreeMap<String, String>,
     original: BTreeMap<String, String>,
     activate: bool,
+    /// Group requested before the catalogue arrived: `(id, instance, activate)`.
+    pending: Option<(String, Option<u8>, bool)>,
 }
 
 fn text_of(v: &ParamValue) -> String {
@@ -49,8 +51,28 @@ impl SettingsPanel {
     /// Selects a group and requests its values (verified groups only; unverified ones would
     /// cost the scope's unknown-query budget). `activate` preselects "make active".
     pub fn open(&mut self, client: &Client, group: &GroupInfo, activate: bool) {
+        self.open_at(client, group, None, activate);
+    }
+
+    /// Opens group `id` (instance `instance`) as soon as the catalogue is available.
+    pub fn request(&mut self, id: &str, instance: Option<u8>, activate: bool) {
+        self.selected = Some(id.to_string());
+        self.pending = Some((id.to_string(), instance, activate));
+    }
+
+    fn open_at(
+        &mut self,
+        client: &Client,
+        group: &GroupInfo,
+        instance: Option<u8>,
+        activate: bool,
+    ) {
         self.selected = Some(group.id.clone());
-        self.instance = group.instances.map_or(1, |(lo, _)| lo);
+        self.instance = match (group.instances, instance) {
+            (Some((lo, hi)), Some(n)) if (lo..=hi).contains(&n) => n,
+            (Some((lo, _)), _) => lo,
+            (None, _) => 1,
+        };
         self.loaded_for = None;
         self.fields.clear();
         self.original.clear();
@@ -86,6 +108,14 @@ impl SettingsPanel {
             ui.label("loading settings catalogue…");
             return;
         };
+        if let Some((id, n, activate)) = self.pending.take() {
+            match groups.iter().find(|g| g.id == id) {
+                Some(g) => self.open_at(client, g, n, activate),
+                None => client
+                    .lock()
+                    .log(format!("unknown settings group {id}"), true),
+            }
+        }
         let current = self
             .selected
             .clone()

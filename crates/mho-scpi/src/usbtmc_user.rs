@@ -722,6 +722,10 @@ impl<B: UsbBackend> Transport for UsbTmc<B> {
         self.timeout
     }
 
+    fn reports_eom(&self) -> bool {
+        true
+    }
+
     fn describe(&self) -> String {
         self.describe.clone()
     }

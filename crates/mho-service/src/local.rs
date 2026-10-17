@@ -203,13 +203,11 @@ impl ScopeApi for LocalBackend {
     }
 
     async fn dvm_value(&self) -> ApiResult<Option<f64>> {
-        if !mho_driver::params::query_verified(":DVM:CURR?") {
-            return Err(ApiError::new(
-                ErrorKind::InvalidArgument,
-                "the DVM reading has not been verified on this instrument yet (run `mho954 verify dvm.value` with the DVM enabled)",
-            ));
-        }
         self.device.call(|s| s.dvm_value()).await
+    }
+
+    async fn decode_bus(&self, bus: u8) -> ApiResult<mho_dsp::DecodeTable> {
+        self.device.call(move |s| s.bus_data(bus)).await
     }
 
     async fn modules(&self) -> ApiResult<Modules> {
@@ -223,6 +221,11 @@ impl ScopeApi for LocalBackend {
 
     async fn groups(&self) -> ApiResult<Vec<mho_driver::params::GroupInfo>> {
         let m = self.modules().await.unwrap_or_default();
+        let trusted = self
+            .device
+            .call(|s| Ok(s.trusts_unverified()))
+            .await
+            .unwrap_or(false);
         Ok(mho_driver::params::GROUPS
             .iter()
             .map(|g| {
@@ -231,7 +234,9 @@ impl ScopeApi for LocalBackend {
                     mho_driver::params::Requires::LogicAnalyzer => m.logic_analyzer,
                     mho_driver::params::Requires::FunctionGenerator => m.function_generator,
                 };
-                mho_driver::params::describe(g, available)
+                let mut info = mho_driver::params::describe(g, available);
+                info.verified |= trusted;
+                info
             })
             .collect())
     }

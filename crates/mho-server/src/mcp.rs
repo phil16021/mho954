@@ -108,6 +108,15 @@ pub struct FftArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct DecodeArgs {
+    /// Decoder bus 1..4.
+    pub bus: u8,
+    /// Return at most this many events (default 200).
+    #[serde(default)]
+    pub max_rows: Option<usize>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct ActionArg {
     /// reset_statistics | clear_all | clear_totalizer
     pub action: String,
@@ -396,6 +405,24 @@ impl McpScope {
     )]
     async fn read_counter(&self) -> ToolResult {
         ok_json(&serde_json::json!({ "value": try_api!(self.api.counter_value().await) }))
+    }
+
+    #[tool(
+        description = "Read the decoded events of protocol decoder bus 1..4 (time in seconds plus \
+        the columns the scope reports, e.g. TX/RX, address/data, ID/data). Set the decoder up first \
+        with configure_settings: group `bus.rs232`, `bus.i2c`, `bus.spi`, `bus.can`, `bus.lin` or \
+        `bus.parallel` with activate=true (switches the decoder on), and group `bus` for the \
+        number format."
+    )]
+    async fn decode_bus(&self, Parameters(p): Parameters<DecodeArgs>) -> ToolResult {
+        let mut table = try_api!(self.api.decode_bus(p.bus).await);
+        let total = table.rows.len();
+        table.rows.truncate(p.max_rows.unwrap_or(200));
+        ok_json(&serde_json::json!({
+            "bus": p.bus,
+            "total_events": total,
+            "table": table,
+        }))
     }
 
     #[tool(description = "Read the digital voltmeter (enable/configure it with group `dvm`).")]

@@ -278,6 +278,10 @@ impl ScopeApi for RemoteBackend {
         self.get("/dvm").await
     }
 
+    async fn decode_bus(&self, bus: u8) -> ApiResult<mho_dsp::DecodeTable> {
+        self.get(&format!("/bus/{bus}/data")).await
+    }
+
     async fn modules(&self) -> ApiResult<Modules> {
         self.get("/modules").await
     }

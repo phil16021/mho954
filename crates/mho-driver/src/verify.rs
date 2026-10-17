@@ -128,6 +128,12 @@ const FIXED: &[Fixed] = &[
     ),
     q("counter.value", ":COUN:CURR?", "guide 3.7.1"),
     q("dvm.value", ":DVM:CURR?", "guide 3.10.1"),
+    // The event table is only read with the decoder and its table on; restored afterwards.
+    c("bus.data", ":BUS1:DISP ON", "decoder 1 on (guide 3.4.2)"),
+    c("bus.data", ":BUS1:EVEN ON", "event table on (guide 3.4.4)"),
+    q("bus.data", ":BUS1:DATA?", "guide 3.4.6 (block + text)"),
+    c("bus.data", ":BUS1:EVEN OFF", "restore"),
+    c("bus.data", ":BUS1:DISP OFF", "restore"),
 ];
 
 /// All candidates: the fixed list plus every query of every settings group

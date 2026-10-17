@@ -5,6 +5,7 @@ use eframe::egui::{self, Color32, RichText};
 use egui_plot::{GridMark, HLine, Legend, Line, LineStyle, Plot, PlotBounds, PlotPoints, VLine};
 use mho_driver::params::{GroupInfo, ParamMap};
 use mho_driver::*;
+use mho_dsp::DecodeTable;
 use mho_dsp::{Measurements, Window, format_si};
 use mho_service::{Frame, LiveConfig, MeasureSpec, ScopeApi, StatsRequest};
 
@@ -24,6 +25,10 @@ const DEPTHS: &[&str] = &[
 ];
 const H_DIVS: f64 = 10.0;
 const V_DIVS: f64 = 8.0;
+
+/// Decoder rows shown in the GUI table / labels drawn on the plot.
+const MAX_DECODE_ROWS: usize = 2000;
+const MAX_DECODE_MARKS: usize = 300;
 
 fn channel_color(source: &str) -> Color32 {
     channel_of(source)
@@ -69,6 +74,8 @@ pub struct ScopeApp {
     capture_dir: PathBuf,
     y_mode: YMode,
     show_fft: bool,
+    show_decoder: bool,
+    decoder_bus: u8,
     fft_source: String,
     fft_window: Window,
     cursor_a: Option<f64>,
@@ -115,6 +122,8 @@ impl ScopeApp {
             capture_dir,
             y_mode: YMode::Divisions,
             show_fft: false,
+            show_decoder: false,
+            decoder_bus: 1,
             fft_source: "CHAN1".into(),
             fft_window: Window::Hann,
             cursor_a: None,
@@ -144,6 +153,7 @@ impl ScopeApp {
             groups: sh.groups.clone(),
             group_values: sh.group_values.clone(),
             stats: sh.stats.clone(),
+            decode: sh.decode.clone(),
             measurements: sh.measurements.clone(),
             live_error: sh.live_error.clone(),
             ws_connected: sh.ws_connected,
@@ -424,7 +434,7 @@ impl ScopeApp {
 
         ui.separator();
         ui.label(RichText::new("Trigger").strong());
-        self.trigger_type(ui, s, &st.trigger.mode);
+        self.trigger_type(ui, &st.trigger.mode);
         let tr = &st.trigger;
         ui.horizontal(|ui| {
             for sweep in TriggerSweep::ALL {
@@ -631,7 +641,7 @@ impl ScopeApp {
     }
 
     /// Trigger types other than EDGE are edited in the settings panel.
-    fn trigger_type(&mut self, ui: &mut egui::Ui, s: &Snapshot, mode: &str) {
+    fn trigger_type(&mut self, ui: &mut egui::Ui, mode: &str) {
         let types: Vec<(&str, &str)> = mho_driver::params::GROUPS
             .iter()
             .filter_map(|g| Some((g.select?.strip_prefix(":TRIG:MODE ")?, g.id)))
@@ -652,30 +662,23 @@ impl ScopeApp {
                     }
                     for (token, id) in &types {
                         if ui.selectable_label(matches(token), *token).clicked() {
-                            self.open_settings(s, id, true);
+                            self.open_settings(id, None, true);
                         }
                     }
                 });
             if let Some((_, id)) = types.iter().find(|(t, _)| matches(t))
                 && ui.small_button("edit…").clicked()
             {
-                self.open_settings(s, id, false);
+                self.open_settings(id, None, false);
             }
         });
     }
 
     /// Opens the settings panel at group `id` (the catalogue is loaded on demand).
-    fn open_settings(&mut self, s: &Snapshot, id: &str, activate: bool) {
+    fn open_settings(&mut self, id: &str, instance: Option<u8>, activate: bool) {
         self.load_groups();
         self.settings_open = Some(true);
-        match s
-            .groups
-            .as_ref()
-            .and_then(|g| g.iter().find(|g| g.id == id))
-        {
-            Some(g) => self.settings.open(&self.client, g, activate),
-            None => self.settings.selected = Some(id.to_string()),
-        }
+        self.settings.request(id, instance, activate);
     }
 
     /// Fetches statistics for every live measurement (one query per statistic).
@@ -747,6 +750,101 @@ impl ScopeApp {
                             .monospace(),
                     );
                     ui.end_row();
+                }
+            });
+    }
+
+    fn read_decoder(&self) {
+        let bus = self.decoder_bus;
+        self.client.op(
+            format!("decoder {bus}"),
+            move |api| async move { api.decode_bus(bus).await },
+            move |sh: &mut Shared, t: DecodeTable| {
+                sh.log(format!("decoder {bus}: {} events", t.rows.len()), false);
+                sh.decode = Some((bus, Arc::new(t)));
+            },
+        );
+    }
+
+    fn export_decoder(&self, bus: u8, table: &DecodeTable) {
+        let path = self.capture_dir.join(format!(
+            "mho954-bus{bus}-{}.csv",
+            chrono::Local::now().format("%Y%m%d-%H%M%S")
+        ));
+        let r = std::fs::create_dir_all(&self.capture_dir)
+            .and_then(|_| std::fs::write(&path, mho_dsp::decode_csv(table)));
+        let mut sh = self.client.lock();
+        match r {
+            Ok(()) => sh.log(format!("saved {}", path.display()), false),
+            Err(e) => sh.log(format!("decoder export: {e}"), true),
+        }
+    }
+
+    fn decoder_panel(&mut self, ui: &mut egui::Ui, s: &Snapshot) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Decoder").strong());
+            for n in 1..=4u8 {
+                ui.selectable_value(&mut self.decoder_bus, n, format!("Bus {n}"));
+            }
+            if ui
+                .button("Read")
+                .on_hover_text("read the scope's decoder event table")
+                .clicked()
+            {
+                self.read_decoder();
+            }
+            if ui
+                .button("Setup…")
+                .on_hover_text("decoder type, lines, thresholds")
+                .clicked()
+            {
+                self.open_settings("bus", Some(self.decoder_bus), false);
+            }
+            if let Some((bus, t)) = &s.decode {
+                if ui.button("CSV").clicked() {
+                    self.export_decoder(*bus, t);
+                }
+                ui.label(
+                    RichText::new(format!(
+                        "bus {bus} · {} · {} events",
+                        if t.protocol.is_empty() {
+                            "?"
+                        } else {
+                            &t.protocol
+                        },
+                        t.rows.len()
+                    ))
+                    .weak(),
+                );
+            }
+        });
+        let Some((_, table)) = &s.decode else {
+            return;
+        };
+        egui::ScrollArea::both()
+            .max_height(180.0)
+            .id_salt("decoder_table")
+            .show(ui, |ui| {
+                egui::Grid::new("decoder_grid")
+                    .striped(true)
+                    .spacing([16.0, 2.0])
+                    .show(ui, |ui| {
+                        for c in &table.columns {
+                            ui.label(RichText::new(c).strong());
+                        }
+                        ui.end_row();
+                        for r in table.rows.iter().take(MAX_DECODE_ROWS) {
+                            for c in &r.cells {
+                                ui.label(RichText::new(c).monospace());
+                            }
+                            ui.end_row();
+                        }
+                    });
+                if table.rows.len() > MAX_DECODE_ROWS {
+                    ui.label(format!(
+                        "… {} more events (use CSV export)",
+                        table.rows.len() - MAX_DECODE_ROWS
+                    ));
                 }
             });
     }
@@ -1217,6 +1315,16 @@ impl ScopeApp {
         let traces = &frame.traces;
         let trig = status.map(|s| s.trigger.clone());
         let (cursor_a, cursor_b) = (self.cursor_a, self.cursor_b);
+        // Decoded events as labels along the top edge.
+        let marks: Vec<(f64, String)> = match (&s.decode, self.show_decoder) {
+            (Some((_, t)), true) => t
+                .rows
+                .iter()
+                .filter_map(|r| Some((r.time?, r.cells.get(1)?.clone())))
+                .take(MAX_DECODE_MARKS)
+                .collect(),
+            _ => Vec::new(),
+        };
 
         let resp = plot.show(ui, |pui| {
             if reset {
@@ -1246,6 +1354,32 @@ impl ScopeApp {
                         .color(channel_color(&w.source))
                         .width(1.2),
                 );
+            }
+            if !marks.is_empty() {
+                let top = match y_mode {
+                    YMode::Divisions => V_DIVS / 2.0 - 0.35,
+                    YMode::Volts => {
+                        let b = pui.plot_bounds();
+                        b.max()[1] - 0.05 * (b.max()[1] - b.min()[1])
+                    }
+                };
+                for (t, label) in &marks {
+                    pui.vline(
+                        VLine::new("decoder", *t)
+                            .color(Color32::from_rgb(120, 220, 120).gamma_multiply(0.35))
+                            .width(1.0),
+                    );
+                    pui.text(
+                        egui_plot::Text::new(
+                            "decoder",
+                            egui_plot::PlotPoint::new(*t, top),
+                            RichText::new(label)
+                                .monospace()
+                                .color(Color32::from_rgb(120, 220, 120)),
+                        )
+                        .anchor(egui::Align2::LEFT_CENTER),
+                    );
+                }
             }
             if let Some(t) = &trig
                 && let Some(cs) = chan_state(&t.edge_source)
@@ -1417,6 +1551,7 @@ struct Snapshot {
     groups: Option<Vec<GroupInfo>>,
     group_values: Option<(String, u8, ParamMap)>,
     stats: Vec<MeasureStats>,
+    decode: Option<(u8, Arc<DecodeTable>)>,
     measurements: Option<Arc<mho_service::MeasureSnapshot>>,
     live_error: Option<String>,
     ws_connected: bool,
@@ -1470,6 +1605,7 @@ impl eframe::App for ScopeApp {
                     ui.selectable_value(&mut self.y_mode, YMode::Volts, "volts");
                     ui.separator();
                     ui.checkbox(&mut self.show_fft, "FFT");
+                    ui.checkbox(&mut self.show_decoder, "Decoder");
                     ui.separator();
                     if let Some(f) = &s.frame {
                         self.cursor_readout(ui, f);
@@ -1477,6 +1613,10 @@ impl eframe::App for ScopeApp {
                 });
                 ui.separator();
                 self.measurements_panel(ui, &s, &local);
+                if self.show_decoder {
+                    ui.separator();
+                    self.decoder_panel(ui, &s);
+                }
             });
         egui::CentralPanel::default().show(ui, |ui| {
             let total = ui.available_height();

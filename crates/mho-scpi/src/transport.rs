@@ -30,6 +30,11 @@ pub trait Transport: Send {
 
     /// Human-readable resource description, e.g. `usbtmc:/dev/usbtmc0`.
     fn describe(&self) -> String;
+
+    /// `true` if [`ReadChunk::end`] reliably marks the end of every message (USBTMC EOM).
+    fn reports_eom(&self) -> bool {
+        false
+    }
 }
 
 impl<T: Transport + ?Sized> Transport for Box<T> {
@@ -50,5 +55,8 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
     }
     fn describe(&self) -> String {
         (**self).describe()
+    }
+    fn reports_eom(&self) -> bool {
+        (**self).reports_eom()
     }
 }

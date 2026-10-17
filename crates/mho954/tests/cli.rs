@@ -212,3 +212,16 @@ fn mcp_over_stdio() {
         "{text}"
     );
 }
+
+#[test]
+fn decoder_needs_setup() {
+    let d = tempfile::tempdir().unwrap();
+    // Each CLI call starts a fresh simulator, so the decoder is off.
+    let err = stderr_of_failure(cli(d.path()).args(["decode", "1"]));
+    assert!(err.contains("decoder 1 is off"), "{err}");
+    let groups = stdout(cli(d.path()).args(["groups", "bus", "--params"]));
+    assert!(
+        groups.contains("bus.rs232") && groups.contains("tx_threshold"),
+        "{groups}"
+    );
+}

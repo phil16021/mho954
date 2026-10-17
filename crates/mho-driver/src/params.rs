@@ -63,6 +63,14 @@ pub enum ParamKind {
     SourceLevel {
         source_param: &'static str,
     },
+    /// Real value addressed by a fixed key (decoder thresholds):
+    /// written as `node <value>,<key>`, read as `node? <key>`.
+    Keyed {
+        key: &'static str,
+        min: f64,
+        max: f64,
+        unit: &'static str,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -189,7 +197,29 @@ const fn time(name: &'static str, node: &'static str, min: f64, help: &'static s
     real(name, node, min, 10.0, "s", help)
 }
 
+/// Decoder threshold of line `key` (`:BUS<n>:THReshold <v>,<key>`).
+const fn threshold(name: &'static str, key: &'static str, help: &'static str) -> ParamSpec {
+    ParamSpec {
+        name,
+        node: ":BUS{n}:THR",
+        kind: ParamKind::Keyed {
+            key,
+            min: -1000.0,
+            max: 1000.0,
+            unit: "V",
+        },
+        help,
+    }
+}
+
 const POL: &[&str] = &["POSitive", "NEGative"];
+const HIGH_LOW: &[&str] = &["HIGH", "LOW"];
+const MSB_LSB: &[&str] = &["MSB", "LSB"];
+/// Decoder line sources that may be switched off.
+const LINE_OR_OFF: &[&str] = &[
+    "CHANnel1", "CHANnel2", "CHANnel3", "CHANnel4", "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",
+    "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "OFF",
+];
 const WHEN3: &[&str] = &["GREater", "LESS", "GLESs"];
 
 pub const GROUPS: &[Group] = &[
@@ -860,6 +890,233 @@ pub const GROUPS: &[Group] = &[
             ),
         ],
     },
+    // ---- protocol decoders (:BUS<n>) ----
+    Group {
+        id: "bus",
+        title: "Decoder bus: type, display, number format, event table",
+        select: None,
+        instances: Some((1, 4)),
+        requires: Requires::Nothing,
+        params: &[
+            en(
+                "mode",
+                ":BUS{n}:MODE",
+                &["PARallel", "RS232", "SPI", "IIC", "LIN", "CAN"],
+                "decoder type (IIS/FLEXray/M1553 need options)",
+            ),
+            boolean("display", ":BUS{n}:DISP", "decoder on/off"),
+            en(
+                "format",
+                ":BUS{n}:FORM",
+                &["HEX", "ASCii", "DEC", "BIN"],
+                "number format of decoded data",
+            ),
+            boolean("event", ":BUS{n}:EVEN", "event table (needs display on)"),
+            boolean("label", ":BUS{n}:LAB", "bus label"),
+            real(
+                "position",
+                ":BUS{n}:POS",
+                -250.0,
+                250.0,
+                "",
+                "vertical position on screen",
+            ),
+        ],
+    },
+    Group {
+        id: "bus.parallel",
+        title: "Parallel decoder",
+        select: Some(":BUS{n}:MODE PAR;:BUS{n}:DISP ON"),
+        instances: Some((1, 4)),
+        requires: Requires::Nothing,
+        params: &[
+            en(
+                "bus",
+                ":BUS{n}:PAR:BUS",
+                &[
+                    "D7D0", "D15D8", "D15D0", "D0D7", "D8D15", "D0D15", "CHANnel1", "CHANnel2",
+                    "CHANnel3", "CHANnel4", "USER",
+                ],
+                "data lines (D… need the logic probe)",
+            ),
+            en(
+                "clock",
+                ":BUS{n}:PAR:CLK",
+                LINE_OR_OFF,
+                "clock line (OFF: sample on data change)",
+            ),
+            en(
+                "slope",
+                ":BUS{n}:PAR:SLOP",
+                &["POSitive", "NEGative", "BOTH"],
+                "sampling clock edge",
+            ),
+            en(
+                "endian",
+                ":BUS{n}:PAR:END",
+                &["NEGative", "POSitive"],
+                "NEG = inverted bit order",
+            ),
+            en(
+                "polarity",
+                ":BUS{n}:PAR:POL",
+                &["NEGative", "POSitive"],
+                "data polarity",
+            ),
+            threshold("threshold", "PAL", "data threshold"),
+        ],
+    },
+    Group {
+        id: "bus.rs232",
+        title: "RS232/UART decoder",
+        select: Some(":BUS{n}:MODE RS232;:BUS{n}:DISP ON"),
+        instances: Some((1, 4)),
+        requires: Requires::Nothing,
+        params: &[
+            en("tx", ":BUS{n}:RS232:TX", LINE_OR_OFF, "TX line"),
+            en("rx", ":BUS{n}:RS232:RX", LINE_OR_OFF, "RX line"),
+            en("polarity", ":BUS{n}:RS232:POL", POL, "idle polarity"),
+            en(
+                "parity",
+                ":BUS{n}:RS232:PAR",
+                &["NONE", "ODD", "EVEN"],
+                "parity",
+            ),
+            en("endian", ":BUS{n}:RS232:END", MSB_LSB, "bit order"),
+            int("baud", ":BUS{n}:RS232:BAUD", 1, 20_000_000, "baud rate"),
+            en(
+                "data_bits",
+                ":BUS{n}:RS232:DBIT",
+                &["5", "6", "7", "8", "9"],
+                "data bits",
+            ),
+            en(
+                "stop_bits",
+                ":BUS{n}:RS232:SBIT",
+                &["1", "1.5", "2"],
+                "stop bits",
+            ),
+            threshold("tx_threshold", "TX", "TX threshold"),
+        ],
+    },
+    Group {
+        id: "bus.i2c",
+        title: "I2C decoder",
+        select: Some(":BUS{n}:MODE IIC;:BUS{n}:DISP ON"),
+        instances: Some((1, 4)),
+        requires: Requires::Nothing,
+        params: &[
+            src("scl", ":BUS{n}:IIC:SCLK:SOUR", true, "clock line"),
+            src("sda", ":BUS{n}:IIC:SDA:SOUR", true, "data line"),
+            boolean("swap", ":BUS{n}:IIC:EXCH", "swap SCL and SDA"),
+            en(
+                "address_bits",
+                ":BUS{n}:IIC:ADDB",
+                &["7", "8", "10"],
+                "address width",
+            ),
+            threshold("scl_threshold", "SCL", "clock threshold"),
+            threshold("sda_threshold", "SDA", "data threshold"),
+        ],
+    },
+    Group {
+        id: "bus.spi",
+        title: "SPI decoder",
+        select: Some(":BUS{n}:MODE SPI;:BUS{n}:DISP ON"),
+        instances: Some((1, 4)),
+        requires: Requires::Nothing,
+        params: &[
+            src("clock", ":BUS{n}:SPI:SCLK:SOUR", true, "clock line"),
+            en("clock_slope", ":BUS{n}:SPI:SCLK:SLOP", POL, "sampling edge"),
+            en("miso", ":BUS{n}:SPI:MISO:SOUR", LINE_OR_OFF, "MISO line"),
+            en("mosi", ":BUS{n}:SPI:MOSI:SOUR", LINE_OR_OFF, "MOSI line"),
+            en("polarity", ":BUS{n}:SPI:POL", HIGH_LOW, "data polarity"),
+            en(
+                "miso_polarity",
+                ":BUS{n}:SPI:MISO:POL",
+                HIGH_LOW,
+                "MISO polarity",
+            ),
+            en(
+                "mosi_polarity",
+                ":BUS{n}:SPI:MOSI:POL",
+                HIGH_LOW,
+                "MOSI polarity",
+            ),
+            int("data_bits", ":BUS{n}:SPI:DBIT", 4, 32, "word width"),
+            en("endian", ":BUS{n}:SPI:END", MSB_LSB, "bit order"),
+            en(
+                "framing",
+                ":BUS{n}:SPI:MODE",
+                &["CS", "TIMeout"],
+                "frame by chip select or idle timeout",
+            ),
+            time(
+                "timeout",
+                ":BUS{n}:SPI:TIM:TIME",
+                8e-9,
+                "idle time ending a frame",
+            ),
+            src(
+                "cs",
+                ":BUS{n}:SPI:SS:SOUR",
+                true,
+                "chip-select line (framing CS)",
+            ),
+            en(
+                "cs_polarity",
+                ":BUS{n}:SPI:SS:POL",
+                HIGH_LOW,
+                "chip-select active level",
+            ),
+            threshold("clock_threshold", "CLK", "clock threshold"),
+            threshold("miso_threshold", "MISO", "MISO threshold"),
+        ],
+    },
+    Group {
+        id: "bus.can",
+        title: "CAN decoder",
+        select: Some(":BUS{n}:MODE CAN;:BUS{n}:DISP ON"),
+        instances: Some((1, 4)),
+        requires: Requires::Nothing,
+        params: &[
+            src("source", ":BUS{n}:CAN:SOUR", true, "bus line"),
+            en(
+                "signal",
+                ":BUS{n}:CAN:STYP",
+                &["TX", "RX", "CANH", "CANL", "DIFFerential"],
+                "probed signal",
+            ),
+            int("baud", ":BUS{n}:CAN:BAUD", 10_000, 5_000_000, "bit rate"),
+            int(
+                "sample_point",
+                ":BUS{n}:CAN:SPO",
+                10,
+                90,
+                "sample point (%)",
+            ),
+            threshold("threshold", "CAN", "threshold"),
+        ],
+    },
+    Group {
+        id: "bus.lin",
+        title: "LIN decoder",
+        select: Some(":BUS{n}:MODE LIN;:BUS{n}:DISP ON"),
+        instances: Some((1, 4)),
+        requires: Requires::Nothing,
+        params: &[
+            src("source", ":BUS{n}:LIN:SOUR", true, "bus line"),
+            en(
+                "standard",
+                ":BUS{n}:LIN:STAN",
+                &["V1X", "V2X", "MIXed"],
+                "LIN version",
+            ),
+            int("baud", ":BUS{n}:LIN:BAUD", 2_400, 20_000_000, "baud rate"),
+            boolean("parity", ":BUS{n}:LIN:PAR", "decode with parity bits"),
+            threshold("threshold", "LIN", "threshold"),
+        ],
+    },
 ];
 
 // ---- lookup, verification ----------------------------------------------------------------------
@@ -882,6 +1139,7 @@ pub fn query_for(spec: &ParamSpec, n: u8, source: Option<&str>) -> String {
         ParamKind::SourceLevel { .. } => {
             format!("{}? {}", node(spec, n), source.unwrap_or("CHAN1"))
         }
+        ParamKind::Keyed { key, .. } => format!("{}? {key}", node(spec, n)),
         _ => format!("{}?", node(spec, n)),
     }
 }
@@ -964,7 +1222,7 @@ fn invalid(spec: &ParamSpec, msg: impl std::fmt::Display) -> DriverError {
 /// Validates `v` and renders it as SCPI argument.
 pub fn encode(spec: &ParamSpec, v: &ParamValue) -> Result<String> {
     match (spec.kind, v) {
-        (ParamKind::Real { min, max, .. }, _) => {
+        (ParamKind::Real { min, max, .. } | ParamKind::Keyed { min, max, .. }, _) => {
             let x = match v {
                 ParamValue::Real(x) => *x,
                 ParamValue::Int(i) => *i as f64,
@@ -1083,7 +1341,7 @@ pub fn decode(spec: &ParamSpec, answer: &str) -> Result<ParamValue> {
     let a = answer.trim().trim_matches('"');
     let bad = || DriverError::Protocol(format!("{}: unexpected answer {a:?}", spec.node));
     Ok(match spec.kind {
-        ParamKind::Real { .. } | ParamKind::SourceLevel { .. } => {
+        ParamKind::Real { .. } | ParamKind::SourceLevel { .. } | ParamKind::Keyed { .. } => {
             ParamValue::Real(a.parse().map_err(|_| bad())?)
         }
         ParamKind::Int { .. } => {
@@ -1109,6 +1367,7 @@ pub fn write_command(spec: &ParamSpec, n: u8, encoded: &str, source: Option<&str
         ParamKind::SourceLevel { .. } => {
             format!("{} {},{encoded}", node(spec, n), source.unwrap_or("CHAN1"))
         }
+        ParamKind::Keyed { key, .. } => format!("{} {encoded},{key}", node(spec, n)),
         _ => format!("{} {encoded}", node(spec, n)),
     }
 }
@@ -1162,7 +1421,8 @@ pub fn describe(g: &Group, available: bool) -> GroupInfo {
                     Option<String>,
                     Vec<String>,
                 ) = match p.kind {
-                    ParamKind::Real { min, max, unit } => {
+                    ParamKind::Real { min, max, unit }
+                    | ParamKind::Keyed { min, max, unit, .. } => {
                         ("real", Some(min), Some(max), Some(unit.into()), vec![])
                     }
                     ParamKind::Int { min, max } => {

@@ -537,6 +537,18 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 }
             }
         }
+        Command::Decode { bus, csv, output } => {
+            let table = api.decode_bus(bus).await?;
+            if let Some(path) = output {
+                std::fs::write(&path, mho_dsp::decode_csv(&table))
+                    .with_context(|| format!("writing {}", path.display()))?;
+                println!("{} events written to {}", table.rows.len(), path.display());
+            } else if csv {
+                print!("{}", mho_dsp::decode_csv(&table));
+            } else {
+                print_decode_table(&table);
+            }
+        }
         Command::Dvm => match api.dvm_value().await? {
             Some(v) => println!("{}", format_si(v, "V")),
             None => println!("---"),
@@ -1444,5 +1456,43 @@ fn parse_value(s: &str) -> mho_driver::params::ParamValue {
             x * 10f64.powi(exp)
         }),
         _ => ParamValue::Text(s.to_string()),
+    }
+}
+
+/// Aligned text table of decoded events.
+fn print_decode_table(t: &mho_dsp::DecodeTable) {
+    if t.columns.is_empty() {
+        println!(
+            "{}: no events",
+            if t.protocol.is_empty() {
+                "decoder"
+            } else {
+                &t.protocol
+            }
+        );
+        return;
+    }
+    let mut widths: Vec<usize> = t.columns.iter().map(|c| c.chars().count()).collect();
+    for r in &t.rows {
+        for (i, c) in r.cells.iter().enumerate() {
+            if let Some(w) = widths.get_mut(i) {
+                *w = (*w).max(c.chars().count());
+            }
+        }
+    }
+    let line = |cells: &[String]| {
+        cells
+            .iter()
+            .zip(&widths)
+            .map(|(c, w)| format!("{c:<w$}"))
+            .collect::<Vec<_>>()
+            .join("  ")
+            .trim_end()
+            .to_string()
+    };
+    println!("{} ({} events)", t.protocol, t.rows.len());
+    println!("{}", line(&t.columns));
+    for r in &t.rows {
+        println!("{}", line(&r.cells));
     }
 }

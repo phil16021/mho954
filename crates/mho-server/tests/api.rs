@@ -819,8 +819,64 @@ async fn settings_groups_stats_counter() {
             .status(),
         400
     );
-    // DVM reading is not verified on the instrument yet → refused, never sent
-    assert_eq!(get(&format!("{v1}/dvm")).await.status(), 400);
+    // The simulator is trusted with not yet verified queries (the strict gate is tested in
+    // the driver); the DVM must be on.
+    assert_eq!(get(&format!("{v1}/dvm")).await.status(), 409);
+    c.put(format!("{v1}/groups/dvm"))
+        .json(&serde_json::json!({"enable": true, "source": "CHAN1"}))
+        .send()
+        .await
+        .unwrap();
+    let dvm: serde_json::Value = get(&format!("{v1}/dvm")).await.json().await.unwrap();
+    assert!(dvm.as_f64().is_some(), "{dvm}");
+    shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn protocol_decoder() {
+    let (url, shutdown) = start(false).await;
+    let v1 = format!("{url}/api/v1");
+    let c = reqwest::Client::new();
+    // decoder off → conflict; bad bus → 400
+    assert_eq!(get(&format!("{v1}/bus/1/data")).await.status(), 409);
+    assert_eq!(get(&format!("{v1}/bus/9/data")).await.status(), 400);
+    let r = c
+        .put(format!("{v1}/groups/bus.spi?instance=3&activate=true"))
+        .json(&serde_json::json!({"data_bits": 8, "miso": "CHAN1", "clock_threshold": 0.8}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200, "{}", r.text().await.unwrap());
+    let t: serde_json::Value = get(&format!("{v1}/bus/3/data")).await.json().await.unwrap();
+    assert_eq!(t["protocol"], "SPI");
+    assert_eq!(t["rows"].as_array().unwrap().len(), 5);
+    let csv = get(&format!("{v1}/bus/3/data?format=csv"))
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        csv.starts_with("Time,MISO,MOSI\n-200.00us,0x48,0x49\n"),
+        "{csv}"
+    );
+    assert_eq!(
+        get(&format!("{v1}/bus/3/data?format=xml")).await.status(),
+        400
+    );
+    // through the HTTP client backend
+    let api = RemoteBackend::new(&url);
+    assert_eq!(api.decode_bus(3).await.unwrap().columns.len(), 3);
+    // MCP
+    let mut m = Mcp::connect(&url).await;
+    let r = m
+        .call("decode_bus", serde_json::json!({"bus": 3, "max_rows": 2}))
+        .await;
+    assert_eq!(r["isError"], false, "{r}");
+    let v: serde_json::Value = serde_json::from_str(&text_of(&r)).unwrap();
+    assert_eq!(v["total_events"], 5);
+    assert_eq!(v["table"]["rows"].as_array().unwrap().len(), 2);
+    let r = m.call("decode_bus", serde_json::json!({"bus": 1})).await;
+    assert_eq!(r["isError"], true, "{r}");
     shutdown.cancel();
 }
 

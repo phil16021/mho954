@@ -152,6 +152,16 @@ pub enum Command {
     },
     /// Digital voltmeter reading (configure with `set dvm enable=true ...`).
     Dvm,
+    /// Decoded events of protocol decoder 1..4 (set it up with `set bus.rs232 --activate ...`).
+    Decode {
+        bus: u8,
+        /// Print CSV instead of a table.
+        #[arg(long)]
+        csv: bool,
+        /// Write CSV to this file.
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+    },
     /// List settings groups (trigger types, decoders, …), optionally by prefix.
     Groups {
         prefix: Option<String>,

@@ -14,6 +14,8 @@ pub const DEFAULT_CHUNK: usize = 64 * 1024;
 pub const MAX_BLOCK: usize = 1_200_000_000;
 /// Consecutive empty reads tolerated before a response counts as missing.
 const MAX_EMPTY_READS: u32 = 4;
+/// Text accepted after a definite block in [`Scpi::query_block_message`].
+const MAX_TAIL: usize = 64 * 1024;
 
 /// A response whose shape was detected from its first byte.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,6 +218,77 @@ impl Scpi {
                 "block read"
             );
         }
+        r
+    }
+
+    /// Sends a query answered by a definite-length block whose declared length may not cover
+    /// the whole message, and returns the payload plus anything sent after it up to the end
+    /// of the message (without the final `\n`).
+    ///
+    /// `:BUS<n>:DATA?` is documented ambiguously in this respect; reading to the end of the
+    /// message keeps the session in sync either way. On transports without end-of-message
+    /// marks (TCP) the read stops at the first `\n` after the declared length.
+    pub fn query_block_message(&mut self, cmd: &str) -> Result<Vec<u8>> {
+        let start = Instant::now();
+        self.discard_stale();
+        self.send(cmd)?;
+        let eom = self.transport.reports_eom();
+        let r = self.guard(cmd, |s| {
+            let mut empty = 0;
+            let header = loop {
+                match parse_block_header(&s.rx).map_err(|m| ScpiError::parse(cmd, m))? {
+                    Some(h) => break h,
+                    None => {
+                        if s.fill(s.chunk)? == 0 {
+                            empty += 1;
+                            if empty >= MAX_EMPTY_READS {
+                                return Err(ScpiError::parse(
+                                    cmd,
+                                    "response ended inside block header",
+                                ));
+                            }
+                        }
+                    }
+                }
+            };
+            let len = header
+                .data_len
+                .ok_or_else(|| ScpiError::parse(cmd, "expected a definite-length block"))?;
+            if len > MAX_BLOCK {
+                return Err(ScpiError::parse(cmd, "block length exceeds limit"));
+            }
+            let total = header.header_len + len;
+            loop {
+                let done = if eom {
+                    s.rx_end && s.rx.len() >= total
+                } else {
+                    s.rx.len() > total && s.rx[total..].contains(&b'\n')
+                };
+                if done {
+                    break;
+                }
+                if s.rx.len() > total + MAX_TAIL {
+                    return Err(ScpiError::parse(cmd, "text after the block exceeds limit"));
+                }
+                if s.fill(s.chunk)? == 0 {
+                    empty += 1;
+                    if empty >= MAX_EMPTY_READS {
+                        return Err(ScpiError::parse(cmd, "no end of message after block"));
+                    }
+                }
+            }
+            let mut data = std::mem::take(&mut s.rx);
+            if !eom && let Some(pos) = data[total..].iter().position(|&b| b == b'\n') {
+                data.truncate(total + pos + 1);
+            }
+            data.drain(..header.header_len);
+            if data.last() == Some(&b'\n') {
+                data.pop();
+            }
+            s.rx_end = false;
+            Ok(data)
+        });
+        self.last_duration = start.elapsed();
         r
     }
 
@@ -438,6 +511,46 @@ mod tests {
         );
         assert_eq!(s.query_block(":WAV:DATA?").unwrap(), b"abcd");
         assert!(mock.is_done());
+    }
+
+    #[test]
+    fn block_message_with_uncounted_tail() {
+        // Declared length covers only part of the message; the rest must not leak.
+        let mock = MockTransport::new()
+            .with_max_read(5)
+            .expect(":BUS1:DATA?", b"#14SPI\nTime,MOSI,\n1us,0x41,\n")
+            .expect("*IDN?", b"X\n")
+            .expect(":BUS1:DATA?", b"#13SPI\n")
+            .expect(":BUS1:DATA?", b"#14SPI\n\n");
+        let mut s = Scpi::new(Box::new(mock.clone()));
+        assert_eq!(
+            s.query_block_message(":BUS1:DATA?").unwrap(),
+            b"SPI\nTime,MOSI,\n1us,0x41,"
+        );
+        assert_eq!(s.query("*IDN?").unwrap(), "X");
+        assert_eq!(s.query_block_message(":BUS1:DATA?").unwrap(), b"SPI");
+        assert_eq!(s.query_block_message(":BUS1:DATA?").unwrap(), b"SPI\n");
+        assert!(mock.is_done());
+    }
+
+    #[test]
+    fn block_message_on_stream() {
+        let mock = MockTransport::new()
+            .stream_mode()
+            .expect(":BUS1:DATA?", b"#15SPI\nTi")
+            .expect("*IDN?", b"X\n");
+        let mut s = Scpi::new(Box::new(mock));
+        // Without end-of-message marks the read stops at the first newline after the block.
+        let mock2 = MockTransport::new()
+            .stream_mode()
+            .expect(":BUS1:DATA?", b"#14SPI\nTime,\n");
+        let mut s2 = Scpi::new(Box::new(mock2));
+        assert_eq!(
+            s2.query_block_message(":BUS1:DATA?").unwrap(),
+            b"SPI\nTime,"
+        );
+        // Missing terminator: gives up instead of hanging.
+        assert!(s.query_block_message(":BUS1:DATA?").is_err());
     }
 
     #[test]

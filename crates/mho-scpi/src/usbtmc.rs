@@ -125,6 +125,10 @@ impl Transport for UsbTmcTransport {
         self.timeout
     }
 
+    fn reports_eom(&self) -> bool {
+        true
+    }
+
     fn describe(&self) -> String {
         format!("usbtmc:{}", self.path.display())
     }

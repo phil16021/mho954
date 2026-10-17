@@ -31,6 +31,8 @@ pub struct Shared {
     pub group_values: Option<(String, u8, mho_driver::params::ParamMap)>,
     /// Statistics of the live measurements (fetched on request).
     pub stats: Vec<mho_driver::MeasureStats>,
+    /// Last decoder event table: `(bus, table)`.
+    pub decode: Option<(u8, Arc<mho_dsp::DecodeTable>)>,
     pub live_error: Option<String>,
     pub ws_connected: bool,
     pub busy: usize,

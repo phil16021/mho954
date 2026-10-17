@@ -126,6 +126,10 @@ impl Transport for MockTransport {
         Ok(ReadChunk { n, end })
     }
 
+    fn reports_eom(&self) -> bool {
+        !self.stream && !self.short_transfers
+    }
+
     fn clear(&mut self) -> io::Result<()> {
         let mut s = self.state.lock().unwrap();
         s.pending.clear();

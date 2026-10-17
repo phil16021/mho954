@@ -144,6 +144,10 @@ pub struct SimOptions {
     /// good. The real MHO954 hung after the 5th, even with valid queries and device clears in
     /// between.
     pub hang_after: u32,
+    /// Apply the hardware verification gate like on the real scope (option `strict`).
+    /// Otherwise the simulator is trusted with commands not yet verified on the instrument,
+    /// so every feature can be tried without hardware.
+    pub strict: bool,
 }
 
 impl Default for SimOptions {
@@ -153,6 +157,7 @@ impl Default for SimOptions {
             no_signal: [false; 4],
             truncate_idn: true,
             hang_after: 5,
+            strict: false,
         }
     }
 }
@@ -179,6 +184,7 @@ impl SimOptions {
                     }
                 }
                 "fullidn" => o.truncate_idn = false,
+                "strict" => o.strict = true,
                 "hang_after" => o.hang_after = v.parse().unwrap_or(o.hang_after),
                 _ => tracing::warn!("MHO954_SIM: unknown option {k:?}"),
             }
@@ -509,18 +515,20 @@ impl SimTransport {
     /// Returns `false` for unknown queries.
     /// Finds a table-driven parameter by its node.
     fn param_spec(hdr: &str) -> Option<crate::params::ParamSpec> {
-        crate::params::GROUPS
-            .iter()
-            .flat_map(|g| g.params.iter())
-            .find(|p| p.node == hdr)
-            .copied()
+        crate::params::GROUPS.iter().find_map(|g| {
+            let (lo, hi) = g.instances.unwrap_or((1, 1));
+            g.params
+                .iter()
+                .find(|p| (lo..=hi).any(|n| crate::params::node(p, n) == hdr))
+                .copied()
+        })
     }
 
     fn param_default(spec: &crate::params::ParamSpec) -> String {
         use crate::params::ParamKind::*;
         match spec.kind {
             Real { unit: "s", .. } => "1.000000E-6".into(),
-            Real { .. } | SourceLevel { .. } => "0.000000".into(),
+            Real { .. } | SourceLevel { .. } | Keyed { .. } => "0.000000".into(),
             Int { min, .. } => min.to_string(),
             Enum(v) => crate::params::short_form(v[0]).to_string(),
             Bool => "0".into(),
@@ -564,6 +572,22 @@ impl SimTransport {
                 _ => return false,
             };
             self.respond(r);
+            return true;
+        }
+        if let Some(n) = hdr
+            .strip_prefix(":BUS")
+            .and_then(|r| r.strip_suffix(":DATA"))
+        {
+            let get = |p: &str| self.params.get(&format!(":BUS{n}:{p}")).cloned();
+            if !get("DISP").is_some_and(|v| v == "ON" || v == "1") {
+                // Conservative: treat like an unknown query while the decoder is off.
+                return false;
+            }
+            let table = sim_decode_table(
+                &get("MODE").unwrap_or_else(|| "PAR".into()),
+                &get("FORM").unwrap_or_else(|| "HEX".into()),
+            );
+            self.respond_block(table.as_bytes());
             return true;
         }
         let r = match hdr {
@@ -746,6 +770,12 @@ impl SimTransport {
                 let (src, v) = args.split_once(',').ok_or("missing source")?;
                 self.params.insert(
                     format!("{hdr} {}", src.trim().to_ascii_uppercase()),
+                    v.trim().to_string(),
+                );
+            } else if let crate::params::ParamKind::Keyed { .. } = spec.kind {
+                let (v, key) = args.split_once(',').ok_or("missing key")?;
+                self.params.insert(
+                    format!("{hdr} {}", key.trim().to_ascii_uppercase()),
                     v.trim().to_string(),
                 );
             } else {
@@ -1043,6 +1073,42 @@ fn normalize_header(h: &str) -> String {
     out
 }
 
+/// Event table like `:BUS<n>:DATA?` returns it: protocol line, column titles, rows, each line
+/// ending with a comma.
+fn sim_decode_table(mode: &str, format: &str) -> String {
+    let text = b"Hello";
+    let cell = |b: u8| match format.to_ascii_uppercase().as_str() {
+        f if f.starts_with("ASC") => (b as char).to_string(),
+        "DEC" => b.to_string(),
+        "BIN" => format!("{b:08b}"),
+        _ => format!("0x{b:02X}"),
+    };
+    let mode = mode.to_ascii_uppercase();
+    let (proto, cols) = match mode.as_str() {
+        "RS232" => ("RS232", "Time,TX,RX,"),
+        "IIC" => ("I2C", "Time,Address,Data,ACK,"),
+        "SPI" => ("SPI", "Time,MISO,MOSI,"),
+        "CAN" => ("CAN", "Time,ID,DLC,Data,CRC,ACK,"),
+        "LIN" => ("LIN", "Time,ID,Data,Checksum,"),
+        _ => ("PARALLEL", "Time,Data,"),
+    };
+    let mut out = format!("{proto}\n{cols}\n");
+    for (i, &b) in text.iter().enumerate() {
+        let t = format!("{:.2}us", -200.0 + 100.0 * i as f64);
+        let row = match proto {
+            "RS232" => format!("{t},{},,", cell(b)),
+            "I2C" => format!("{t},0x50,{},ACK,", cell(b)),
+            "SPI" => format!("{t},{},{},", cell(b), cell(b.wrapping_add(1))),
+            "CAN" => format!("{t},0x123,1,{},0x1A2B,ACK,", cell(b)),
+            "LIN" => format!("{t},0x10,{},0x55,", cell(b)),
+            _ => format!("{t},{},", cell(b)),
+        };
+        out.push_str(&row);
+        out.push('\n');
+    }
+    out
+}
+
 impl Transport for SimTransport {
     fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
         if data.starts_with(b":SYST:SET #") || data.starts_with(b":SYSTEM:SETUP #") {
@@ -1100,6 +1166,10 @@ impl Transport for SimTransport {
 
     fn timeout(&self) -> Duration {
         self.timeout
+    }
+
+    fn reports_eom(&self) -> bool {
+        true
     }
 
     fn describe(&self) -> String {

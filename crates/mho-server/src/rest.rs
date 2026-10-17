@@ -82,6 +82,7 @@ pub fn routes() -> Router {
         .route("/measure/actions/{action}", post(measure_action))
         .route("/counter", get(counter))
         .route("/dvm", get(dvm))
+        .route("/bus/{n}/data", get(bus_data))
         .route("/groups", get(groups))
         .route("/groups/{id}", get(group_get).put(group_set))
         .route("/openapi.json", get(openapi_json))
@@ -134,7 +135,8 @@ pub fn doc_routes() -> Router {
         measure_stats,
         measure_action,
         counter,
-        dvm
+        dvm,
+        bus_data
     ),
     components(schemas(ApiError, ErrorKind))
 )]
@@ -604,6 +606,37 @@ async fn measure_action(
 #[utoipa::path(get, path = "/api/v1/counter", responses((status = 200, body = Option<f64>)))]
 async fn counter(State(s): State<AppState>) -> HttpResult<Json<Option<f64>>> {
     Ok(Json(s.backend.counter_value().await?))
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+struct BusQuery {
+    /// `json` (default) or `csv` (like the scope's own export).
+    format: Option<String>,
+}
+
+/// Event table of protocol decoder `n` (1..4). The decoder must be on (group `bus`);
+/// its event table is switched on if needed.
+#[utoipa::path(get, path = "/api/v1/bus/{n}/data", params(("n" = u8, Path), BusQuery),
+    responses((status = 200, body = mho_dsp::DecodeTable)))]
+async fn bus_data(
+    State(s): State<AppState>,
+    Path(n): Path<u8>,
+    Query(q): Query<BusQuery>,
+) -> HttpResult<Response> {
+    let format = q.format.as_deref().unwrap_or("json").to_ascii_lowercase();
+    if !matches!(format.as_str(), "json" | "csv") {
+        return Err(ApiError::invalid(format!("unknown format {format:?}")).into());
+    }
+    let table = s.backend.decode_bus(n).await?;
+    Ok(if format == "csv" {
+        (
+            [(header::CONTENT_TYPE, "text/csv")],
+            mho_dsp::decode_csv(&table),
+        )
+            .into_response()
+    } else {
+        Json(table).into_response()
+    })
 }
 
 /// Digital voltmeter reading (enable it via group `dvm`).
