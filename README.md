@@ -67,6 +67,9 @@ mho954 probe -o report.json                # SCPI-Dialekt prüfen
 `-c usb` (Standard, USBTMC im Userspace), `-c usbtmc` (Kernel-Treiber), `-c tcp:192.168.1.20`
 (LAN/WLAN, Port 5555) oder `-c sim` wählen die Verbindung explizit.
 
+**Netzwerk ist optional:** Der volle Funktionsumfang läuft über USB. Dazu gehören GUI, REST, MCP,
+RAW, Screenshots und auch die LAN-Konfiguration. LAN/WLAN ist nur ein alternativer Weg zum Scope.
+
 **WLAN:** Für den WLAN-Dongle gibt es laut Programming Guide keine SCPI-Befehle. Das WLAN wird am
 Scope eingerichtet. Mit der WLAN-IP des Scopes funktioniert danach `-c tcp:<IP>` ganz normal.
 

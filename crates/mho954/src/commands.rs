@@ -394,7 +394,13 @@ async fn serve(cli: &Cli, cfg: Config, bind: Option<std::net::SocketAddr>, allow
     let shutdown = CancellationToken::new();
     let s2 = shutdown.clone();
     tokio::spawn(async move {
-        let _ = tokio::signal::ctrl_c().await;
+        // Ctrl-C and SIGTERM (systemd stop) both shut down gracefully.
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).ok();
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = async { match term.as_mut() { Some(t) => { t.recv().await; } None => std::future::pending().await } } => {}
+        }
+        tracing::info!("shutting down");
         s2.cancel();
     });
     mho_server::serve(backend, opts, shutdown).await

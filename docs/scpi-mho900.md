@@ -26,7 +26,10 @@ MHO954 (Serie `MHO9X000000000`, `*IDN?`-Firmware `00.01.00`, USB über USB/IP vo
 | `*IDN?` | 24,9 ms (23,4–27,3) |
 | Bildschirm-Wellenform 1 Kanal, Preamble gecacht | 28,2 ms → ≈ 35 fps |
 | `:MEAS:ITEM? VPP` | 24–130 ms |
-| Screenshot PNG 1024×600 (≈ 84 kB) | 285–320 ms, ≈ 0,3 MB/s |
+| Screenshot PNG 1024×600 (≈ 84 kB) | 240–320 ms (durch die PNG-Erzeugung im Scope begrenzt) |
+| RAW 10k Punkte | 0,2 s |
+| RAW 1M Punkte WORD (2 MB), User-Space-USBTMC, 64-KiB-Requests | 1,51 s ≈ 1,3 MB/s |
+| Live-Ansicht (GUI) | 12 fps bei 2 Kanälen, 5,5 fps bei 4 Kanälen |
 
 ## Wellenformen
 
@@ -54,7 +57,7 @@ MHO954 (Serie `MHO9X000000000`, `*IDN?`-Firmware `00.01.00`, USB über USB/IP vo
 | `:TIM:MODE` | `MAIN`, `XY`, `ROLL` | Guide |
 | `:TRIG:STAT?` | `TD`, `WAIT`, `RUN`, `AUTO`, `STOP` | Guide, Gerät |
 | `:TRIG:COUP` | `AC`, `DC`, `LFReject`, `HFReject` | Guide |
-| `:MEAS:ITEM?` | `<item>,<src>[,<src2>]`; ungültig → `9.9E37` | Guide, Gerät |
+| `:MEAS:ITEM?` | `<item>,<src>[,<src2>]`; ungültig → `9.9E37`. Die erste Abfrage eines neu angelegten Items liefert oft `9.9E37`, erst die nächste den Wert | Guide, Gerät |
 
 Messgrößen (Guide): VMAX VMIN VPP VTOP VBASe VAMP VAVG VRMS OVERshoot PREShoot MARea MPARea
 PERiod FREQuency RTIMe FTIMe PWIDth NWIDth PDUTy NDUTy TVMAX TVMIN PSLewrate NSLewrate VUPPer
