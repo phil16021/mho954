@@ -8,7 +8,7 @@ use mho_service::LiveConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// `usb` (user-space USBTMC, default), `usb:SERIAL`, `usbtmc` (kernel driver),
     /// `/dev/usbtmc0`, `tcp:192.168.1.20[:5555]` or `sim`.

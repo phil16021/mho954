@@ -457,6 +457,26 @@ mod tests {
         assert!((p.time(1000) - 10e-6).abs() < 1e-12);
     }
 
+    /// Preamble and response formats recorded on the real MHO954 (`mho954 probe`).
+    #[test]
+    fn real_device_fixture() {
+        let text = include_str!("../../../tests/fixtures/probe-mho954.json");
+        let v: serde_json::Value = serde_json::from_str(text).unwrap();
+        let pre_resp = v["queries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|q| q["query"] == ":WAV:PRE?")
+            .unwrap()["response"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let p = Preamble::parse(&pre_resp).unwrap();
+        assert_eq!((p.format, p.points, p.y_reference), (1, 1000, 32768.0));
+        let idn = v["queries"][0]["response"].as_str().unwrap();
+        assert_eq!(Idn::parse(idn).unwrap().model, "MHO954");
+    }
+
     #[test]
     fn idn_parse() {
         let idn = Idn::parse("RIGOL TECHNOLOGIES,MHO954,MHO9X000000000,00.01.00\n").unwrap();

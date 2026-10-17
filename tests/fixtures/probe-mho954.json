@@ -1,0 +1,130 @@
+{
+  "idn": {
+    "firmware": "00.01.00",
+    "manufacturer": "RIGOL TECHNOLOGIES",
+    "model": "MHO954",
+    "serial": "MHO9X000000000"
+  },
+  "queries": [
+    {
+      "ms": 26.156212,
+      "ok": true,
+      "query": "*IDN?",
+      "response": "RIGOL TECHNOLOGIES,MHO954,MHO9X000000000,00.01.00"
+    },
+    {
+      "ms": 25.213376999999998,
+      "ok": true,
+      "query": "*OPC?",
+      "response": "1"
+    },
+    {
+      "ms": 30.205620999999997,
+      "ok": true,
+      "query": ":SYST:VERS?",
+      "response": "3.0"
+    },
+    {
+      "ms": 28.620462999999997,
+      "ok": true,
+      "query": ":SYST:ERR?",
+      "response": "0,\"No error\""
+    },
+    {
+      "ms": 34.282097,
+      "ok": true,
+      "query": ":TRIG:STAT?",
+      "response": "AUTO"
+    },
+    {
+      "ms": 25.928853,
+      "ok": true,
+      "query": ":ACQ:SRAT?",
+      "response": "5.000000E+8"
+    },
+    {
+      "ms": 28.420675,
+      "ok": true,
+      "query": ":ACQ:MDEP?",
+      "response": "1.0000E+04"
+    },
+    {
+      "ms": 27.341554000000002,
+      "ok": true,
+      "query": ":TIM:SCAL?",
+      "response": "2.000000E-6"
+    },
+    {
+      "ms": 26.86438,
+      "ok": true,
+      "query": ":CHAN1:SCAL?",
+      "response": "5.000000E-02"
+    },
+    {
+      "ms": 25.189880000000002,
+      "ok": true,
+      "query": ":CHAN1:BWL?",
+      "response": "OFF"
+    },
+    {
+      "ms": 25.055416,
+      "ok": true,
+      "query": ":WAV:FORM?",
+      "response": "WORD"
+    },
+    {
+      "ms": 25.529988,
+      "ok": true,
+      "query": ":WAV:MODE?",
+      "response": "NORM"
+    },
+    {
+      "ms": 29.298027,
+      "ok": true,
+      "query": ":WAV:PRE?",
+      "response": "1,0,1000,1,2.000000E-8,-1.000000E-5,0.000000,6.6667E-06,0,32768"
+    },
+    {
+      "ms": 24.905185,
+      "ok": true,
+      "query": ":MEAS:ITEM? VPP,CHAN1",
+      "response": "9.9000E+37"
+    },
+    {
+      "ms": 30.456744,
+      "ok": true,
+      "query": ":SYST:OPT:VAL? BWU05T08",
+      "response": "0"
+    },
+    {
+      "ms": 25.967018000000003,
+      "ok": true,
+      "query": ":LAN:IPAD?",
+      "response": "0.0.0.0"
+    }
+  ],
+  "screenshot": {
+    "bytes": 96699,
+    "ms": 387.88739300000003
+  },
+  "transport": "usb:MHO954:MHO9X000000000",
+  "waveform": {
+    "low_nibble_used": true,
+    "max": 65535,
+    "min": 65535,
+    "ms": 106.51875199999999,
+    "points": 1000,
+    "preamble": {
+      "count": 1,
+      "format": 1,
+      "kind": 0,
+      "points": 1000,
+      "x_increment": 2e-8,
+      "x_origin": -0.00001,
+      "x_reference": 0.0,
+      "y_increment": 6.6667e-6,
+      "y_origin": 0.0,
+      "y_reference": 32768.0
+    }
+  }
+}

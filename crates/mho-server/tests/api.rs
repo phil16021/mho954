@@ -320,3 +320,403 @@ fn network_bind_requires_token() {
     };
     assert!(opts.validate().is_ok());
 }
+
+// ---- REST coverage --------------------------------------------------------------------------
+
+async fn get(url: &str) -> reqwest::Response {
+    reqwest::get(url).await.unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rest_endpoints_success_and_errors() {
+    let (url, shutdown) = start(false).await;
+    let v1 = format!("{url}/api/v1");
+    let c = reqwest::Client::new();
+
+    // measure via query string, item catalogue, local measurements
+    let r: serde_json::Value = get(&format!("{v1}/measure?items=VPP,FREQ&source=CHAN2"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(r.as_array().unwrap().len(), 2);
+    assert_eq!(
+        get(&format!("{v1}/measure?items=NOPE&source=CHAN2"))
+            .await
+            .status(),
+        400
+    );
+    let items: serde_json::Value = get(&format!("{v1}/measure/items"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert!(items.as_array().unwrap().len() > 30);
+    let local: serde_json::Value = get(&format!("{v1}/measure/local?source=CHAN2"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(local["has_data"], true);
+    assert!((local["frequency"].as_f64().unwrap() - 5e3).abs() < 50.0);
+
+    // FFT with window, peak count and full spectrum
+    let fft: serde_json::Value = get(&format!(
+        "{v1}/fft?source=CHAN4&window=flattop&peaks=2&full=true"
+    ))
+    .await
+    .json()
+    .await
+    .unwrap();
+    assert_eq!(fft["peaks"].as_array().unwrap().len(), 2);
+    assert!(fft["dbv"].as_array().unwrap().len() > 100);
+
+    // waveform formats
+    let w: serde_json::Value = get(&format!("{v1}/waveform/CHAN1?format=json"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(w["raw"].as_array().unwrap().len(), 1000);
+    let csv = get(&format!("{v1}/waveform/2?format=csv"))
+        .await
+        .text()
+        .await
+        .unwrap();
+    assert!(csv.starts_with("time_s,CHAN2_V"));
+    let npy = get(&format!("{v1}/waveform/CHAN1?format=npy")).await;
+    assert!(npy.headers().get("x-preamble").is_some());
+    assert!(npy.bytes().await.unwrap().starts_with(b"\x93NUMPY"));
+    assert_eq!(
+        get(&format!("{v1}/waveform/CHAN1?format=xml"))
+            .await
+            .status(),
+        400
+    );
+    assert_eq!(get(&format!("{v1}/waveform/CHAN9")).await.status(), 400);
+    // RAW while running → conflict
+    assert_eq!(
+        get(&format!("{v1}/waveform/CHAN1?mode=raw")).await.status(),
+        409
+    );
+
+    // settings
+    let ch: serde_json::Value = get(&format!("{v1}/channels/1")).await.json().await.unwrap();
+    assert_eq!(ch["channel"], 1);
+    let tb: serde_json::Value = c
+        .put(format!("{v1}/timebase"))
+        .json(&serde_json::json!({"scale": 1e-3}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(tb["scale"], 1e-3);
+    let r = c
+        .put(format!("{v1}/timebase"))
+        .json(&serde_json::json!({"scale": -1.0}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    let tr: serde_json::Value = c
+        .put(format!("{v1}/trigger"))
+        .json(&serde_json::json!({"edge_level": 0.5, "edge_slope": "Negative"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(tr["edge_slope"], "Negative");
+    let acq: serde_json::Value = c
+        .put(format!("{v1}/acquire"))
+        .json(&serde_json::json!({"memory_depth": "100k"}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(acq["memory_depth"], 100000.0);
+    assert_eq!(
+        c.post(format!("{v1}/actions/stop"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        204
+    );
+    assert_eq!(
+        c.post(format!("{v1}/actions/explode"))
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        400
+    );
+
+    // live config
+    let live: serde_json::Value = get(&format!("{v1}/live")).await.json().await.unwrap();
+    assert_eq!(live["enabled"], true);
+    let r = c
+        .put(format!("{v1}/live"))
+        .json(&serde_json::json!({"max_fps": 0}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+
+    // options: listing works; the simulator rejects every license → device error
+    let opts: serde_json::Value = get(&format!("{v1}/options")).await.json().await.unwrap();
+    assert_eq!(opts.as_array().unwrap().len(), 11);
+    let r = c
+        .post(format!("{v1}/options/install"))
+        .json(&serde_json::json!({"key": "MHO900-BWU05T08@abc123"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 422);
+
+    // documentation
+    let doc: serde_json::Value = get(&format!("{v1}/openapi.json"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    let ops: usize = doc["paths"]
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|p| p.as_object().unwrap().len())
+        .sum();
+    assert!(ops >= 25, "{ops} operations");
+    shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unreachable_scope_maps_to_503() {
+    let backend = LocalBackend::start(
+        Connection::Usbtmc {
+            path: Some("/dev/nonexistent-usbtmc".into()),
+        },
+        false,
+        LiveConfig::default(),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let opts = ServerOptions {
+        bind: addr,
+        capture_dir: std::env::temp_dir(),
+        api_token: None,
+    };
+    let shutdown = CancellationToken::new();
+    let app = mho_server::router(backend, &opts, shutdown.clone());
+    tokio::spawn(mho_server::axum_reexport::serve(listener, app).into_future());
+    let r = get(&format!("http://{addr}/api/v1/status")).await;
+    assert_eq!(r.status(), 503);
+    let info: serde_json::Value = get(&format!("http://{addr}/api/v1/info"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(info["connected"], false);
+    shutdown.cancel();
+}
+
+// ---- MCP coverage ---------------------------------------------------------------------------
+
+struct Mcp {
+    url: String,
+    sid: Option<String>,
+    client: reqwest::Client,
+    id: u64,
+}
+
+impl Mcp {
+    async fn connect(url: &str) -> Mcp {
+        let mut m = Mcp {
+            url: format!("{url}/mcp"),
+            sid: None,
+            client: reqwest::Client::new(),
+            id: 0,
+        };
+        let init = m
+            .post(serde_json::json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{
+                "protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}))
+            .await;
+        m.sid = init
+            .headers()
+            .get("mcp-session-id")
+            .map(|v| v.to_str().unwrap().to_string());
+        m.post(serde_json::json!({"jsonrpc":"2.0","method":"notifications/initialized"}))
+            .await;
+        m
+    }
+
+    async fn post(&self, body: serde_json::Value) -> reqwest::Response {
+        let mut rb = self
+            .client
+            .post(&self.url)
+            .header("content-type", "application/json")
+            .header("accept", "application/json, text/event-stream")
+            .json(&body);
+        if let Some(s) = &self.sid {
+            rb = rb.header("mcp-session-id", s);
+        }
+        rb.send().await.unwrap()
+    }
+
+    /// Calls a tool and returns the `result` object.
+    async fn call(&mut self, name: &str, args: serde_json::Value) -> serde_json::Value {
+        self.id += 1;
+        let body = self
+            .post(
+                serde_json::json!({"jsonrpc":"2.0","id":self.id,"method":"tools/call",
+                "params":{"name":name,"arguments":args}}),
+            )
+            .await
+            .text()
+            .await
+            .unwrap();
+        let line = body
+            .lines()
+            .filter_map(|l| l.strip_prefix("data: "))
+            .find(|l| l.starts_with('{'))
+            .unwrap_or_else(|| body.as_str());
+        let v: serde_json::Value =
+            serde_json::from_str(line).unwrap_or_else(|e| panic!("{e}: {body}"));
+        v["result"].clone()
+    }
+}
+
+fn text_of(result: &serde_json::Value) -> String {
+    result["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_mcp_tool() {
+    let (url, shutdown) = start(false).await;
+    let mut m = Mcp::connect(&url).await;
+    let ok = |r: &serde_json::Value| assert_eq!(r["isError"], false, "{r}");
+    let err = |r: &serde_json::Value| assert_eq!(r["isError"], true, "{r}");
+
+    let r = m.call("identify", serde_json::json!({})).await;
+    ok(&r);
+    assert!(text_of(&r).contains("MHO954"));
+    ok(&m.call("get_status", serde_json::json!({})).await);
+    ok(&m
+        .call(
+            "configure_channel",
+            serde_json::json!({"channel": 3, "display": true, "scale": 0.5}),
+        )
+        .await);
+    err(&m
+        .call(
+            "configure_channel",
+            serde_json::json!({"channel": 7, "scale": 0.5}),
+        )
+        .await);
+    ok(&m
+        .call("configure_timebase", serde_json::json!({"scale": 5e-4}))
+        .await);
+    ok(&m
+        .call(
+            "configure_trigger",
+            serde_json::json!({"edge_level": 0.2, "sweep": "Normal"}),
+        )
+        .await);
+    ok(&m
+        .call(
+            "configure_acquisition",
+            serde_json::json!({"acq_type": "Peak"}),
+        )
+        .await);
+    ok(&m
+        .call("run_control", serde_json::json!({"action": "run"}))
+        .await);
+    err(&m
+        .call("run_control", serde_json::json!({"action": "explode"}))
+        .await);
+    let r = m
+        .call(
+            "measure",
+            serde_json::json!({"items": ["FREQ"], "source": "CHAN2"}),
+        )
+        .await;
+    ok(&r);
+    assert!(text_of(&r).contains("FREQUENCY"));
+    err(&m
+        .call(
+            "measure",
+            serde_json::json!({"items": ["RRDELAY"], "source": "CHAN1"}),
+        )
+        .await);
+    ok(&m
+        .call("list_measurement_items", serde_json::json!({}))
+        .await);
+    let r = m
+        .call("analyze_waveform", serde_json::json!({"source": "CHAN2"}))
+        .await;
+    assert!(text_of(&r).contains("\"has_data\": true"));
+    let r = m
+        .call(
+            "fft_peaks",
+            serde_json::json!({"source": "CHAN4", "count": 1}),
+        )
+        .await;
+    ok(&r);
+    assert!(text_of(&r).contains("peaks"));
+    let r = m.call("screenshot", serde_json::json!({})).await;
+    assert_eq!(r["content"][0]["type"], "image");
+    assert_eq!(r["content"][0]["mimeType"], "image/png");
+    ok(&m.call("list_options", serde_json::json!({})).await);
+    let r = m.call("get_network", serde_json::json!({})).await;
+    assert!(text_of(&r).contains("mac"));
+    ok(&m
+        .call("configure_network", serde_json::json!({"mode": "Dhcp"}))
+        .await);
+    err(&m
+        .call(
+            "configure_network",
+            serde_json::json!({"mode": "Static", "ip": "1.2.3"}),
+        )
+        .await);
+    err(&m
+        .call("raw_scpi", serde_json::json!({"command": "*IDN?"}))
+        .await); // forbidden
+
+    // get_waveform with save_as: file written once, never overwritten, names validated
+    let name = format!("mcp-test-{}.csv", std::process::id());
+    let r = m
+        .call(
+            "get_waveform",
+            serde_json::json!({"source": "CHAN2", "max_points": 20, "save_as": name}),
+        )
+        .await;
+    ok(&r);
+    let t = text_of(&r);
+    assert!(t.contains("saved_to") && t.contains(&name), "{t}");
+    let saved = std::env::temp_dir()
+        .join("mho954-test-captures")
+        .join(&name);
+    assert!(saved.exists());
+    err(&m
+        .call(
+            "get_waveform",
+            serde_json::json!({"source": "CHAN2", "save_as": name}),
+        )
+        .await);
+    err(&m
+        .call(
+            "get_waveform",
+            serde_json::json!({"source": "CHAN2", "save_as": "../evil.csv"}),
+        )
+        .await);
+    std::fs::remove_file(saved).unwrap();
+    shutdown.cancel();
+}
