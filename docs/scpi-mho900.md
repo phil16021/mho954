@@ -111,6 +111,7 @@ Utility → About.
 | Compound mit parametrierten Abfragen `:MEAS:STAT:ITEM? CURR,…;:MEAS:STAT:ITEM? AVER,…` | **falsch**: Jede Position liefert den Wert der letzten Teilabfrage → Statistik einzeln abfragen |
 | `:MEAS:STAT:ITEM? <CURR\|AVER\|MIN\|MAX\|DEV\|CNT>,<item>,<src>` einzeln | korrekt (z. B. VRMS CH3: 1,21 mV / 1,23 mV / 1,05 mV / 1,35 mV / 39,5 µV / 1000) |
 | `:DVM:CURR?` bei ausgeschaltetem DVM | **keine Antwort** (kostet Budget) → wird nur bei eingeschaltetem DVM abgefragt |
+| `:DVM:CURR?` bei eingeschaltetem DVM (ACRM, CH2) | beantwortet (`7.910000E-4`) |
 | Compound `:TIM:SCAL?;:CHAN1:SCAL?` | eine Zeile, Werte mit `;` getrennt. Das Scope braucht aber ~20 ms je Teilabfrage (10 Abfragen: 0,2 s statt 0,25 s); der Gewinn ist also klein |
 | `:WAV:SOUR D0` | **abgelehnt** (`-200 Command execute failed`) → Digitalkanäle nicht über `:WAV:DATA?` lesbar |
 | `:MEAS:ITEM VPP,CHAN1` (Set-Form) | angenommen (Messung anlegen ohne Abfrage) |
@@ -148,7 +149,7 @@ Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigg
   kosten bei fehlender Antwort Budget. Set-Befehle schickt `verify` immer, auch wenn sie schon
   geprüft sind (Setup und Restore der Proben), und vor jedem Kandidaten wird die Fehlerqueue
   geleert.
-- Noch am Gerät zu prüfen: `dvm.value` (bei eingeschaltetem DVM), `:MATH<n>:FFT:SEAR:RES?` mit
+- Noch am Gerät zu prüfen: `:MATH<n>:FFT:SEAR:RES?` mit
   echten Peaks (Format der Zeilen), Logikanalysator mit angesteckter Sonde (Bitreihenfolge
   D15 = MSB angenommen).
 - Pfade für `:SAVE:*`/`:LOAD:*`: `C:/` oder `D:/`, Dateiname ≤ 26 Zeichen (Guide 3.21). Erlaubt

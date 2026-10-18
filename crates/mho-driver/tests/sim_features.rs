@@ -8,8 +8,7 @@ fn strict_simulator_refuses_unverified_queries() {
     // `from_transport` applies the hardware gate, like a real instrument.
     let mut s = Scope::from_transport(Box::new(SimTransport::new())).unwrap();
     assert!(!s.trusts_unverified());
-    // Still unverified on the test scope: the DVM value and everything of the generator.
-    assert!(matches!(s.dvm_value(), Err(DriverError::Unsupported(_))));
+    // Still unverified on the test scope: everything of the generator.
     assert!(matches!(
         s.group_get("afg", Some(1), false),
         Err(DriverError::Unsupported(_))

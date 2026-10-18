@@ -846,12 +846,6 @@
     "detail": "9.90E+37"
   },
   {
-    "command": ":DVM:CURR?",
-    "group": "dvm.value",
-    "outcome": "no_answer",
-    "detail": "invalid argument: no answer to `:DVM:CURR?` (unknown query?)"
-  },
-  {
     "command": ":MEAS:SOUR?",
     "group": "measure.setup",
     "outcome": "ok",
@@ -2350,5 +2344,11 @@
     "group": "math.peaks",
     "outcome": "ok",
     "detail": ""
+  },
+  {
+    "command": ":DVM:CURR?",
+    "group": "dvm.value",
+    "outcome": "ok",
+    "detail": "7.910000E-4"
   }
 ]

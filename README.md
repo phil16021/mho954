@@ -250,7 +250,7 @@ Weil das Scope unbekannte Queries nicht beantwortet und nach etwa fünf davon h�
 - **Lesen** einer Gruppe, Dekoder-Tabellen, FFT-Peaks, Math-Spuren im Live-Bild und das DVM gibt
   es erst, wenn die Queries mit `mho954 verify <gruppe>` am Gerät bestätigt wurden. Das Ergebnis
   steht in `docs/verified-commands.json` und wird beim nächsten Build einkompiliert. Stand
-  2026-10-18 ist alles bestätigt außer dem DVM-Wert und den Generator-Gruppen (`afg*`, `bode`;
+  2026-10-18 ist alles bestätigt außer den Generator-Gruppen (`afg*`, `bode`;
   das Test-Scope hat keinen Generator).
 - `verify` sendet jede Query einzeln, danach `*IDN?`. Nach drei unbeantworteten Queries hört es
   auf und bittet um einen Neustart des Scopes; danach `mho954 verify --reset-budget`.
