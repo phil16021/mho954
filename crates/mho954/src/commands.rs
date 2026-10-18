@@ -267,6 +267,73 @@ pub async fn run(cli: Cli, cfg: Config) -> anyhow::Result<()> {
     result
 }
 
+fn print_bode_summary(s: &mho_dsp::BodeSummary) {
+    let hz = |v: Option<f64>| v.map_or("-".into(), |v| format_si(v, "Hz"));
+    println!(
+        "-3 dB at {}, 0 dB at {}{}",
+        hz(s.corner_3db_hz),
+        hz(s.unity_gain_hz),
+        s.phase_margin_deg
+            .map(|m| format!(" (phase margin {m:.1}°)"))
+            .unwrap_or_default()
+    );
+    if let (Some(f), Some(m)) = (s.phase_crossover_hz, s.gain_margin_db) {
+        println!("-180° at {}, gain margin {m:.1} dB", format_si(f, "Hz"));
+    }
+}
+
+fn print_capabilities(c: &mho_driver::Capabilities) {
+    let mhz = |hz: Option<f64>| hz.map_or("unknown".into(), |h| format!("{:.0} MHz", h / 1e6));
+    println!("model          {}", c.model);
+    println!(
+        "bandwidth      {} (1-2 channels), {} (3-4 channels){}",
+        mhz(c.bandwidth_hz),
+        mhz(c.bandwidth_4ch_hz),
+        c.bandwidth_upgrade
+            .as_ref()
+            .map(|u| format!(", upgrade {u} from {}", mhz(c.base_bandwidth_hz)))
+            .unwrap_or_default()
+    );
+    let m = c.max_memory_depth.map(|d| format!("{}M", d / 1_000_000));
+    println!(
+        "memory depth   max {} / {} / {} / {} with 1 / 2 / 3 / 4 channels",
+        m[0], m[1], m[2], m[3]
+    );
+    println!(
+        "logic analyzer {}",
+        if c.logic_analyzer {
+            "yes (needs the PLA2216 probe)"
+        } else {
+            "no"
+        }
+    );
+    match &c.generator {
+        Some(g) => println!(
+            "generator      GI/GII, sine up to {}{}{}",
+            mhz(Some(g.max_sine_hz)),
+            g.option
+                .as_ref()
+                .map(|o| format!(", option {o}"))
+                .unwrap_or_default(),
+            if g.hardware_flag {
+                ""
+            } else {
+                " (:SYST:MOD? reports no DG)"
+            }
+        ),
+        None => println!("generator      no (or not yet confirmed: `mho954 verify afg`)"),
+    }
+    println!(
+        "protocols      standard + {}",
+        if c.protocols.is_empty() {
+            "none".into()
+        } else {
+            c.protocols.join(", ")
+        }
+    );
+    println!("options        {}", c.options.join(" "));
+}
+
 async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Result<()> {
     let api = backend.api();
     match cli.command {
@@ -278,6 +345,17 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                     idn.manufacturer, idn.model, idn.serial, idn.firmware, info.connection
                 ),
                 None => bail!("scope not connected ({})", info.connection),
+            }
+            if let Ok(c) = api.capabilities().await {
+                println!("{}", c.summary());
+            }
+        }
+        Command::Caps { json } => {
+            let c = api.capabilities().await?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&c)?);
+            } else {
+                print_capabilities(&c);
             }
         }
         Command::Status { json } => {
@@ -429,12 +507,12 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
         Command::Options { cmd } => match cmd.unwrap_or(OptionsCmd::List) {
             OptionsCmd::List => {
                 for o in api.options().await? {
-                    println!(
-                        "{} {:<10} {}",
-                        if o.active { "[x]" } else { "[ ]" },
-                        o.name,
-                        o.description
-                    );
+                    let mark = match (o.standard, o.active) {
+                        (true, _) => "[s]",
+                        (false, true) => "[x]",
+                        (false, false) => "[ ]",
+                    };
+                    println!("{mark} {:<10} {}", o.name, o.description);
                 }
             }
             OptionsCmd::Install { license } => {
@@ -600,6 +678,62 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 }
             }
         }
+        Command::Afg {
+            channel,
+            on,
+            off,
+            func,
+            freq,
+            ampl,
+            offset,
+            phase,
+            duty,
+            symmetry,
+            load,
+            modulation,
+            depth,
+            deviation,
+            mod_freq,
+            mod_wave,
+        } => {
+            let num = |s: Option<String>, what: &str| -> anyhow::Result<Option<f64>> {
+                s.map(|s| match parse_value(&s) {
+                    mho_driver::params::ParamValue::Real(x) => Ok(x),
+                    mho_driver::params::ParamValue::Int(i) => Ok(i as f64),
+                    _ => anyhow::bail!("{what}: number expected, got {s:?}"),
+                })
+                .transpose()
+            };
+            let update = mho_driver::GeneratorUpdate {
+                output: (on || off).then_some(on),
+                function: func,
+                frequency: num(freq, "freq")?,
+                amplitude: num(ampl, "ampl")?,
+                offset: num(offset, "offset")?,
+                phase: num(phase, "phase")?,
+                duty: num(duty, "duty")?,
+                symmetry: num(symmetry, "symmetry")?,
+                load,
+                modulation,
+                mod_depth: num(depth, "depth")?,
+                mod_deviation: num(deviation, "deviation")?,
+                mod_frequency: num(mod_freq, "mod-freq")?,
+                mod_wave,
+            };
+            let state = if update == mho_driver::GeneratorUpdate::default() {
+                Some(api.group_get("afg".into(), Some(channel)).await?)
+            } else {
+                api.set_generator(channel, update).await?
+            };
+            match state {
+                Some(state) => {
+                    for (k, v) in state {
+                        println!("{k:<14} {}", show_value(&v));
+                    }
+                }
+                None => println!("applied (generator settings not yet verified for reading)"),
+            }
+        }
         Command::Bode {
             start,
             stop,
@@ -608,6 +742,9 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
             dut_out,
             amplitude,
             generator,
+            load,
+            averages,
+            native,
             output,
         } => {
             let num = |s: &str, what: &str| -> anyhow::Result<f64> {
@@ -617,6 +754,23 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                     _ => anyhow::bail!("{what}: number expected, got {s:?}"),
                 }
             };
+            if native {
+                let req = mho_driver::NativeBodeRequest {
+                    input: dut_in,
+                    output: dut_out,
+                    start: num(&start, "start")?,
+                    stop: num(&stop, "stop")?,
+                    points_per_decade: points.clamp(10, 100) as u32,
+                    amplitude: num(&amplitude, "amplitude")?,
+                    ..Default::default()
+                };
+                let png = api.bode_native(req).await?;
+                let path = output.unwrap_or_else(|| std::path::PathBuf::from("bode.png"));
+                std::fs::write(&path, png)
+                    .with_context(|| format!("writing {}", path.display()))?;
+                println!("Bode plot screenshot written to {}", path.display());
+                return Ok(());
+            }
             let req = mho_driver::BodeRequest {
                 generator,
                 input: dut_in,
@@ -625,13 +779,15 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 stop: num(&stop, "stop")?,
                 points,
                 amplitude: num(&amplitude, "amplitude")?,
+                load,
+                averages,
                 ..Default::default()
             };
             let pts = api.bode_sweep(req).await?;
-            let mut csv = String::from("frequency_hz,gain_db,phase_deg\n");
-            for p in &pts {
-                csv.push_str(&format!("{},{},{}\n", p.frequency, p.gain_db, p.phase_deg));
-            }
+            let f: Vec<f64> = pts.iter().map(|p| p.frequency).collect();
+            let g: Vec<f64> = pts.iter().map(|p| p.gain_db).collect();
+            let ph: Vec<f64> = pts.iter().map(|p| p.phase_deg).collect();
+            let csv = mho_dsp::bode_csv(&f, &g, &ph);
             if let Some(path) = output {
                 std::fs::write(&path, csv)
                     .with_context(|| format!("writing {}", path.display()))?;
@@ -646,6 +802,7 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                     );
                 }
             }
+            print_bode_summary(&mho_dsp::bode_summary(&f, &g, &ph));
         }
         Command::Peaks { math } => {
             let peaks = api.fft_peaks(math).await?;
@@ -1487,6 +1644,10 @@ async fn verify_cmd(
     let (results, budget, stop) = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let mut scope = Scope::open(&conn)?;
         let mut stop = None;
+        // A group whose query went unanswered is most likely missing as a whole (no
+        // generator, no option): its other queries and its subgroups would only burn the
+        // budget.
+        let mut unanswered_groups = std::collections::HashSet::new();
         for cand in selected {
             // Set commands always run: they are free, and probes need their setup.
             let done = cand.kind == Kind::Query
@@ -1496,6 +1657,15 @@ async fn verify_cmd(
                         .any(|r| r.command == cand.command && r.outcome == Outcome::Ok));
             if done {
                 println!("{:<32} already verified", cand.command);
+                continue;
+            }
+            let dead = unanswered_groups.iter().find(|g: &&String| {
+                cand.group == **g || cand.group.starts_with(&format!("{g}."))
+            });
+            if cand.kind == Kind::Query
+                && let Some(g) = dead
+            {
+                println!("{:<32} skipped (a query of {g} went unanswered)", cand.command);
                 continue;
             }
             if cand.kind == Kind::Query && budget.used >= UNKNOWN_QUERY_BUDGET {
@@ -1509,6 +1679,7 @@ async fn verify_cmd(
             println!("{:<32} {:?} {}", r.command, r.outcome, r.detail);
             if r.outcome == Outcome::NoAnswer {
                 budget.used += 1;
+                unanswered_groups.insert(cand.group.clone());
             }
             let unresponsive = r.outcome == Outcome::ScopeUnresponsive;
             results.retain(|x| x.command != r.command);

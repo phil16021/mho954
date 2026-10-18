@@ -56,6 +56,11 @@ pub enum Command {
     Mcp,
     /// Show identification and connection.
     Idn,
+    /// Show what the scope can do: bandwidth with upgrades, memory limits, generator, options.
+    Caps {
+        #[arg(long)]
+        json: bool,
+    },
     /// Show the full scope state.
     Status {
         #[arg(long)]
@@ -178,6 +183,57 @@ pub enum Command {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Built-in function generator (AFG option): show channel 1 (GI) or 2 (GII), or change it,
+    /// e.g. `afg 1 --func sin --freq 1k --ampl 1 --load 50 --on`.
+    Afg {
+        /// 1 = GI, 2 = GII.
+        channel: u8,
+        /// Switch the output on (after the other settings).
+        #[arg(long)]
+        on: bool,
+        /// Switch the output off (before the other settings).
+        #[arg(long, conflicts_with = "on")]
+        off: bool,
+        /// SIN, SQU, RAMP, NOIS, DC, ARB, EXPR, EXPF, ECG1, GAUS, LOR, HAV, SINC.
+        #[arg(long)]
+        func: Option<String>,
+        /// Frequency in Hz (SI prefixes: 1k, 2.5M).
+        #[arg(long)]
+        freq: Option<String>,
+        /// Amplitude in Vpp.
+        #[arg(long)]
+        ampl: Option<String>,
+        /// DC offset in V.
+        #[arg(long, allow_hyphen_values = true)]
+        offset: Option<String>,
+        /// Start phase in degrees.
+        #[arg(long)]
+        phase: Option<String>,
+        /// Square duty cycle in %.
+        #[arg(long)]
+        duty: Option<String>,
+        /// Ramp symmetry in %.
+        #[arg(long)]
+        symmetry: Option<String>,
+        /// Expected load: highz or 50.
+        #[arg(long)]
+        load: Option<String>,
+        /// Modulation: am, fm, pm or off.
+        #[arg(long = "mod")]
+        modulation: Option<String>,
+        /// AM depth in %.
+        #[arg(long)]
+        depth: Option<String>,
+        /// FM deviation (Hz) or PM deviation (°).
+        #[arg(long)]
+        deviation: Option<String>,
+        /// Modulating frequency in Hz.
+        #[arg(long)]
+        mod_freq: Option<String>,
+        /// Modulating waveform: SIN, SQU, TRI, UPR, DNR, NOIS.
+        #[arg(long)]
+        mod_wave: Option<String>,
+    },
     /// Software Bode sweep with the built-in function generator (AFG option).
     Bode {
         #[arg(long, default_value = "100")]
@@ -197,7 +253,17 @@ pub enum Command {
         amplitude: String,
         #[arg(long, default_value_t = 1)]
         generator: u8,
-        /// Write CSV (frequency, gain_db, phase_deg).
+        /// Load the generator expects: highz or 50.
+        #[arg(long)]
+        load: Option<String>,
+        /// Acquisitions averaged per frequency (1..16).
+        #[arg(long, default_value_t = 1)]
+        averages: u32,
+        /// Run the scope's own Bode plot instead and save its screenshot (-o file.png).
+        /// `--points` is then per decade (10..100).
+        #[arg(long)]
+        native: bool,
+        /// Write CSV (frequency, gain, phase, unwrapped phase; summary as # lines).
         #[arg(short, long)]
         output: Option<PathBuf>,
     },

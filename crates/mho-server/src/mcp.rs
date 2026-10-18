@@ -68,6 +68,14 @@ pub struct ConfigureChannel {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct GeneratorParams {
+    /// 1 = GI, 2 = GII.
+    pub channel: u8,
+    #[serde(flatten)]
+    pub update: mho_driver::GeneratorUpdate,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct RunControl {
     /// One of: run, stop, single, autoscale, clear, force (force a trigger).
     pub action: String,
@@ -542,6 +550,38 @@ impl McpScope {
         ok_json(&try_api!(self.api.bode_sweep(p).await))
     }
 
+    #[tool(
+        description = "Set the built-in function generator (AFG option) channel 1 (GI) or 2 (GII): \
+        waveform (SIN, SQU, RAMP, NOIS, DC, ARB, EXPR, EXPF, ECG1, GAUS, LOR, HAV, SINC), frequency \
+        Hz, amplitude Vpp, offset V, phase °, duty/symmetry %, load (highz or 50), modulation (am, \
+        fm, pm, off with mod_depth/mod_deviation/mod_frequency/mod_wave) and output on/off. Only \
+        given fields change; limits depend on waveform, load and AFG50/AFG100 (see \
+        get_capabilities). output=true drives a real signal into whatever is connected to the \
+        generator: only switch it on when the user asked for it."
+    )]
+    async fn set_generator(&self, Parameters(p): Parameters<GeneratorParams>) -> ToolResult {
+        let state = try_api!(self.api.set_generator(p.channel, p.update).await);
+        ok_json(&serde_json::json!({ "channel": p.channel, "state": state }))
+    }
+
+    #[tool(
+        description = "Run the scope's own Bode plot (AFG option) from start to stop Hz (10 Hz..30 MHz, \
+        start <= stop/10) with input/output channel numbers, points per decade and sweep amplitude, \
+        and return a screenshot of the finished plot. The scope cannot export the curve; use \
+        bode_sweep for numbers. Drives the generator output during the sweep."
+    )]
+    async fn bode_native(
+        &self,
+        Parameters(p): Parameters<mho_driver::NativeBodeRequest>,
+    ) -> ToolResult {
+        let png = try_api!(self.api.bode_native(p).await);
+        let data = base64::engine::general_purpose::STANDARD.encode(png);
+        Ok(CallToolResult::success(vec![ContentBlock::image(
+            data,
+            "image/png",
+        )]))
+    }
+
     #[tool(description = "Read the digital voltmeter (enable/configure it with group `dvm`).")]
     async fn read_dvm(&self) -> ToolResult {
         ok_json(&serde_json::json!({ "value": try_api!(self.api.dvm_value().await) }))
@@ -552,6 +592,17 @@ impl McpScope {
     )]
     async fn list_options(&self) -> ToolResult {
         ok_json(&try_api!(self.api.options().await))
+    }
+
+    #[tool(
+        description = "What this scope can do: model, effective analog bandwidth after upgrades (1-2 \
+        and 3-4 channels), maximum memory depth per number of active channels, whether the built-in \
+        function generator is usable (and its max sine frequency), and which optional protocol \
+        decoders/triggers (CAN-FD, FlexRay, I2S, MIL-STD-1553) are licensed. Check this before using \
+        generator, Bode or optional decoder groups."
+    )]
+    async fn get_capabilities(&self) -> ToolResult {
+        ok_json(&try_api!(self.api.capabilities().await))
     }
 
     #[tool(

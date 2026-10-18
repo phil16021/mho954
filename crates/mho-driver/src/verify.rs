@@ -101,6 +101,11 @@ const FIXED: &[Fixed] = &[
         ":SYST:MOD?",
         "guide 3.24 :SYSTem:MODules? (LA/AFG hardware present)",
     ),
+    q(
+        "system.dg",
+        ":SYST:DGST?",
+        "guide 3.24 :SYSTem:DGSTatus? (generator present)",
+    ),
     q("system", "*ESR?", "guide IEEE 488.2"),
     q("system", "*STB?", "guide IEEE 488.2"),
     c("system", "*CLS", "guide IEEE 488.2"),

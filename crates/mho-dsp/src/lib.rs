@@ -1,6 +1,7 @@
 //! Signal processing on captured waveforms: amplitude/timing measurements, FFT,
 //! min/max decimation for display and file export.
 
+pub mod bode;
 pub mod decimate;
 pub mod decode;
 pub mod export;
@@ -8,6 +9,7 @@ pub mod fft;
 pub mod logic;
 pub mod measure;
 
+pub use bode::{BodeSummary, bode_csv, bode_summary, unwrap_phase};
 pub use decimate::{MinMax, minmax_decimate};
 pub use decode::{
     DecodeRow, DecodeTable, ScopePeak, decode_csv, parse_decode_table, parse_fft_peaks,

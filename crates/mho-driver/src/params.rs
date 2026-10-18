@@ -88,14 +88,50 @@ pub struct ParamSpec {
     pub help: &'static str,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Requires {
     Nothing,
     /// Logic analyzer hardware (`:SYST:MOD?` first field) and probe.
     LogicAnalyzer,
-    /// Function generator hardware (`:SYST:MOD?` second field, AFG option).
+    /// Function generator: `:SYST:MOD?` DG field, or a licensed AFG option that answered on
+    /// the instrument (see [`crate::Capabilities`]).
     FunctionGenerator,
+    /// Software option with this order code (`AUTOA`, `FlexA`, `AUDIOA`, `AEROA`).
+    Option(&'static str),
+}
+
+impl Requires {
+    /// Human-readable requirement for error messages.
+    pub fn describe(self) -> String {
+        match self {
+            Requires::Nothing => "nothing".into(),
+            Requires::LogicAnalyzer => "the logic analyzer".into(),
+            Requires::FunctionGenerator => "the function generator (AFG50/AFG100 option)".into(),
+            Requires::Option(code) => format!("option MHO900-{code}"),
+        }
+    }
+}
+
+/// [`Requires`] as exchanged over the API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Requirement {
+    Nothing,
+    LogicAnalyzer,
+    FunctionGenerator,
+    /// Order code of the software option, e.g. `FlexA`.
+    Option(String),
+}
+
+impl From<Requires> for Requirement {
+    fn from(r: Requires) -> Self {
+        match r {
+            Requires::Nothing => Requirement::Nothing,
+            Requires::LogicAnalyzer => Requirement::LogicAnalyzer,
+            Requires::FunctionGenerator => Requirement::FunctionGenerator,
+            Requires::Option(c) => Requirement::Option(c.into()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -253,6 +289,21 @@ const fn indexed(
         help,
     }
 }
+/// Sweep amplitude of the scope's Bode plot for one frequency range (`:BOD:VOLT <range>,<v>`).
+const fn bode_amp(name: &'static str, range: &'static str, help: &'static str) -> ParamSpec {
+    indexed(
+        name,
+        ":BOD:VOLT",
+        range,
+        &ParamKind::Real {
+            min: 0.02,
+            max: 10.0,
+            unit: "V",
+        },
+        help,
+    )
+}
+
 /// Math operands (reference waveforms REF1..10 are left out until REF is supported).
 const MATH_SRC: &[&str] = &[
     "CHANnel1", "CHANnel2", "CHANnel3", "CHANnel4", "MATH1", "MATH2", "MATH3",
@@ -263,6 +314,15 @@ const LINE_OR_OFF: &[&str] = &[
     "D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15", "OFF",
 ];
 const WHEN3: &[&str] = &["GREater", "LESS", "GLESs"];
+const COMPARE6: &[&str] = &[
+    "EQUal",
+    "NOTequal",
+    "GREaterthan",
+    "LESSthan",
+    "INRange",
+    "OUTRange",
+];
+const FLEX_BAUD: &[&str] = &["2500000", "5000000", "10000000"];
 
 pub const GROUPS: &[Group] = &[
     Group {
@@ -767,6 +827,178 @@ pub const GROUPS: &[Group] = &[
                 kind: ParamKind::Text { max_len: 20 },
                 help: "data value; the scope reports don't-care bits as X (e.g. XXXXXXXX)",
             },
+        ],
+    },
+    // ---- optional protocol triggers (FlexA, AUDIOA, AEROA) ----
+    Group {
+        id: "trigger.flexray",
+        title: "FlexRay trigger (option FlexA)",
+        select: Some(":TRIG:MODE FLEX"),
+        instances: None,
+        requires: Requires::Option("FlexA"),
+        params: &[
+            en("baud", ":TRIG:FLEX:BAUD", FLEX_BAUD, "bit rate"),
+            src("source", ":TRIG:FLEX:SOUR", true, "bus line"),
+            level("level", ":TRIG:FLEX:LEV", "threshold"),
+            en("channel", ":TRIG:FLEX:CH", &["A", "B"], "FlexRay channel"),
+            en(
+                "when",
+                ":TRIG:FLEX:WHEN",
+                &["FRAMe", "SYMBol", "ERRor", "TSS"],
+                "trigger condition",
+            ),
+            en(
+                "position",
+                ":TRIG:FLEX:POS",
+                &["TSS", "FSS", "FES", "DTS"],
+                "frame position (WHEN TSS)",
+            ),
+            en(
+                "frame",
+                ":TRIG:FLEX:FRAM",
+                &["NULL", "SYNC", "STAR", "ANY"],
+                "frame type (WHEN FRAMe)",
+            ),
+            en(
+                "symbol",
+                ":TRIG:FLEX:SYMB",
+                &["CAS", "WUS"],
+                "symbol (WHEN SYMBol)",
+            ),
+            en(
+                "error",
+                ":TRIG:FLEX:ERR",
+                &["HEAD", "TRAiler", "DECode", "ANY"],
+                "error type (WHEN ERRor)",
+            ),
+            en(
+                "define",
+                ":TRIG:FLEX:DEF",
+                &["CYCLe", "ID"],
+                "frame filter by cycle count or ID (WHEN FRAMe)",
+            ),
+            en("id_compare", ":TRIG:FLEX:IDC", COMPARE6, "ID comparison"),
+            int("min_id", ":TRIG:FLEX:MINID", 0, 1023, "lower/only ID"),
+            int("max_id", ":TRIG:FLEX:MAXID", 0, 1023, "upper ID (ranges)"),
+            en(
+                "cycle_compare",
+                ":TRIG:FLEX:CYCC",
+                COMPARE6,
+                "cycle count comparison",
+            ),
+            int(
+                "min_cycle",
+                ":TRIG:FLEX:MINCY",
+                0,
+                63,
+                "lower/only cycle count",
+            ),
+            int(
+                "max_cycle",
+                ":TRIG:FLEX:MAXCY",
+                0,
+                63,
+                "upper cycle count (ranges)",
+            ),
+        ],
+    },
+    Group {
+        id: "trigger.i2s",
+        title: "I2S trigger (option AUDIOA)",
+        select: Some(":TRIG:MODE IIS"),
+        instances: None,
+        requires: Requires::Option("AUDIOA"),
+        params: &[
+            src("clock", ":TRIG:IIS:SOUR:CLOC", true, "bit clock line"),
+            src(
+                "word_select",
+                ":TRIG:IIS:SOUR:WSEL",
+                true,
+                "word select line",
+            ),
+            src("data_source", ":TRIG:IIS:SOUR:DATA", true, "data line"),
+            level("clock_level", ":TRIG:IIS:CLEV", "clock threshold"),
+            level("ws_level", ":TRIG:IIS:SLEV", "word select threshold"),
+            level("data_level", ":TRIG:IIS:DLEV", "data threshold"),
+            en(
+                "clock_slope",
+                ":TRIG:IIS:CLOC:SLOP",
+                POL,
+                "sampling clock edge",
+            ),
+            en(
+                "alignment",
+                ":TRIG:IIS:ALIG",
+                &["IIS", "LJ", "RJ"],
+                "I2S, left or right justified",
+            ),
+            int("width", ":TRIG:IIS:WIDT", 4, 32, "word size in bits"),
+            int(
+                "user_width",
+                ":TRIG:IIS:UWID",
+                4,
+                32,
+                "compared bits (≤ width)",
+            ),
+            en(
+                "audio",
+                ":TRIG:IIS:AUD",
+                &["LEFT", "RIGHt", "EITHer"],
+                "audio channel",
+            ),
+            en("when", ":TRIG:IIS:WHEN", COMPARE6, "data comparison"),
+            int("data", ":TRIG:IIS:DATA", 0, (1u64 << 32) - 1, "data value"),
+        ],
+    },
+    Group {
+        id: "trigger.m1553",
+        title: "MIL-STD-1553 trigger (option AEROA)",
+        select: Some(":TRIG:MODE M1553"),
+        instances: None,
+        requires: Requires::Option("AEROA"),
+        params: &[
+            src("source", ":TRIG:M1553:SOUR", true, "bus line"),
+            en(
+                "when",
+                ":TRIG:M1553:WHEN",
+                &["SYNCbreak", "DATA", "CMD", "STATus", "ERRor"],
+                "trigger condition",
+            ),
+            en("polarity", ":TRIG:M1553:POL", POL, "signal polarity"),
+            level("upper_level", ":TRIG:M1553:ALEV", "upper threshold"),
+            level("lower_level", ":TRIG:M1553:BLEV", "lower threshold"),
+            en(
+                "window",
+                ":TRIG:M1553:WIND",
+                &["TA", "TB", "TAB"],
+                "which threshold the level controls adjust",
+            ),
+            en(
+                "sync",
+                ":TRIG:M1553:SYNC",
+                &["DATA", "STATus", "ALL"],
+                "sync type (WHEN SYNCbreak)",
+            ),
+            en(
+                "error",
+                ":TRIG:M1553:ERR",
+                &["SYNC", "ERR"],
+                "sync or parity error (WHEN ERRor)",
+            ),
+            en(
+                "data_compare",
+                ":TRIG:M1553:DATC",
+                COMPARE6,
+                "data comparison (WHEN DATA)",
+            ),
+            int("data", ":TRIG:M1553:DATV", 0, 65_535, "data word value"),
+            int(
+                "rta",
+                ":TRIG:M1553:DRTA",
+                0,
+                6,
+                "remote terminal address value",
+            ),
         ],
     },
     Group {
@@ -1641,14 +1873,29 @@ pub const GROUPS: &[Group] = &[
                 ],
                 "waveform",
             ),
-            real("frequency", ":SOUR{n}:FREQ", 1e-3, 100e6, "Hz", "frequency"),
+            real(
+                "frequency",
+                ":SOUR{n}:FREQ",
+                2e-3,
+                100e6,
+                "Hz",
+                "frequency (limit depends on waveform and AFG50/AFG100)",
+            ),
+            real(
+                "period",
+                ":SOUR{n}:PER",
+                1e-8,
+                500.0,
+                "s",
+                "period (1/frequency)",
+            ),
             real(
                 "amplitude",
                 ":SOUR{n}:VOLT:AMPL",
-                0.0,
-                10.0,
+                1e-3,
+                20.0,
                 "V",
-                "amplitude (Vpp)",
+                "amplitude (Vpp; max 10 V into 50 Ω, 20 V high-Z, halved above 50 MHz)",
             ),
             real(
                 "offset",
@@ -1656,8 +1903,10 @@ pub const GROUPS: &[Group] = &[
                 -10.0,
                 10.0,
                 "V",
-                "DC offset",
+                "DC offset (|offset| ≤ (Vmax − Vpp)/2)",
             ),
+            real("high", ":SOUR{n}:VOLT:HIGH", -10.0, 10.0, "V", "high level"),
+            real("low", ":SOUR{n}:VOLT:LOW", -10.0, 10.0, "V", "low level"),
             real("phase", ":SOUR{n}:PHAS", 0.0, 360.0, "°", "start phase"),
             real(
                 "duty",
@@ -1722,7 +1971,7 @@ pub const GROUPS: &[Group] = &[
             real(
                 "fm_deviation",
                 ":SOUR{n}:MOD:FM:DEV",
-                0.0,
+                2e-3,
                 100e6,
                 "Hz",
                 "FM deviation",
@@ -1785,19 +2034,34 @@ pub const GROUPS: &[Group] = &[
             real("start", ":BOD:STAR", 10.0, 3e6, "Hz", "start frequency"),
             real("stop", ":BOD:STOP", 100.0, 30e6, "Hz", "stop frequency"),
             int("points", ":BOD:POIN", 10, 100, "points per decade"),
-            indexed(
-                "amplitude",
-                ":BOD:VOLT",
-                "ALL",
-                &ParamKind::Real {
-                    min: 0.02,
-                    max: 10.0,
-                    unit: "V",
-                },
-                "sweep amplitude (all ranges)",
+            boolean(
+                "gain_curve",
+                ":BOD:GAIN:ENAB",
+                "show gain (set only while stopped)",
             ),
-            boolean("gain_curve", ":BOD:GAIN:ENAB", "show gain"),
-            boolean("phase_curve", ":BOD:PHAS:ENAB", "show phase"),
+            boolean(
+                "phase_curve",
+                ":BOD:PHASE:ENAB",
+                "show phase (set only while stopped)",
+            ),
+        ],
+    },
+    Group {
+        id: "bode.amplitude",
+        title: "Sweep amplitude of the scope's Bode plot, overall or per frequency range",
+        select: None,
+        instances: None,
+        requires: Requires::FunctionGenerator,
+        params: &[
+            bode_amp("all", "ALL", "one amplitude for the whole sweep"),
+            bode_amp("from_10hz", "10", "amplitude from 10 Hz"),
+            bode_amp("from_100hz", "100", "amplitude from 100 Hz"),
+            bode_amp("from_1khz", "1K", "amplitude from 1 kHz"),
+            bode_amp("from_10khz", "10K", "amplitude from 10 kHz"),
+            bode_amp("from_100khz", "100K", "amplitude from 100 kHz"),
+            bode_amp("from_1mhz", "1M", "amplitude from 1 MHz"),
+            bode_amp("from_10mhz", "10M", "amplitude from 10 MHz"),
+            bode_amp("from_25mhz", "25M", "amplitude from 25 MHz"),
         ],
     },
     // ---- protocol decoders (:BUS<n>) ----
@@ -1811,8 +2075,10 @@ pub const GROUPS: &[Group] = &[
             en(
                 "mode",
                 ":BUS{n}:MODE",
-                &["PARallel", "RS232", "SPI", "IIC", "LIN", "CAN"],
-                "decoder type (IIS/FLEXray/M1553 need options)",
+                &[
+                    "PARallel", "RS232", "SPI", "IIC", "LIN", "CAN", "IIS", "FLEXray", "M1553",
+                ],
+                "decoder type (IIS, FLEXray and M1553 need options)",
             ),
             boolean("display", ":BUS{n}:DISP", "decoder on/off"),
             en(
@@ -2025,6 +2291,126 @@ pub const GROUPS: &[Group] = &[
             int("baud", ":BUS{n}:LIN:BAUD", 2_400, 20_000_000, "baud rate"),
             boolean("parity", ":BUS{n}:LIN:PAR", "decode with parity bits"),
             threshold("threshold", "LIN", "threshold"),
+        ],
+    },
+    // ---- optional protocol decoders (AUTOA, FlexA, AUDIOA, AEROA) ----
+    Group {
+        id: "bus.canfd",
+        title: "CAN-FD data phase of the CAN decoder (option AUTOA)",
+        select: Some(":BUS{n}:MODE CAN;:BUS{n}:DISP ON"),
+        instances: Some((1, 4)),
+        requires: Requires::Option("AUTOA"),
+        params: &[
+            int(
+                "fd_baud",
+                ":BUS{n}:CAN:FDB",
+                1_000_000,
+                10_000_000,
+                "data phase bit rate",
+            ),
+            int(
+                "fd_sample_point",
+                ":BUS{n}:CAN:FDSP",
+                10,
+                90,
+                "data phase sample point (%)",
+            ),
+        ],
+    },
+    Group {
+        id: "bus.flexray",
+        title: "FlexRay decoder (option FlexA)",
+        select: Some(":BUS{n}:MODE FLEX;:BUS{n}:DISP ON"),
+        instances: Some((1, 4)),
+        requires: Requires::Option("FlexA"),
+        params: &[
+            src("source", ":BUS{n}:FLEX:SOUR", true, "bus line"),
+            en(
+                "signal",
+                ":BUS{n}:FLEX:STYP",
+                &["BP", "BM", "RT"],
+                "probed signal: BP, BM or RX/TX",
+            ),
+            en(
+                "channel",
+                ":BUS{n}:FLEX:CHAN",
+                &["A", "B"],
+                "FlexRay channel",
+            ),
+            en("baud", ":BUS{n}:FLEX:BAUD", FLEX_BAUD, "bit rate"),
+            int(
+                "sample_point",
+                ":BUS{n}:FLEX:SPO",
+                10,
+                90,
+                "sample point (%)",
+            ),
+            threshold("threshold", "FLEX", "threshold"),
+        ],
+    },
+    Group {
+        id: "bus.i2s",
+        title: "I2S decoder (option AUDIOA)",
+        select: Some(":BUS{n}:MODE IIS;:BUS{n}:DISP ON"),
+        instances: Some((1, 4)),
+        requires: Requires::Option("AUDIOA"),
+        params: &[
+            src("clock", ":BUS{n}:IIS:SOUR:CLOC", true, "bit clock line"),
+            src(
+                "word_select",
+                ":BUS{n}:IIS:SOUR:WSEL",
+                true,
+                "word select line",
+            ),
+            src("data_source", ":BUS{n}:IIS:SOUR:DATA", true, "data line"),
+            en(
+                "clock_slope",
+                ":BUS{n}:IIS:CLOC:SLOP",
+                POL,
+                "sampling clock edge",
+            ),
+            en(
+                "alignment",
+                ":BUS{n}:IIS:ALIG",
+                &["IIS", "LJ", "RJ"],
+                "I2S, left or right justified",
+            ),
+            int(
+                "word_size",
+                ":BUS{n}:IIS:RWID",
+                4,
+                32,
+                "transmitted word size (bits)",
+            ),
+            int(
+                "receive_width",
+                ":BUS{n}:IIS:REC",
+                4,
+                32,
+                "decoded bits per word",
+            ),
+            en(
+                "ws_low",
+                ":BUS{n}:IIS:WSL",
+                &["LEFT", "RIGHt"],
+                "channel while word select is low",
+            ),
+            en("endian", ":BUS{n}:IIS:END", MSB_LSB, "bit order"),
+            en("polarity", ":BUS{n}:IIS:POL", POL, "data polarity"),
+            threshold("clock_threshold", "I2SClk", "clock threshold"),
+            threshold("ws_threshold", "WS", "word select threshold"),
+            threshold("data_threshold", "DATA", "data threshold"),
+        ],
+    },
+    Group {
+        id: "bus.m1553",
+        title: "MIL-STD-1553 decoder (option AEROA)",
+        select: Some(":BUS{n}:MODE M1553;:BUS{n}:DISP ON"),
+        instances: Some((1, 4)),
+        requires: Requires::Option("AEROA"),
+        params: &[
+            src("source", ":BUS{n}:M1553:SOUR", true, "bus line"),
+            threshold("threshold", "1553", "threshold"),
         ],
     },
 ];
@@ -2330,7 +2716,7 @@ pub struct GroupInfo {
     pub title: String,
     /// Instance range, e.g. `[1, 4]` for decoders.
     pub instances: Option<(u8, u8)>,
-    pub requires: Requires,
+    pub requires: Requirement,
     /// All queries of this group were confirmed on the instrument.
     pub verified: bool,
     /// Hardware present (see `requires`).
@@ -2343,7 +2729,7 @@ pub fn describe(g: &Group, available: bool) -> GroupInfo {
         id: g.id.into(),
         title: g.title.into(),
         instances: g.instances,
-        requires: g.requires,
+        requires: g.requires.into(),
         verified: group_verified(g),
         available,
         params: g
@@ -2452,6 +2838,16 @@ mod tests {
                         p.node
                     );
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn option_requirements_name_known_options() {
+        for g in GROUPS {
+            if let Requires::Option(code) = g.requires {
+                assert!(crate::caps::known_option(code), "{}: {code}", g.id);
+                assert!(g.title.contains(code), "{}: title names the option", g.id);
             }
         }
     }

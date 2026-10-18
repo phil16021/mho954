@@ -18,8 +18,71 @@ const SCREEN_POINTS: usize = 1000;
 /// ADC codes per vertical division (matches the real scope's WORD scaling).
 const CODES_PER_DIV: f64 = 7500.0;
 const Y_REF: f64 = 32768.0;
+/// Options installed on the upgraded test scope (order codes).
+const SIM_LICENSED: &[&str] = &[
+    "BWU05T08", "RLU05", "AFG50", "AFG100", "AUTOA", "FlexA", "AUDIOA", "AEROA",
+];
 /// Corner frequency of the simulated device under test behind the function generator.
 pub const SIM_DUT_CORNER: f64 = 10e3;
+
+/// `(channel, property)` of a generator node, e.g. `:SOUR2:VOLT:AMPL` → `('2', "VOLT:AMPL")`.
+/// Table nodes (`:SOUR{n}:…`) give `'n'` as channel.
+fn afg_prop(node: &str) -> Option<(char, &str)> {
+    let rest = node.strip_prefix(":SOUR")?;
+    if let Some(prop) = rest.strip_prefix("{n}:") {
+        return Some(('n', prop));
+    }
+    let mut chars = rest.chars();
+    let n = chars.next().filter(|c| matches!(c, '1' | '2'))?;
+    Some((n, chars.as_str().strip_prefix(':')?))
+}
+
+/// Output of a simulated generator channel.
+#[derive(Debug, Clone)]
+struct AfgWave {
+    /// Short form of `:SOUR<n>:FUNC` (SIN, SQU, RAMP, DC, NOIS, …).
+    function: String,
+    frequency: f64,
+    /// Vpp.
+    amplitude: f64,
+    offset: f64,
+    /// Start phase in radians.
+    phase: f64,
+    /// Square duty cycle 0..1.
+    duty: f64,
+    /// Ramp symmetry 0..1.
+    symmetry: f64,
+}
+
+impl AfgWave {
+    fn value(&self, t: f64) -> f64 {
+        let a = self.amplitude / 2.0;
+        let cycles = self.frequency * t + self.phase / (2.0 * PI);
+        let x = cycles - cycles.floor();
+        let shape = match self.function.as_str() {
+            "SQU" => {
+                if x < self.duty {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
+            "RAMP" => {
+                let s = self.symmetry.clamp(1e-6, 1.0 - 1e-6);
+                if x < s {
+                    -1.0 + 2.0 * x / s
+                } else {
+                    1.0 - 2.0 * (x - s) / (1.0 - s)
+                }
+            }
+            "DC" => 0.0,
+            // Deterministic pseudo noise from the phase (no RNG state needed here).
+            "NOIS" => ((t * 1e9).sin() * 43758.5453).fract() * 2.0 - 1.0,
+            _ => (2.0 * PI * cycles).sin(),
+        };
+        self.offset + a * shape
+    }
+}
 
 #[derive(Debug, Clone)]
 struct SimChannel {
@@ -150,9 +213,13 @@ pub struct SimOptions {
     /// Otherwise the simulator is trusted with commands not yet verified on the instrument,
     /// so every feature can be tried without hardware.
     pub strict: bool,
-    /// Report logic analyzer and function generator hardware (`:SYST:MOD?`); option `noafg`
-    /// turns the generator off like on the test scope.
+    /// Report logic analyzer and function generator hardware (`:SYST:MOD?`) and the AFG
+    /// licenses; option `noafg` turns the generator off.
     pub afg: bool,
+    /// Report the options of the upgraded test scope as installed (BWU05T08, RLU05, AFG,
+    /// CAN-FD, FlexRay, I2S, MIL-STD-1553); option `noopt` reports none, like before the
+    /// upgrade.
+    pub licensed: bool,
     /// A logic probe is plugged in. Without one (option `noprobe`, like the test scope) the
     /// scope rejects D0..D15 as parallel decoder source with -200.
     pub la_probe: bool,
@@ -167,6 +234,7 @@ impl Default for SimOptions {
             hang_after: 5,
             strict: false,
             afg: true,
+            licensed: true,
             la_probe: true,
         }
     }
@@ -196,6 +264,7 @@ impl SimOptions {
                 "fullidn" => o.truncate_idn = false,
                 "strict" => o.strict = true,
                 "noafg" => o.afg = false,
+                "noopt" => o.licensed = false,
                 "noprobe" => o.la_probe = false,
                 "hang_after" => o.hang_after = v.parse().unwrap_or(o.hang_after),
                 _ => tracing::warn!("MHO954_SIM: unknown option {k:?}"),
@@ -390,18 +459,22 @@ impl SimTransport {
         let wall = self.now();
         let ch = self.state.ch[n - 1].clone();
         let noise_amp = ch.scale * 0.02;
-        let afg = self.afg_tone();
+        let gi = self.afg_wave(1);
+        let gii = self.afg_wave(2);
         (first..first + count)
             .map(|i| {
                 let t = i as f64 * x_inc + x_org;
-                let mut v = match (afg, n) {
-                    // Generator GI drives a first-order low-pass (fc = 10 kHz): CH1 sees its
-                    // input, CH2 its output.
-                    (Some((f, a)), 1) => a / 2.0 * (2.0 * PI * f * t).sin(),
-                    (Some((f, a)), 2) => {
-                        let r = f / SIM_DUT_CORNER;
+                let mut v = match (n, &gi, &gii) {
+                    // GI is cabled to CH1 and GII to CH2 (like the test bench). With GII off,
+                    // GI also drives a first-order low-pass (fc = 10 kHz) seen on CH2.
+                    (1, Some(w), _) => w.value(t),
+                    (2, _, Some(w)) => w.value(t),
+                    (2, Some(w), None) if w.function == "SIN" => {
+                        let r = w.frequency / SIM_DUT_CORNER;
                         let gain = 1.0 / (1.0 + r * r).sqrt();
-                        gain * a / 2.0 * (2.0 * PI * f * t - r.atan()).sin()
+                        let a = w.amplitude / 2.0;
+                        w.offset
+                            + gain * a * (2.0 * PI * w.frequency * t + w.phase - r.atan()).sin()
                     }
                     _ => Self::signal(n as u8, t, wall),
                 };
@@ -419,18 +492,58 @@ impl SimTransport {
             .collect()
     }
 
-    /// `(frequency, amplitude Vpp)` of generator GI while its output is on.
-    fn afg_tone(&self) -> Option<(f64, f64)> {
+    /// Keeps the generator's dependent values consistent after `hdr` was written:
+    /// frequency ↔ period, amplitude/offset ↔ high/low level.
+    fn afg_coupled(&mut self, hdr: &str) {
+        let Some((n, prop)) = afg_prop(hdr) else {
+            return;
+        };
+        let get = |p: &str, default: f64| {
+            self.params
+                .get(&format!(":SOUR{n}:{p}"))
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(default)
+        };
+        let derived: Vec<(&str, f64)> = match prop {
+            "FREQ" => vec![("PER", 1.0 / get("FREQ", 1e3))],
+            "PER" => vec![("FREQ", 1.0 / get("PER", 1e-3))],
+            "VOLT:AMPL" | "VOLT:OFFS" => {
+                let (a, o) = (get("VOLT:AMPL", 5.0), get("VOLT:OFFS", 0.0));
+                vec![("VOLT:HIGH", o + a / 2.0), ("VOLT:LOW", o - a / 2.0)]
+            }
+            "VOLT:HIGH" | "VOLT:LOW" => {
+                let (h, l) = (get("VOLT:HIGH", 2.5), get("VOLT:LOW", -2.5));
+                vec![("VOLT:AMPL", h - l), ("VOLT:OFFS", (h + l) / 2.0)]
+            }
+            _ => vec![],
+        };
+        for (p, v) in derived {
+            self.params
+                .insert(format!(":SOUR{n}:{p}"), format!("{v:E}"));
+        }
+    }
+
+    /// Waveform of generator `n` (1 = GI, 2 = GII) while its output is on.
+    fn afg_wave(&self, n: u8) -> Option<AfgWave> {
         if !self.opts.afg {
             return None;
         }
-        let on = self.param_or(":SOUR1:OUTP:STAT", "0");
+        let p = |prop: &str, default: &str| self.param_or(&format!(":SOUR{n}:{prop}"), default);
+        let num = |prop: &str, default: f64| p(prop, "").parse::<f64>().unwrap_or(default);
+        let on = p("OUTP:STAT", "0");
         if on != "ON" && on != "1" {
             return None;
         }
-        let f = self.param_or(":SOUR1:FREQ", "1000").parse().ok()?;
-        let a = self.param_or(":SOUR1:VOLT:AMPL", "1").parse().ok()?;
-        Some((f, a))
+        let function = p("FUNC", "SIN").to_ascii_uppercase();
+        Some(AfgWave {
+            function: crate::params::short_form(&function),
+            frequency: num("FREQ", 1000.0),
+            amplitude: num("VOLT:AMPL", 5.0),
+            offset: num("VOLT:OFFS", 0.0),
+            phase: num("PHAS", 0.0).to_radians(),
+            duty: num("FUNC:SQU:DUTY", 50.0) / 100.0,
+            symmetry: num("FUNC:RAMP:SYMM", 50.0) / 100.0,
+        })
     }
 
     fn math_index(src: &str) -> Option<u8> {
@@ -676,6 +789,21 @@ impl SimTransport {
 
     fn param_default(spec: &crate::params::ParamSpec) -> String {
         use crate::params::ParamKind::*;
+        // Generator defaults from guide 3.25: 1 kHz sine, 5 Vpp, 50 % duty/symmetry.
+        if let Some((_, prop)) = afg_prop(spec.node) {
+            let v = match prop {
+                "FREQ" => Some("1.000000E3"),
+                "PER" => Some("1.000000E-3"),
+                "VOLT:AMPL" => Some("5.000000E0"),
+                "VOLT:HIGH" => Some("2.500000E0"),
+                "VOLT:LOW" => Some("-2.500000E0"),
+                "FUNC:SQU:DUTY" | "FUNC:RAMP:SYMM" => Some("5.000000E1"),
+                _ => None,
+            };
+            if let Some(v) = v {
+                return v.into();
+            }
+        }
         match spec.kind {
             Real { unit: "s", .. } => "1.000000E-6".into(),
             Real { .. } if spec.node.ends_with(":SCAL") => "1.000000E0".into(),
@@ -815,6 +943,9 @@ impl SimTransport {
             },
             ":SYST:VERS" => "3.0".into(),
             ":SYST:MOD" => format!("1,{},0,0,0", u8::from(self.opts.afg)),
+            ":SOUR1:LOAD:ARB" | ":SOUR2:LOAD:ARB" if self.opts.afg => {
+                self.params.get(hdr).cloned().unwrap_or_default()
+            }
             ":LAN:STAT" => if self.state.lan.manual && self.state.lan.ip != "0.0.0.0" {
                 "CONFIGURED"
             } else {
@@ -835,11 +966,13 @@ impl SimTransport {
             ":LAN:DESC" => self.state.lan.description.clone(),
             ":LAN:VISA" => format!("TCPIP0::{}::INSTR", self.state.lan.ip),
             ":SYST:OPT:VAL" | ":SYST:OPT:STAT" => {
-                if OPTIONS.iter().any(|o| o.token.eq_ignore_ascii_case(args)) {
-                    "0".into()
-                } else {
+                let Some(o) = OPTIONS.iter().find(|o| o.token.eq_ignore_ascii_case(args)) else {
                     return false;
-                }
+                };
+                let installed = self.opts.licensed
+                    && SIM_LICENSED.contains(&o.code)
+                    && (self.opts.afg || !o.code.starts_with("AFG"));
+                u8::from(installed).to_string()
             }
             ":TRIG:STAT" => {
                 if !self.state.running {
@@ -1000,6 +1133,11 @@ impl SimTransport {
                 );
             } else {
                 self.params.insert(hdr.to_string(), args.trim().to_string());
+                self.afg_coupled(hdr);
+                if hdr == ":BOD:RUNS" {
+                    // The simulated Bode sweep finishes at once.
+                    self.params.insert(hdr.to_string(), "0".into());
+                }
             }
             return Ok(());
         }
@@ -1039,6 +1177,9 @@ impl SimTransport {
             "*RST" => {
                 *s = SimState::default();
                 self.params.clear();
+            }
+            ":SOUR1:LOAD:ARB" | ":SOUR2:LOAD:ARB" => {
+                self.params.insert(hdr.to_string(), args.trim().to_string());
             }
             // One-shot commands of `ops::COMMANDS` (save/load on the scope, resets, recording).
             h if crate::ops::COMMANDS

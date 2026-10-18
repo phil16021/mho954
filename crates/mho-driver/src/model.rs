@@ -427,6 +427,9 @@ pub struct OptionInfo {
     pub name: String,
     pub description: String,
     pub active: bool,
+    /// Included as standard on the MHO900 (no license, not queried).
+    #[serde(default)]
+    pub standard: bool,
 }
 
 /// Normalises a waveform/measurement source (`1`, `ch1`, `CHANnel1` → `CHAN1`, `math1` → `MATH1`,

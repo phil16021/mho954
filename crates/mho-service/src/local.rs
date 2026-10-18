@@ -15,8 +15,6 @@ pub struct LocalBackend {
     hub: LiveHub,
     allow_raw_scpi: bool,
     live_stop: tokio_util::sync::CancellationToken,
-    /// `:SYST:MOD?` is constant for a scope; cached after the first query.
-    modules: std::sync::Arc<std::sync::Mutex<Option<Modules>>>,
 }
 
 impl LocalBackend {
@@ -35,7 +33,6 @@ impl LocalBackend {
             hub,
             allow_raw_scpi,
             live_stop,
-            modules: Default::default(),
         }
     }
 
@@ -268,31 +265,54 @@ impl ScopeApi for LocalBackend {
         r
     }
 
+    async fn bode_native(&self, request: NativeBodeRequest) -> ApiResult<Vec<u8>> {
+        request.validate().map_err(ApiError::from)?;
+        let progress = self.hub.progress_reporter("Bode plot (scope)");
+        let r = self
+            .device
+            .call_mut(move |s| s.bode_native(&request, &mut |a, b| progress(a, b)))
+            .await;
+        self.hub.progress_done("Bode plot (scope)");
+        r
+    }
+
     async fn modules(&self) -> ApiResult<Modules> {
-        if let Some(m) = *self.modules.lock().unwrap() {
-            return Ok(m);
-        }
-        let m = self.device.call(|s| s.modules()).await?;
-        *self.modules.lock().unwrap() = Some(m);
-        Ok(m)
+        self.device
+            .call(|s| {
+                let c = s.capabilities()?;
+                Ok(Modules {
+                    logic_analyzer: c.logic_analyzer,
+                    function_generator: c.generator.is_some(),
+                })
+            })
+            .await
+    }
+
+    async fn capabilities(&self) -> ApiResult<Capabilities> {
+        self.device.call(|s| s.capabilities()).await
     }
 
     async fn groups(&self) -> ApiResult<Vec<mho_driver::params::GroupInfo>> {
-        let m = self.modules().await.unwrap_or_default();
-        let trusted = self
+        use mho_driver::params::{GROUPS, Requires, describe};
+        let (trusted, available) = self
             .device
-            .call(|s| Ok(s.trusts_unverified()))
+            .call(|s| {
+                let available = GROUPS
+                    .iter()
+                    .map(|g| s.requirement_met(g.requires))
+                    .collect::<Result<Vec<bool>>>()?;
+                Ok((s.trusts_unverified(), available))
+            })
             .await
-            .unwrap_or(false);
-        Ok(mho_driver::params::GROUPS
+            .unwrap_or_else(|_| {
+                let plain = GROUPS.iter().map(|g| g.requires == Requires::Nothing);
+                (false, plain.collect())
+            });
+        Ok(GROUPS
             .iter()
-            .map(|g| {
-                let available = match g.requires {
-                    mho_driver::params::Requires::Nothing => true,
-                    mho_driver::params::Requires::LogicAnalyzer => m.logic_analyzer,
-                    mho_driver::params::Requires::FunctionGenerator => m.function_generator,
-                };
-                let mut info = mho_driver::params::describe(g, available);
+            .zip(available)
+            .map(|(g, available)| {
+                let mut info = describe(g, available);
                 info.verified |= trusted;
                 info
             })

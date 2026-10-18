@@ -470,7 +470,11 @@ async fn rest_endpoints_success_and_errors() {
 
     // options: listing works; the simulator rejects every license → device error
     let opts: serde_json::Value = get(&format!("{v1}/options")).await.json().await.unwrap();
-    assert_eq!(opts.as_array().unwrap().len(), 11);
+    assert_eq!(
+        opts.as_array().unwrap().len(),
+        14,
+        "11 options + 3 standard"
+    );
     let r = c
         .post(format!("{v1}/options/install"))
         .json(&serde_json::json!({"key": "MHO900-BWU05T08@abc123"}))
@@ -1117,6 +1121,88 @@ async fn logic_analyzer_and_bode() {
         .await;
     assert_eq!(r["isError"], false, "{r}");
     assert!(text_of(&r).contains("phase_deg"));
+    shutdown.cancel();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn capabilities_generator_and_native_bode() {
+    let (url, shutdown) = start(false).await;
+    let v1 = format!("{url}/api/v1");
+    let c = reqwest::Client::new();
+    let caps: serde_json::Value = get(&format!("{v1}/capabilities"))
+        .await
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(caps["bandwidth_hz"], 800e6, "{caps}");
+    assert_eq!(caps["max_memory_depth"][0], 500_000_000u64, "{caps}");
+    assert_eq!(caps["generator"]["max_sine_hz"], 100e6, "{caps}");
+    // groups report the option requirement and availability
+    let groups: serde_json::Value = get(&format!("{v1}/groups")).await.json().await.unwrap();
+    let flex = groups
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["id"] == "bus.flexray")
+        .unwrap();
+    assert_eq!(flex["requires"], serde_json::json!({"option": "FlexA"}));
+    assert_eq!(flex["available"], true);
+
+    let put =
+        |n: u8, body: serde_json::Value| c.put(format!("{v1}/generator/{n}")).json(&body).send();
+    let r = put(
+        1,
+        serde_json::json!({"function": "SIN", "frequency": 2e3, "output": true}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(r.status(), 200);
+    let st: serde_json::Value = r.json().await.unwrap();
+    assert_eq!(
+        (st["output"].clone(), st["frequency"].clone()),
+        (true.into(), 2e3.into())
+    );
+    let r = put(1, serde_json::json!({"frequency": 200e6}))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 400);
+    let r = put(2, serde_json::json!({"load": "75"})).await.unwrap();
+    assert_eq!(r.status(), 400);
+
+    let r = c
+        .post(format!("{v1}/bode/native"))
+        .json(&serde_json::json!({"start": 100, "stop": 100e3}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), 200);
+    assert_eq!(r.headers()["content-type"], "image/png");
+    let bad = c
+        .post(format!("{v1}/bode/native"))
+        .json(&serde_json::json!({"start": 1e3, "stop": 5e3}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), 400, "start must be <= stop/10");
+
+    let mut m = Mcp::connect(&url).await;
+    let r = m.call("get_capabilities", serde_json::json!({})).await;
+    assert!(text_of(&r).contains("MIL-STD-1553"), "{r}");
+    let r = m
+        .call(
+            "set_generator",
+            serde_json::json!({"channel": 2, "function": "RAMP", "frequency": 1e3, "symmetry": 20}),
+        )
+        .await;
+    assert_eq!(r["isError"], false, "{r}");
+    assert!(text_of(&r).contains("RAMP"), "{r}");
+    let r = m
+        .call(
+            "bode_native",
+            serde_json::json!({"start": 100, "stop": 1e4}),
+        )
+        .await;
+    assert_eq!(r["content"][0]["type"], "image", "{}", r["isError"]);
     shutdown.cancel();
 }
 

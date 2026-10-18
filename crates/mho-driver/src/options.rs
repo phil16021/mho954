@@ -2,6 +2,9 @@
 //!
 //! `:SYSTem:OPTion:STATus?` expects its own tokens (`AUDio`, `CAN-FD`, ...), which differ from
 //! the order codes printed on licenses (`AUDIOA`, `AUTOA`, ...). Unknown tokens get no answer.
+//!
+//! [`STANDARD`] lists license names of other Rigol series that are standard on the MHO900;
+//! they have no status token and are never queried.
 
 pub struct OptionDef {
     /// Token for `:SYSTem:OPTion:STATus? <token>`.
@@ -66,5 +69,26 @@ pub const OPTIONS: &[OptionDef] = &[
         token: "BND",
         code: "BND",
         description: "Bundle: AFG100, AUDIOA, AUTOA, FlexA, AEROA",
+    },
+];
+
+/// A feature that other Rigol series sell as an option and the MHO900 includes as standard.
+pub struct StandardOption {
+    pub code: &'static str,
+    pub description: &'static str,
+}
+
+pub const STANDARD: &[StandardOption] = &[
+    StandardOption {
+        code: "EMBD",
+        description: "I2C and SPI trigger and decode (standard)",
+    },
+    StandardOption {
+        code: "COM",
+        description: "RS232/UART trigger and decode (standard)",
+    },
+    StandardOption {
+        code: "AUTO",
+        description: "CAN and LIN trigger and decode (standard)",
     },
 ];

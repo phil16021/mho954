@@ -8,10 +8,11 @@ use mho_scpi::{Scpi, TcpTransport, Transport, UsbTmcTransport, UsbTmcUserTranspo
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
+use crate::caps::Capabilities;
 use crate::error::{DriverError, Result};
 use crate::measure::{find_item, valid_value};
 use crate::model::*;
-use crate::options::OPTIONS;
+use crate::options::{OPTIONS, STANDARD};
 use crate::params::{self, ParamMap, ParamValue};
 use crate::sim::SimTransport;
 
@@ -110,7 +111,13 @@ pub struct Scope {
     chan_cache: [Option<ChannelState>; CHANNELS as usize],
     /// Send queries that were not verified on the instrument (simulator only).
     trust_unverified: bool,
+    /// Capabilities of this connection (options and modules do not change while connected).
+    caps: Option<Capabilities>,
 }
+
+/// Query whose answer shows that the built-in generator is enabled on the instrument
+/// (`:SYST:MOD?` reports no DG on the upgraded test scope, so the license alone is not proof).
+pub const GENERATOR_CANARY: &str = ":SOUR1:OUTP:STAT?";
 
 /// Maximum RAW record accepted (500 Mpts with the RLU-05 option).
 const MAX_RAW_POINTS: usize = 500_000_000;
@@ -176,6 +183,7 @@ impl Scope {
             measured: HashSet::new(),
             chan_cache: Default::default(),
             trust_unverified: false,
+            caps: None,
         })
     }
 
@@ -680,6 +688,13 @@ impl Scope {
     /// file path for save/load; destructive commands need `confirm`.
     pub fn run_command(&mut self, id: &str, arg: Option<&str>, confirm: bool) -> Result<()> {
         let c = crate::ops::find_command(id)?;
+        if !self.requirement_met(c.requires)? {
+            return Err(DriverError::Unsupported(format!(
+                "{} needs {}",
+                c.id,
+                c.requires.describe()
+            )));
+        }
         if c.confirm && !confirm {
             return Err(DriverError::Invalid(format!(
                 "{} must be confirmed explicitly ({})",
@@ -975,8 +990,10 @@ impl Scope {
 
     // ---- options ------------------------------------------------------------------------
 
+    /// Licensable options with their state, followed by the standard features that other
+    /// series sell as options (`standard`, not queried).
     pub fn options(&mut self) -> Result<Vec<OptionInfo>> {
-        OPTIONS
+        let mut out = OPTIONS
             .iter()
             .map(|o| {
                 Ok(OptionInfo {
@@ -985,9 +1002,17 @@ impl Scope {
                     active: self
                         .scpi
                         .query_bool(&format!(":SYST:OPT:STAT? {}", o.token))?,
+                    standard: false,
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        out.extend(STANDARD.iter().map(|o| OptionInfo {
+            name: o.code.to_string(),
+            description: o.description.to_string(),
+            active: true,
+            standard: true,
+        }));
+        Ok(out)
     }
 
     /// Installs a purchased option license (`<series>-<option>@<code>`, generated on
@@ -1007,6 +1032,7 @@ impl Scope {
             ));
         }
         self.scpi.write(&format!(":SYST:OPT:INST {key}"))?;
+        self.caps = None;
         self.scpi
             .with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
         self.check_errors()
@@ -1166,6 +1192,42 @@ impl Scope {
         })
     }
 
+    /// Model bandwidth with upgrades, memory limits, generator and licensed protocols. Queried
+    /// once per connection (about 13 verified queries), then cached.
+    pub fn capabilities(&mut self) -> Result<Capabilities> {
+        if let Some(c) = &self.caps {
+            return Ok(c.clone());
+        }
+        let options = self.options()?;
+        let modules = self.modules()?;
+        let confirmed = self.may_query(GENERATOR_CANARY);
+        let c = Capabilities::derive(&self.idn, &options, modules, confirmed);
+        self.caps = Some(c.clone());
+        Ok(c)
+    }
+
+    /// `true` if the hardware or option a group needs is present.
+    pub fn requirement_met(&mut self, r: params::Requires) -> Result<bool> {
+        Ok(match r {
+            params::Requires::Nothing => true,
+            params::Requires::LogicAnalyzer => self.capabilities()?.logic_analyzer,
+            params::Requires::FunctionGenerator => self.capabilities()?.generator.is_some(),
+            params::Requires::Option(code) => self.capabilities()?.has_option(code),
+        })
+    }
+
+    fn ensure_available(&mut self, g: &params::Group) -> Result<()> {
+        if self.requirement_met(g.requires)? {
+            Ok(())
+        } else {
+            Err(DriverError::Unsupported(format!(
+                "{} needs {} (see `mho954 caps`)",
+                g.id,
+                g.requires.describe()
+            )))
+        }
+    }
+
     /// Reads all parameters of a settings group. Refuses groups whose queries have not been
     /// confirmed on the instrument unless `allow_unverified` (an unknown query blocks the scope).
     pub fn group_get(
@@ -1176,6 +1238,7 @@ impl Scope {
     ) -> Result<ParamMap> {
         let g = params::find_group(id)?;
         let n = check_instance(g, instance)?;
+        self.ensure_available(g)?;
         if !allow_unverified && !self.trust_unverified && !params::group_verified(g) {
             return Err(DriverError::Unsupported(format!(
                 "{} has not been verified on this instrument yet (run `mho954 verify {}`)",
@@ -1220,6 +1283,17 @@ impl Scope {
     ) -> Result<Option<ParamMap>> {
         let g = params::find_group(id)?;
         let n = check_instance(g, instance)?;
+        self.ensure_available(g)?;
+        if g.id == "afg"
+            && let Some(gen_caps) = self.capabilities()?.generator
+        {
+            let current = if self.trust_unverified || params::group_verified(g) {
+                Some(self.group_get(id, instance, false)?)
+            } else {
+                None
+            };
+            crate::generator::check_update(&gen_caps, values, current.as_ref())?;
+        }
         let mut cmds = Vec::new();
         for (name, v) in values {
             let spec = g.params.iter().find(|p| p.name == name).ok_or_else(|| {

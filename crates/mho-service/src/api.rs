@@ -180,13 +180,17 @@ pub trait ScopeApi: Send + Sync + 'static {
     async fn run_command(&self, id: String, request: CommandRequest) -> ApiResult<()>;
     /// Digital channels D0..D15 through decoder `bus` (needs the logic probe).
     async fn logic_capture(&self, bus: u8) -> ApiResult<mho_driver::LogicCapture>;
+    /// Runs the scope's own Bode plot; returns a screenshot of the result (PNG).
+    async fn bode_native(&self, request: mho_driver::NativeBodeRequest) -> ApiResult<Vec<u8>>;
     /// Software Bode sweep with the built-in function generator (AFG option).
     async fn bode_sweep(
         &self,
         request: mho_driver::BodeRequest,
     ) -> ApiResult<Vec<mho_driver::BodePoint>>;
-    /// Hardware modules (logic analyzer, function generator).
+    /// Hardware modules (logic analyzer, function generator incl. a licensed AFG).
     async fn modules(&self) -> ApiResult<mho_driver::Modules>;
+    /// Effective bandwidth, memory limits, generator and licensed protocol options.
+    async fn capabilities(&self) -> ApiResult<mho_driver::Capabilities>;
     /// Catalogue of table-driven settings groups (trigger types, decoders, …).
     async fn groups(&self) -> ApiResult<Vec<GroupInfo>>;
     /// Reads a settings group (only groups verified on the instrument).
@@ -200,6 +204,44 @@ pub trait ScopeApi: Send + Sync + 'static {
         values: ParamMap,
         activate: bool,
     ) -> ApiResult<Option<ParamMap>>;
+    /// Changes generator channel `channel` (1 = GI, 2 = GII): waveform settings, then
+    /// modulation, and the output last (first when switching it off). Returns the channel's
+    /// state if group `afg` may be read.
+    async fn set_generator(
+        &self,
+        channel: u8,
+        update: mho_driver::GeneratorUpdate,
+    ) -> ApiResult<Option<ParamMap>> {
+        use mho_driver::params::ParamValue;
+        let settings = update.settings()?;
+        let modulation = update.modulation_settings()?;
+        let output = |on: bool| {
+            let mut m = ParamMap::new();
+            m.insert("output".into(), ParamValue::Bool(on));
+            m
+        };
+        let mut state = None;
+        if update.output == Some(false) {
+            state = self
+                .group_set("afg".into(), Some(channel), output(false), false)
+                .await?;
+        }
+        if !settings.is_empty() {
+            state = self
+                .group_set("afg".into(), Some(channel), settings, false)
+                .await?;
+        }
+        if !modulation.is_empty() {
+            self.group_set("afg.modulation".into(), Some(channel), modulation, false)
+                .await?;
+        }
+        if update.output == Some(true) {
+            state = self
+                .group_set("afg".into(), Some(channel), output(true), false)
+                .await?;
+        }
+        Ok(state)
+    }
     async fn network(&self) -> ApiResult<NetworkState>;
     async fn set_network(&self, update: NetworkUpdate) -> ApiResult<NetworkState>;
     async fn live_config(&self) -> ApiResult<LiveConfig>;

@@ -4,7 +4,9 @@
 //! emulates the instrument for development and tests without hardware.
 
 pub mod analysis;
+pub mod caps;
 mod error;
+pub mod generator;
 pub mod measure;
 pub mod model;
 pub mod ops;
@@ -14,8 +16,10 @@ mod scope;
 pub mod sim;
 pub mod verify;
 
-pub use analysis::{BodePoint, BodeRequest, LogicCapture};
+pub use analysis::{BodePoint, BodeRequest, LogicCapture, NativeBodeRequest};
+pub use caps::{Capabilities, GeneratorCaps};
 pub use error::{DriverError, Result};
+pub use generator::GeneratorUpdate;
 pub use measure::{MEASURE_ITEMS, MeasureItem, find_item};
 pub use model::*;
 pub use scope::{Connection, Scope};

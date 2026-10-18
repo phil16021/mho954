@@ -133,6 +133,25 @@ pub const READOUTS: &[Readout] = &[
         restore: &[],
         items: &[int("done", ":SAVE:STAT?")],
     },
+    Readout {
+        id: "afg.arb",
+        title: "Arbitrary waveform files last loaded into GI and GII",
+        guard: None,
+        setup: &[],
+        restore: &[],
+        items: &[
+            ReadItem {
+                name: "gi",
+                query: ":SOUR1:LOAD:ARB?",
+                kind: ReadKind::Text,
+            },
+            ReadItem {
+                name: "gii",
+                query: ":SOUR2:LOAD:ARB?",
+                kind: ReadKind::Text,
+            },
+        ],
+    },
 ];
 
 /// Argument of a one-shot command.
@@ -158,6 +177,7 @@ pub struct Command {
     pub arg: CommandArg,
     /// Destructive: only with explicit confirmation.
     pub confirm: bool,
+    pub requires: params::Requires,
 }
 
 const fn cmd(id: &'static str, command: &'static str, title: &'static str) -> Command {
@@ -167,6 +187,7 @@ const fn cmd(id: &'static str, command: &'static str, title: &'static str) -> Co
         command,
         arg: CommandArg::None,
         confirm: false,
+        requires: params::Requires::Nothing,
     }
 }
 
@@ -182,8 +203,13 @@ const fn save(
         command,
         arg: CommandArg::Path { extensions },
         confirm: false,
+        requires: params::Requires::Nothing,
     }
 }
+
+/// Arbitrary waveform files for the generator (the guide's example is a CSV file; there is
+/// no SCPI upload, copy the file to the scope or a USB stick first).
+const ARB_FILES: &[&str] = &["csv", "arb"];
 
 pub const COMMANDS: &[Command] = &[
     save(
@@ -256,6 +282,7 @@ pub const COMMANDS: &[Command] = &[
         command: ":REF:SAVE",
         arg: CommandArg::Index { min: 1, max: 10 },
         confirm: false,
+        requires: params::Requires::Nothing,
     },
     Command {
         id: "ref.reset",
@@ -263,17 +290,47 @@ pub const COMMANDS: &[Command] = &[
         command: ":REF:RES",
         arg: CommandArg::Index { min: 1, max: 10 },
         confirm: false,
+        requires: params::Requires::Nothing,
     },
     cmd("record.start", ":REC:STAR ON", "start recording"),
     cmd("record.stop", ":REC:STAR OFF", "stop recording"),
     cmd("record.play", ":REC:PLAY ON", "play back the recording"),
     cmd("record.pause", ":REC:PLAY OFF", "stop playback"),
     Command {
+        id: "afg.align_phase",
+        title: "restart GI and GII with their set frequency and phase (align phase)",
+        command: ":SOUR1:PHAS:SYNC",
+        arg: CommandArg::None,
+        confirm: false,
+        requires: params::Requires::FunctionGenerator,
+    },
+    Command {
+        id: "afg1.load_arb",
+        title: "load an arbitrary waveform file stored on the scope into GI (function ARB)",
+        command: ":SOUR1:LOAD:ARB",
+        arg: CommandArg::Path {
+            extensions: ARB_FILES,
+        },
+        confirm: false,
+        requires: params::Requires::FunctionGenerator,
+    },
+    Command {
+        id: "afg2.load_arb",
+        title: "load an arbitrary waveform file stored on the scope into GII (function ARB)",
+        command: ":SOUR2:LOAD:ARB",
+        arg: CommandArg::Path {
+            extensions: ARB_FILES,
+        },
+        confirm: false,
+        requires: params::Requires::FunctionGenerator,
+    },
+    Command {
         id: "reset",
         title: "factory default settings (*RST); back up the setup first",
         command: "*RST",
         arg: CommandArg::None,
         confirm: true,
+        requires: params::Requires::Nothing,
     },
 ];
 

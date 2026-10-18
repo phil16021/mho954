@@ -318,8 +318,17 @@ impl ScopeApi for RemoteBackend {
         self.send(Method::POST, "/bode", &request).await
     }
 
+    async fn bode_native(&self, request: NativeBodeRequest) -> ApiResult<Vec<u8>> {
+        self.bytes(self.req(Method::POST, "/bode/native").json(&request))
+            .await
+    }
+
     async fn modules(&self) -> ApiResult<Modules> {
         self.get("/modules").await
+    }
+
+    async fn capabilities(&self) -> ApiResult<Capabilities> {
+        self.get("/capabilities").await
     }
 
     async fn groups(&self) -> ApiResult<Vec<mho_driver::params::GroupInfo>> {

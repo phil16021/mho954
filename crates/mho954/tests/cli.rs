@@ -266,8 +266,39 @@ fn logic_and_bode() {
     );
     assert!(out.contains("3 points"), "{out}");
     let text = std::fs::read_to_string(&csv).unwrap();
+    // simulated low-pass: corner at 10 kHz, summary first
+    assert!(text.starts_with("# corner_3db_hz: "), "{text}");
     assert!(
-        text.starts_with("frequency_hz,gain_db,phase_deg\n1000,"),
+        text.contains("frequency_hz,gain_db,phase_deg,phase_unwrapped_deg\n1000,"),
         "{text}"
     );
+    assert!(out.contains("-3 dB at"), "{out}");
+    // scope-native Bode plot: screenshot
+    let png = d.path().join("bode.png");
+    let out = stdout(
+        cli(d.path())
+            .args(["bode", "--native", "--start", "100", "--stop", "100k", "-o"])
+            .arg(&png),
+    );
+    assert!(out.contains("screenshot written"), "{out}");
+    assert!(std::fs::read(&png).unwrap().starts_with(b"\x89PNG"));
+}
+
+#[test]
+fn generator_and_capabilities() {
+    let d = tempfile::tempdir().unwrap();
+    let caps = stdout(cli(d.path()).arg("caps"));
+    assert!(caps.contains("800 MHz") && caps.contains("500M"), "{caps}");
+    assert!(caps.contains("FlexRay"), "{caps}");
+    let out = stdout(cli(d.path()).args([
+        "afg", "2", "--func", "squ", "--freq", "1k", "--ampl", "1", "--duty", "25", "--on",
+    ]));
+    assert!(
+        out.contains("SQU") && out.contains("output         true"),
+        "{out}"
+    );
+    let err = stderr_of_failure(cli(d.path()).args(["afg", "1", "--func", "ramp", "--freq", "5M"]));
+    assert!(err.contains("RAMP limit"), "{err}");
+    let opts = stdout(cli(d.path()).arg("options"));
+    assert!(opts.contains("[s] EMBD"), "{opts}");
 }

@@ -223,3 +223,112 @@ fn bode_sweep_of_simulated_low_pass() {
         Err(DriverError::Invalid(_))
     ));
 }
+
+fn sim(opts: mho_driver::SimOptions) -> Scope {
+    // `from_transport` applies the hardware gate; tests that read unverified groups use
+    // `Scope::open(&Connection::Sim)` instead.
+    Scope::from_transport(Box::new(SimTransport::with_options(opts))).unwrap()
+}
+
+#[test]
+fn capabilities_follow_options_and_modules() {
+    // Default simulator = the upgraded test scope.
+    let c = sim(Default::default()).capabilities().unwrap();
+    assert_eq!(c.bandwidth_hz, Some(800e6));
+    assert_eq!(c.memory_limit(1), 500_000_000);
+    assert_eq!(c.generator.as_ref().unwrap().max_sine_hz, 100e6);
+    assert_eq!(c.protocols.len(), 4);
+    // Before the upgrade.
+    let mut plain = sim(mho_driver::SimOptions {
+        licensed: false,
+        ..Default::default()
+    });
+    let c = plain.capabilities().unwrap();
+    assert_eq!(
+        (c.bandwidth_hz, c.memory_limit(1)),
+        (Some(500e6), 100_000_000)
+    );
+    assert!(c.protocols.is_empty());
+    // Option groups are refused without their license, for reading and writing.
+    let mut v = ParamMap::new();
+    v.insert("baud".into(), ParamValue::Text("10000000".into()));
+    for r in [
+        plain.group_get("bus.flexray", Some(1), true).map(|_| ()),
+        plain
+            .group_set("bus.flexray", Some(1), &v, true)
+            .map(|_| ()),
+    ] {
+        assert!(matches!(r, Err(DriverError::Unsupported(m)) if m.contains("FlexA")));
+    }
+    // DG field 0 and no AFG license: no generator, its commands are refused too.
+    let mut noafg = sim(mho_driver::SimOptions {
+        afg: false,
+        ..Default::default()
+    });
+    assert!(noafg.capabilities().unwrap().generator.is_none());
+    assert!(matches!(
+        noafg.run_command("afg.align_phase", None, false),
+        Err(DriverError::Unsupported(_))
+    ));
+}
+
+#[test]
+fn generator_limits_and_outputs() {
+    let mut s = Scope::open(&Connection::Sim).unwrap();
+    let set = |s: &mut Scope, n: u8, kv: &[(&str, ParamValue)]| {
+        let m: ParamMap = kv.iter().map(|(k, v)| (k.to_string(), v.clone())).collect();
+        s.group_set("afg", Some(n), &m, false)
+    };
+    use ParamValue::*;
+    // Square wave limit (20 MHz with AFG100) comes from the current function as well.
+    set(&mut s, 1, &[("function", Text("SQU".into()))]).unwrap();
+    assert!(matches!(
+        set(&mut s, 1, &[("frequency", Real(30e6))]),
+        Err(DriverError::Invalid(m)) if m.contains("SQU")
+    ));
+    // GI 1 kHz sine 2 Vpp on CH1, GII 5 kHz square on CH2 (the bench cabling).
+    set(
+        &mut s,
+        1,
+        &[
+            ("function", Text("SIN".into())),
+            ("frequency", Real(1e3)),
+            ("amplitude", Real(2.0)),
+            ("output", Bool(true)),
+        ],
+    )
+    .unwrap();
+    set(
+        &mut s,
+        2,
+        &[
+            ("function", Text("SQU".into())),
+            ("frequency", Real(5e3)),
+            ("amplitude", Real(1.0)),
+            ("offset", Real(0.5)),
+            ("output", Bool(true)),
+        ],
+    )
+    .unwrap();
+    s.set_timebase(&mho_driver::TimebaseUpdate {
+        scale: Some(200e-6),
+        offset: Some(0.0),
+        ..Default::default()
+    })
+    .unwrap();
+    let range = |s: &mut Scope, src: &str| {
+        let v = s.screen_waveform(src, None).unwrap().volts();
+        let max = v.iter().cloned().fold(f64::MIN, f64::max);
+        let min = v.iter().cloned().fold(f64::MAX, f64::min);
+        (min, max)
+    };
+    let (lo, hi) = range(&mut s, "CHAN1");
+    assert!((hi - lo - 2.0).abs() < 0.15, "GI {lo}..{hi}");
+    let (lo, hi) = range(&mut s, "CHAN2");
+    assert!(
+        lo > -0.1 && (hi - 1.0).abs() < 0.1,
+        "GII square 0..1 V: {lo}..{hi}"
+    );
+    let st = s.group_get("afg", Some(2), false).unwrap();
+    assert_eq!(st["period"], ParamValue::Real(2e-4));
+}

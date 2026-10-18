@@ -3,7 +3,7 @@ use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, post, put};
 use mho_driver::params::{GroupInfo, ParamMap};
 use mho_driver::*;
 use mho_dsp::{Measurements, SpectrumPeak, Window};
@@ -78,6 +78,8 @@ pub fn routes() -> Router {
         .route("/live", get(live_get).put(live_put))
         .route("/network", get(network).put(set_network))
         .route("/modules", get(modules))
+        .route("/capabilities", get(capabilities))
+        .route("/generator/{n}", put(set_generator))
         .route("/measure/stats", get(measure_stats))
         .route("/measure/actions/{action}", post(measure_action))
         .route("/counter", get(counter))
@@ -90,6 +92,7 @@ pub fn routes() -> Router {
         .route("/commands/{id}", post(run_command))
         .route("/logic/{bus}", get(logic))
         .route("/bode", post(bode))
+        .route("/bode/native", post(bode_native))
         .route("/groups", get(groups))
         .route("/groups/{id}", get(group_get).put(group_set))
         .route("/openapi.json", get(openapi_json))
@@ -136,6 +139,8 @@ pub fn doc_routes() -> Router {
         network,
         set_network,
         modules,
+        capabilities,
+        set_generator,
         groups,
         group_get,
         group_set,
@@ -150,7 +155,8 @@ pub fn doc_routes() -> Router {
         commands,
         run_command,
         logic,
-        bode
+        bode,
+        bode_native
     ),
     components(schemas(ApiError, ErrorKind))
 )]
@@ -551,6 +557,26 @@ async fn modules(State(s): State<AppState>) -> HttpResult<Json<Modules>> {
     Ok(Json(s.backend.modules().await?))
 }
 
+/// What this scope can do: effective bandwidth (with upgrades), memory limits per channel
+/// count, function generator, licensed protocol options.
+#[utoipa::path(get, path = "/api/v1/capabilities", responses((status = 200, body = Capabilities)))]
+async fn capabilities(State(s): State<AppState>) -> HttpResult<Json<Capabilities>> {
+    Ok(Json(s.backend.capabilities().await?))
+}
+
+/// Changes generator channel 1 (GI) or 2 (GII); only given fields change, the output is
+/// switched last. Returns the channel's settings once group `afg` is verified, else `null`.
+#[utoipa::path(put, path = "/api/v1/generator/{n}", request_body = GeneratorUpdate,
+    params(("n" = u8, Path, description = "1 = GI, 2 = GII")),
+    responses((status = 200, body = Option<ParamMap>)))]
+async fn set_generator(
+    State(s): State<AppState>,
+    Path(n): Path<u8>,
+    Json(u): Json<GeneratorUpdate>,
+) -> HttpResult<Json<Option<ParamMap>>> {
+    Ok(Json(s.backend.set_generator(n, u).await?))
+}
+
 /// Catalogue of settings groups (trigger types, decoders, math, …) with parameter ranges,
 /// hardware availability and whether the group was verified on the instrument.
 #[utoipa::path(get, path = "/api/v1/groups", responses((status = 200, body = Vec<GroupInfo>)))]
@@ -742,6 +768,18 @@ async fn bode(
     Json(r): Json<mho_driver::BodeRequest>,
 ) -> HttpResult<Json<Vec<mho_driver::BodePoint>>> {
     Ok(Json(s.backend.bode_sweep(r).await?))
+}
+
+/// Runs the scope's own Bode plot (`:BODeplot`, AFG option) and returns a screenshot of the
+/// finished plot. The scope has no command to read the curve; use `/bode` for numbers.
+#[utoipa::path(post, path = "/api/v1/bode/native", request_body = mho_driver::NativeBodeRequest,
+    responses((status = 200, content_type = "image/png", description = "screenshot")))]
+async fn bode_native(
+    State(s): State<AppState>,
+    Json(r): Json<mho_driver::NativeBodeRequest>,
+) -> HttpResult<Response> {
+    let png = s.backend.bode_native(r).await?;
+    Ok(([(header::CONTENT_TYPE, "image/png")], png).into_response())
 }
 
 /// Digital voltmeter reading (enable it via group `dvm`).

@@ -9,6 +9,7 @@ use utoipa::ToSchema;
 
 use crate::error::{DriverError, Result};
 use crate::model::{Action, ChannelUpdate, TimebaseUpdate, TriggerSweep, TriggerUpdate};
+use crate::params::{ParamMap, ParamValue};
 use crate::scope::Scope;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -40,6 +41,10 @@ pub struct BodeRequest {
     pub amplitude: f64,
     /// Wait after each frequency step.
     pub settle_ms: u64,
+    /// Acquisitions averaged per frequency (complex mean of output/input), 1..=16.
+    pub averages: u32,
+    /// Load the generator expects: `highz` (default) or `50`.
+    pub load: Option<String>,
 }
 
 impl Default for BodeRequest {
@@ -53,7 +58,75 @@ impl Default for BodeRequest {
             points: 31,
             amplitude: 1.0,
             settle_ms: 100,
+            averages: 1,
+            load: None,
         }
+    }
+}
+
+/// Bode plot run by the scope itself (`:BODeplot`). The scope shows the result on screen
+/// only; it has no command to read the curve back.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+#[serde(default)]
+pub struct NativeBodeRequest {
+    /// Channel at the DUT input.
+    pub input: u8,
+    /// Channel at the DUT output.
+    pub output: u8,
+    /// Hz, 10 Hz..3 MHz, at most stop/10.
+    pub start: f64,
+    /// Hz, 100 Hz..30 MHz.
+    pub stop: f64,
+    /// Points per decade, 10..=100.
+    pub points_per_decade: u32,
+    /// Sweep amplitude (all ranges), 0.02..=10 V.
+    pub amplitude: f64,
+    /// Linear instead of logarithmic frequency spacing.
+    pub linear: bool,
+    /// Give up after this many seconds.
+    pub timeout_s: u64,
+}
+
+impl Default for NativeBodeRequest {
+    fn default() -> Self {
+        NativeBodeRequest {
+            input: 1,
+            output: 2,
+            start: 100.0,
+            stop: 1e6,
+            points_per_decade: 10,
+            amplitude: 0.2,
+            linear: false,
+            timeout_s: 300,
+        }
+    }
+}
+
+impl NativeBodeRequest {
+    pub fn validate(&self) -> Result<()> {
+        let bad = |m: &str| Err(DriverError::Invalid(m.into()));
+        if !(1..=4).contains(&self.input) || !(1..=4).contains(&self.output) {
+            return bad("channels must be 1..=4");
+        }
+        if self.input == self.output {
+            return bad("input and output must be different channels");
+        }
+        if !(10.0..=3e6).contains(&self.start) || !(100.0..=30e6).contains(&self.stop) {
+            return bad("need 10 Hz <= start <= 3 MHz and 100 Hz <= stop <= 30 MHz");
+        }
+        if self.start > self.stop / 10.0 {
+            return bad("the scope needs start <= stop/10");
+        }
+        if !(10..=100).contains(&self.points_per_decade) {
+            return bad("points_per_decade must be 10..=100");
+        }
+        if !(0.02..=10.0).contains(&self.amplitude) {
+            return bad("amplitude must be 0.02..=10 V");
+        }
+        if !(1..=3600).contains(&self.timeout_s) {
+            return bad("timeout_s must be 1..=3600");
+        }
+        Ok(())
     }
 }
 
@@ -94,8 +167,41 @@ impl BodeRequest {
         if !(0.01..=10.0).contains(&self.amplitude) {
             return bad("amplitude must be 0.01..=10 Vpp".into());
         }
+        if !(1..=16).contains(&self.averages) {
+            return bad("averages must be 1..=16".into());
+        }
+        self.fifty_ohm()?;
         if self.settle_ms > 10_000 {
             return bad("settle_ms at most 10000".into());
+        }
+        Ok(())
+    }
+
+    /// `true` for a 50 Ω load, `false` for high-Z.
+    pub fn fifty_ohm(&self) -> Result<bool> {
+        match self.load.as_deref().map(|l| l.trim().to_ascii_lowercase()) {
+            None => Ok(false),
+            Some(l) if matches!(l.as_str(), "highz" | "high-z" | "hiz" | "omeg") => Ok(false),
+            Some(l) if matches!(l.as_str(), "50" | "fifty" | "fift") => Ok(true),
+            Some(l) => Err(DriverError::Invalid(format!("load {l:?}: use highz or 50"))),
+        }
+    }
+
+    /// Checks the request against this scope's generator (frequency and amplitude limits).
+    pub fn check_generator(&self, g: &crate::GeneratorCaps) -> Result<()> {
+        let min = crate::generator::min_frequency(g);
+        if self.start < min || self.stop > g.max_sine_hz {
+            return Err(DriverError::Invalid(format!(
+                "sweep {}..{} Hz outside the generator's sine range {min}..{} Hz",
+                self.start, self.stop, g.max_sine_hz
+            )));
+        }
+        let max = crate::generator::max_amplitude(self.stop, self.fifty_ohm()?);
+        if self.amplitude > max {
+            return Err(DriverError::Invalid(format!(
+                "amplitude {} Vpp above {max} Vpp at {} Hz for this load",
+                self.amplitude, self.stop
+            )));
         }
         Ok(())
     }
@@ -224,18 +330,20 @@ impl Scope {
     /// acquisition per step and compares the tone on the input and output channels (single-bin
     /// DFT on the screen waveforms, so both come from the same acquisition). Vertical scales
     /// are adjusted per step; timebase, scales, trigger sweep and run state are restored, the
-    /// generator output is switched off at the end.
+    /// generator output is switched off at the end (its modulation stays off).
     pub fn bode_sweep(
         &mut self,
         req: &BodeRequest,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<Vec<BodePoint>> {
         req.validate()?;
-        if !self.modules()?.function_generator {
+        let Some(gen_caps) = self.capabilities()?.generator else {
             return Err(DriverError::Unsupported(
-                "this scope has no function generator (AFG option)".into(),
+                "this scope has no usable function generator (AFG option; see `mho954 caps`)"
+                    .into(),
             ));
-        }
+        };
+        req.check_generator(&gen_caps)?;
         let tb = self.timebase()?;
         let trig = self.trigger()?;
         let running = self.trigger_status()? != "STOP";
@@ -245,8 +353,11 @@ impl Scope {
         ];
         let g = req.generator;
         self.drain_errors()?;
+        let load = if req.fifty_ohm()? { "FIFT" } else { "OMEG" };
         for c in [
+            format!(":SOUR{g}:MOD:STAT OFF"),
             format!(":SOUR{g}:FUNC SIN"),
+            format!(":SOUR{g}:IMP {load}"),
             format!(":SOUR{g}:VOLT:AMPL {:e}", req.amplitude),
             format!(":SOUR{g}:VOLT:OFFS 0"),
             format!(":SOUR{g}:OUTP:STAT ON"),
@@ -291,6 +402,65 @@ impl Scope {
         Ok(points)
     }
 
+    /// Runs the scope's own Bode plot and returns a screenshot of the finished plot (PNG).
+    /// Polls `:BOD:RUNS?` until the sweep stops, which must be verified on the instrument.
+    pub fn bode_native(
+        &mut self,
+        req: &NativeBodeRequest,
+        progress: &mut dyn FnMut(usize, usize),
+    ) -> Result<Vec<u8>> {
+        req.validate()?;
+        if !self.may_query(":BOD:RUNS?") {
+            return Err(DriverError::Unsupported(
+                ":BODeplot has not been verified on this instrument yet (run `mho954 verify bode`)"
+                    .into(),
+            ));
+        }
+        let mut v = ParamMap::new();
+        v.insert(
+            "input".into(),
+            ParamValue::Text(format!("CHAN{}", req.input)),
+        );
+        v.insert(
+            "output".into(),
+            ParamValue::Text(format!("CHAN{}", req.output)),
+        );
+        // The scope checks start <= stop/10 against the other's current value; `group_set`
+        // repeats the writes once after an error, which resolves that.
+        v.insert("stop".into(), ParamValue::Real(req.stop));
+        v.insert("start".into(), ParamValue::Real(req.start));
+        v.insert(
+            "points".into(),
+            ParamValue::Int(u64::from(req.points_per_decade)),
+        );
+        let sweep = if req.linear { "LINE" } else { "LOG" };
+        v.insert("sweep".into(), ParamValue::Text(sweep.into()));
+        self.group_set("bode", None, &v, true)?;
+        let mut a = ParamMap::new();
+        a.insert("all".into(), ParamValue::Real(req.amplitude));
+        self.group_set("bode.amplitude", None, &a, false)?;
+        self.scpi().write(":BOD:RUNS ON")?;
+        self.check_errors()?;
+        let total = req.timeout_s as usize;
+        let start = Instant::now();
+        loop {
+            std::thread::sleep(Duration::from_millis(500));
+            let running = self.scpi().query_bool(":BOD:RUNS?")?;
+            let elapsed = start.elapsed().as_secs() as usize;
+            if !running {
+                break;
+            }
+            if elapsed >= total {
+                self.scpi().write(":BOD:RUNS OFF")?;
+                return Err(DriverError::State(format!(
+                    "Bode plot still running after {total} s (stopped)"
+                )));
+            }
+            progress(elapsed, total);
+        }
+        self.screenshot()
+    }
+
     fn bode_points(
         &mut self,
         req: &BodeRequest,
@@ -308,29 +478,44 @@ impl Scope {
                 ..Default::default()
             })?;
             std::thread::sleep(Duration::from_millis(req.settle_ms));
-            let mut tones = None;
-            for _ in 0..4 {
-                let (inp, outp, rescaled) = self.bode_acquire(req, f)?;
-                if !rescaled {
-                    tones = Some((inp, outp));
+            // Complex output/input ratios of acquisitions with a stable vertical range; the
+            // first few may rescale the channels.
+            let wanted = req.averages as usize;
+            let mut ratios = Vec::with_capacity(wanted);
+            let (mut sum_in, mut sum_out) = (0.0, 0.0);
+            for _ in 0..wanted + 4 {
+                let ((ai, pi), (ao, po), rescaled) = self.bode_acquire(req, f)?;
+                if rescaled {
+                    continue;
+                }
+                if ai <= 0.0 {
+                    return Err(DriverError::State(format!(
+                        "no signal on CH{} at {f:.4e} Hz",
+                        req.input
+                    )));
+                }
+                let (g, ph) = (ao / ai, po - pi);
+                ratios.push((g * ph.cos(), g * ph.sin()));
+                sum_in += ai;
+                sum_out += ao;
+                if ratios.len() == wanted {
                     break;
                 }
             }
-            let ((ai, pi), (ao, po)) = tones.ok_or_else(|| {
-                DriverError::State(format!("no stable vertical range at {f:.4e} Hz"))
-            })?;
-            if ai <= 0.0 {
+            if ratios.is_empty() {
                 return Err(DriverError::State(format!(
-                    "no signal on CH{} at {f:.4e} Hz",
-                    req.input
+                    "no stable vertical range at {f:.4e} Hz"
                 )));
             }
+            let n = ratios.len() as f64;
+            let re = ratios.iter().map(|r| r.0).sum::<f64>() / n;
+            let im = ratios.iter().map(|r| r.1).sum::<f64>() / n;
             out.push(BodePoint {
                 frequency: f,
-                gain_db: 20.0 * (ao / ai).log10(),
-                phase_deg: wrap_deg(po - pi),
-                input_amplitude: ai,
-                output_amplitude: ao,
+                gain_db: 20.0 * re.hypot(im).log10(),
+                phase_deg: wrap_deg(im.atan2(re)),
+                input_amplitude: sum_in / n,
+                output_amplitude: sum_out / n,
             });
             progress(i + 1, freqs.len());
         }
