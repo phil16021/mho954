@@ -26,6 +26,17 @@ nusb). Der Kernel-Treiber `usbtmc` (`-c usbtmc`) bleibt als Alternative.
 
 ## Messwerte am Gerät (USB/IP, Userspace-USBTMC, 64-KiB-Requests)
 
+Nach dem Upgrade (2026-10-18, USB direkt bzw. LAN 192.168.1.109): `*IDN?` 25 ms (USB) /
+29 ms (LAN), RAW 10M Punkte WORD (20 MB) 16,9 s ≈ 1,18 MB/s über USB, 21,7 s ≈ 0,92 MB/s über
+LAN; beide Dateien bitgleich.
+
+- Die Speichertiefe ist eine Obergrenze: Bei 200 µs/div (2 ms Fenster, max. 4 GSa/s) enthält
+  der Speicher nur ≈ 10M Punkte, auch bei `MDEP 500M`. Volle 500M brauchen ≥ 12,5 ms/div
+  (bei 20 ms/div: 2 GSa/s, 500 000 000 Punkte).
+- Die Präambel meldet im RAW-Modus das eingestellte Lesefenster `:WAV:STAR`..`:WAV:STOP`, nicht
+  den Datensatz, und reicht bis 500 000 000 (Guide: 50 000 000). Der RAW-Abruf öffnet das
+  Fenster deshalb vorher auf `:ACQ:MDEP?`.
+
 | Vorgang | Zeit |
 |---|---|
 | `*IDN?` | 24,5 ms (22,8–25,8) |

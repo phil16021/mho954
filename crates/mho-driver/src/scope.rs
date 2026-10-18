@@ -921,6 +921,25 @@ impl Scope {
         src: String,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<Waveform> {
+        // The preamble reports the current read window (STAR..STOP), not the record: after
+        // a 10M read at 500M depth it still said 10M. Open the window to the memory depth
+        // first (seen on the device: 500 000 000 points, beyond the guide's 50M).
+        let depth = self
+            .scpi
+            .query(":ACQ:MDEP?")
+            .ok()
+            .and_then(|a| a.trim().parse::<f64>().ok())
+            .filter(|d| *d >= 1.0)
+            .map_or(MAX_RAW_POINTS, |d| (d as usize).min(MAX_RAW_POINTS));
+        self.scpi.write(":WAV:STAR 1")?;
+        self.scpi.write(&format!(":WAV:STOP {depth}"))?;
+        let rejected = self.scpi.errors()?;
+        if !rejected.is_empty() {
+            debug!(
+                ?rejected,
+                depth, "RAW window beyond the record; using the scope's window"
+            );
+        }
         let preamble = Preamble::parse(&self.scpi.query(":WAV:PRE?")?)?;
         let total = preamble.points;
         if total > MAX_RAW_POINTS {
