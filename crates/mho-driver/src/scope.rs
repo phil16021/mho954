@@ -277,11 +277,21 @@ impl Scope {
             Action::Clear => ":CLE",
             Action::Force => ":TFOR",
         };
+        if action == Action::Autoscale {
+            self.drain_errors()?;
+        }
         self.scpi.write(cmd)?;
         if action == Action::Autoscale {
             // Autoscale takes a few seconds; the next query would otherwise time out.
             self.scpi
                 .with_timeout(Duration::from_secs(10), |s| s.query("*OPC?"))?;
+            // A disabled or locked AUTO key makes the scope refuse silently otherwise.
+            self.check_errors().map_err(|e| match e {
+                DriverError::Device(m) => DriverError::Device(format!(
+                    "autoscale refused: {m} (the AUTO key may be disabled or locked, group autoset)"
+                )),
+                e => e,
+            })?;
         }
         Ok(())
     }
@@ -670,9 +680,17 @@ impl Scope {
     }
 
     /// Reads a set of values (cursor readings, mask/search/histogram results). The guard
-    /// query is checked first: outside the matching mode the scope would not answer.
-    pub fn readout(&mut self, id: &str) -> Result<ParamMap> {
+    /// query is checked first: outside the matching mode the scope would not answer. With
+    /// `enable`, a mode that is off is switched on first (the readout's setup commands).
+    pub fn readout(&mut self, id: &str, enable: bool) -> Result<ParamMap> {
         let r = crate::ops::find_readout(id)?;
+        if !self.requirement_met(r.requires)? {
+            return Err(DriverError::Unsupported(format!(
+                "{} needs {}",
+                r.id,
+                r.requires.describe()
+            )));
+        }
         if !self.trust_unverified && !crate::ops::readout_verified(r) {
             return Err(DriverError::Unsupported(format!(
                 "readout {} has not been verified on this instrument yet (run `mho954 verify {}`)",
@@ -680,13 +698,29 @@ impl Scope {
             )));
         }
         if let Some((q, expect)) = r.guard {
-            let a = self.scpi.query(q)?;
+            let mut a = self.scpi.query(q)?;
+            if !crate::ops::guard_ok(&a, expect) && enable && !r.setup.is_empty() {
+                self.drain_errors()?;
+                for c in r.setup {
+                    self.scpi.write(c)?;
+                }
+                self.check_errors()?;
+                // The mode needs a moment before its values are answered.
+                std::thread::sleep(Duration::from_millis(300));
+                a = self.scpi.query(q)?;
+            }
             if !crate::ops::guard_ok(&a, expect) {
+                let how = match r.enable_group {
+                    Some(g) => format!(
+                        "switch it on: read with enable (GUI \"Enable and read\", CLI --enable) \
+                         or set group {g}"
+                    ),
+                    None => "switch it on first".into(),
+                };
                 return Err(DriverError::State(format!(
-                    "{}: needs {} {expect} (is {a}); {}",
+                    "{} is off ({} is {a}): {how}",
                     r.id,
                     q.trim_end_matches('?'),
-                    r.title
                 )));
             }
         }
@@ -749,6 +783,12 @@ impl Scope {
                 )));
             }
         };
+        if let Some(g) = c.needs {
+            let a = self.scpi.query(g.query)?;
+            if !crate::ops::guard_ok(&a, g.expect) {
+                return Err(DriverError::State(format!("{}: {}", c.id, g.hint)));
+            }
+        }
         self.drain_errors()?;
         self.scpi.write(&line)?;
         if c.id == "reset" {
@@ -758,7 +798,22 @@ impl Scope {
             self.measured.clear();
             std::thread::sleep(Duration::from_millis(500));
         }
-        self.check_errors()
+        // Device errors of commands are bare codes ("-200: Command execute failed"); add
+        // what usually causes them.
+        let on_stick = arg.is_some_and(|p| p.trim().to_ascii_uppercase().starts_with("D:"));
+        self.check_errors().map_err(|e| match e {
+            DriverError::Device(m) => {
+                let mut m = format!("{}: {m}", c.id);
+                if on_stick {
+                    m.push_str(" (D:/ is the USB stick in the scope; C:/ is its internal memory)");
+                }
+                if let Some(g) = c.needs {
+                    m.push_str(&format!(" ({})", g.hint));
+                }
+                DriverError::Device(m)
+            }
+            e => e,
+        })
     }
 
     /// Peak table of the FFT on math channel `n` (FFT operator and peak search must be on).

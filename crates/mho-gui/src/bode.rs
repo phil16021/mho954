@@ -189,7 +189,7 @@ impl BodePanel {
                 return;
             }
             client.lock().bode_running = true;
-            client.op(
+            client.op_or(
                 "Bode sweep",
                 move |api| async move { api.bode_sweep(req).await },
                 |sh: &mut Shared, pts: Vec<BodePoint>| {
@@ -203,6 +203,7 @@ impl BodePanel {
                         sh.set_bode(pts);
                     }
                 },
+                |sh: &mut Shared, _| sh.bode_running = false,
             );
         }
         if running {
@@ -239,7 +240,7 @@ impl BodePanel {
         let stamp = file_stamp();
         let path = capture_dir.join(format!("bode-{stamp}.png"));
         client.lock().bode_running = true;
-        client.op(
+        client.op_or(
             "Bode plot (scope)",
             move |api| async move { api.bode_native(req).await },
             move |sh: &mut Shared, png: Vec<u8>| {
@@ -253,6 +254,7 @@ impl BodePanel {
                     Err(e) => sh.log(format!("Bode plot: {e}"), true),
                 }
             },
+            |sh: &mut Shared, _| sh.bode_running = false,
         );
     }
 }

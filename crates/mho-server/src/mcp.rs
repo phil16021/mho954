@@ -126,8 +126,11 @@ pub struct DecodeArgs {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReadoutArg {
-    /// cursor.manual | cursor.track | mask | search | histogram | save
+    /// cursor.manual | cursor.track | mask | search | histogram | save | afg.arb
     pub id: String,
+    /// Switch the mode on first if it is off (histogram, mask test, search, cursor mode).
+    #[serde(default)]
+    pub enable: bool,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -485,10 +488,11 @@ impl McpScope {
         description = "Read a set of values from the scope: cursor.manual / cursor.track (cursor \
         positions and deltas; set group `cursor.manual`/`cursor.track` with activate=true first), mask \
         (pass/fail counts; group `mask`), search (number of found events; group `search`), histogram \
-        (statistics; group `histogram`), save (1 = last save finished)."
+        (statistics; group `histogram`), save (1 = last save finished), afg.arb (loaded arbitrary \
+        files). enable=true switches an inactive mode on first (changes the scope's display)."
     )]
     async fn read_values(&self, Parameters(p): Parameters<ReadoutArg>) -> ToolResult {
-        ok_json(&try_api!(self.api.readout(p.id).await))
+        ok_json(&try_api!(self.api.readout(p.id, p.enable).await))
     }
 
     #[tool(

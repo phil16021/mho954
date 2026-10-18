@@ -236,6 +236,11 @@ fn readouts_and_commands() {
     );
     let reads = stdout(cli(d.path()).args(["read", "--list"]));
     assert!(reads.contains("cursor.manual"), "{reads}");
+    // A mode that is off is named, and --enable switches it on.
+    let err = stderr_of_failure(cli(d.path()).args(["read", "histogram"]));
+    assert!(err.contains("--enable"), "{err}");
+    let hist = stdout(cli(d.path()).args(["read", "histogram", "--enable"]));
+    assert!(hist.contains("statistics"), "{hist}");
     let done = stdout(cli(d.path()).args(["do", "save.setup", "D:/bench.stp"]));
     assert!(done.contains("done"), "{done}");
     let err = stderr_of_failure(cli(d.path()).args(["do", "reset"]));

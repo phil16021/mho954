@@ -11,6 +11,7 @@ use mho_service::{Frame, LiveConfig, MeasureSpec, ScopeApi, StatsRequest};
 
 use crate::bode::{BodePanel, bode_plot};
 use crate::generator::GeneratorPanel;
+use crate::meters::MetersPanel;
 use crate::plot_tools::{self, Handle, PlotTools, ViewAction, gated_volts, zoom_range};
 use crate::prefs::{self, Prefs};
 use crate::settings::SettingsPanel;
@@ -123,6 +124,9 @@ pub struct ScopeApp {
     bode: BodePanel,
     show_bode: bool,
     generator: GeneratorPanel,
+    meters: MetersPanel,
+    license: String,
+    license_confirm: bool,
     /// Preferences as last written, and when.
     prefs_saved: Prefs,
     prefs_saved_at: std::time::Instant,
@@ -191,6 +195,9 @@ impl ScopeApp {
             bode: p.bode,
             show_bode: false,
             generator: p.generator,
+            meters: MetersPanel::default(),
+            license: String::new(),
+            license_confirm: false,
             caps_requested: false,
             options_requested: false,
             setup_path: String::new(),
@@ -222,6 +229,8 @@ impl ScopeApp {
             options: sh.options.clone(),
             commands: sh.commands.clone(),
             readout_values: sh.readout_values.clone(),
+            readout_error: sh.readout_error.clone(),
+            meters: sh.meters.clone(),
             decode: sh.decode.clone(),
             measurements: sh.measurements.clone(),
             live_error: sh.live_error.clone(),
@@ -355,12 +364,15 @@ impl ScopeApp {
         }
     }
 
-    fn capture_raw(&self) {
+    fn capture_raw(&self, stop_first: bool) {
         let dir = self.capture_dir.clone();
         let source = self.raw_source.clone();
         self.client.op(
             "RAW capture",
             move |api| async move {
+                if stop_first {
+                    api.action(Action::Stop).await?;
+                }
                 let w = api.waveform(source, WaveMode::Raw).await?;
                 let stem = format!(
                     "mho954-{}-{}",
@@ -467,6 +479,13 @@ impl ScopeApp {
             if ui.button("Force").clicked() {
                 self.action(Action::Force);
             }
+            if ui
+                .button("Clear")
+                .on_hover_text("clear the waveforms on the scope screen")
+                .clicked()
+            {
+                self.action(Action::Clear);
+            }
         });
         ui.separator();
 
@@ -526,7 +545,8 @@ impl ScopeApp {
 
         ui.separator();
         ui.label(RichText::new("Trigger").strong());
-        self.trigger_type(ui, &st.trigger.mode);
+        self.load_groups();
+        self.trigger_type(ui, &st.trigger.mode, s.groups.as_deref());
         let tr = &st.trigger;
         ui.horizontal(|ui| {
             for sweep in TriggerSweep::ALL {
@@ -648,6 +668,25 @@ impl ScopeApp {
                         }
                     }
                 });
+            if acq.acq_type == AcquireType::Average {
+                egui::ComboBox::from_id_salt("acq_avg")
+                    .selected_text(format!("{} avg", acq.averages))
+                    .width(70.0)
+                    .show_ui(ui, |ui| {
+                        for k in 1..=16u32 {
+                            let n = 1u32 << k;
+                            if ui
+                                .selectable_label(acq.averages == n, n.to_string())
+                                .clicked()
+                            {
+                                self.set_acquire(AcquireUpdate {
+                                    averages: Some(n),
+                                    ..Default::default()
+                                });
+                            }
+                        }
+                    });
+            }
         });
 
         ui.separator();
@@ -675,12 +714,20 @@ impl ScopeApp {
                         ui.selectable_value(&mut self.raw_source, src.clone(), &src);
                     }
                 });
+            let running = s.frame.as_ref().is_some_and(|f| f.trigger_status != "STOP");
+            let label = if running {
+                "Stop + RAW to .npy"
+            } else {
+                "RAW to .npy"
+            };
             if ui
-                .button("RAW to .npy")
-                .on_hover_text("Full memory of the channel; stop the scope first")
+                .button(label)
+                .on_hover_text(
+                    "full memory of the channel (the scope must be stopped; this button stops it)",
+                )
                 .clicked()
             {
-                self.capture_raw();
+                self.capture_raw(running);
             }
         });
 
@@ -723,8 +770,12 @@ impl ScopeApp {
                     s.readouts.as_deref(),
                     s.commands.as_deref(),
                     s.readout_values.as_ref(),
-                );
+                    s.readout_error.as_ref(),
+                )
             });
+        if let Some(Some(group)) = tools.body_returned.clone() {
+            self.open_settings(&group, None, true);
+        }
         if tools.body_returned.is_some() {
             self.tools.load(&self.client);
         }
@@ -769,6 +820,14 @@ impl ScopeApp {
                     ui.checkbox(&mut self.show_bode, "show plot");
                 }
             });
+
+        ui.separator();
+        let meters = egui::CollapsingHeader::new(RichText::new("Counter & DVM").strong())
+            .id_salt("meters")
+            .show(ui, |ui| self.meters.ui(ui, &self.client, &s.meters));
+        if let Some(Some(group)) = meters.body_returned {
+            self.open_settings(group, None, false);
+        }
 
         ui.separator();
         egui::CollapsingHeader::new(RichText::new("Network (RJ45)").strong())
@@ -850,10 +909,14 @@ impl ScopeApp {
     }
 
     /// Trigger types other than EDGE are edited in the settings panel.
-    fn trigger_type(&mut self, ui: &mut egui::Ui, mode: &str) {
+    fn trigger_type(&mut self, ui: &mut egui::Ui, mode: &str, groups: Option<&[GroupInfo]>) {
+        // Only trigger types this scope has (FlexRay/I2S/1553 need their options).
+        let available =
+            |id: &str| groups.is_none_or(|gs| gs.iter().any(|g| g.id == id && g.available));
         let types: Vec<(&str, &str)> = mho_driver::params::GROUPS
             .iter()
             .filter_map(|g| Some((g.select?.strip_prefix(":TRIG:MODE ")?, g.id)))
+            .filter(|(_, id)| available(id))
             .collect();
         let current = mode.to_ascii_uppercase();
         let matches = |token: &str| current.starts_with(token) || token.starts_with(&current);
@@ -1032,12 +1095,14 @@ impl ScopeApp {
             {
                 self.open_settings("bus", Some(self.decoder_bus), false);
             }
-            if ui
-                .button("Logic (VCD)")
-                .on_hover_text(
-                    "capture D0..D15 through this bus (parallel decoding) and save a VCD file",
-                )
-                .clicked()
+            let has_la = s.capabilities.as_ref().is_none_or(|c| c.logic_analyzer);
+            if has_la
+                && ui
+                    .button("Logic (VCD)")
+                    .on_hover_text(
+                        "capture D0..D15 through this bus (parallel decoding) and save a VCD file",
+                    )
+                    .clicked()
             {
                 self.capture_logic();
             }
@@ -1155,11 +1220,40 @@ impl ScopeApp {
                         ui.end_row();
                     }
                 });
-                ui.label(
-                    RichText::new("install a purchased license: mho954 options install '<key>'")
-                        .small()
-                        .weak(),
+                ui.label(RichText::new("install a purchased license").small().weak());
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.license)
+                        .desired_width(260.0)
+                        .hint_text("MHO900-<OPTION>@<code>"),
                 );
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.license_confirm, "install on the scope");
+                    if ui
+                        .add_enabled(
+                            self.license_confirm && !self.license.trim().is_empty(),
+                            egui::Button::new("Install"),
+                        )
+                        .clicked()
+                    {
+                        let key = self.license.trim().to_string();
+                        self.license_confirm = false;
+                        self.client.op(
+                            "install option",
+                            move |api| async move {
+                                api.install_option(key).await?;
+                                Ok((api.options().await?, api.capabilities().await?))
+                            },
+                            |sh: &mut Shared, (o, c): (Vec<OptionInfo>, Capabilities)| {
+                                sh.options = Some(o);
+                                sh.capabilities = Some(c);
+                                sh.log(
+                                    "license installed (a restart of the scope may be needed)",
+                                    false,
+                                );
+                            },
+                        );
+                    }
+                });
             }
         }
     }
@@ -2416,6 +2510,8 @@ struct Snapshot {
     options: Option<Vec<OptionInfo>>,
     commands: Option<Vec<mho_driver::ops::CommandInfo>>,
     readout_values: Option<(String, ParamMap)>,
+    readout_error: Option<(String, String)>,
+    meters: crate::meters::Meters,
     measurements: Option<Arc<mho_service::MeasureSnapshot>>,
     live_error: Option<String>,
     ws_connected: bool,

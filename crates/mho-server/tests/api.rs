@@ -994,9 +994,31 @@ async fn readouts_and_commands() {
 
     let api = RemoteBackend::new(&url);
     assert!(api.readouts().await.unwrap().len() >= 5);
+    // Recording off: the command names what is missing instead of a bare -200.
+    let e = api
+        .run_command("record.stop".into(), Default::default())
+        .await
+        .unwrap_err();
+    assert!(e.message.contains("group record"), "{e:?}");
+    let mut rec = mho_driver::params::ParamMap::new();
+    rec.insert("enable".into(), mho_driver::params::ParamValue::Bool(true));
+    api.group_set("record".into(), None, rec, false)
+        .await
+        .unwrap();
     api.run_command("record.stop".into(), Default::default())
         .await
         .unwrap();
+    let cmds = api.commands().await.unwrap();
+    let hs = cmds.iter().find(|c| c.id == "histogram.save").unwrap();
+    assert!(hs.available && hs.precondition.as_deref().unwrap().contains("histogram"));
+    // Readouts can switch their mode on (?enable=true).
+    let off = get(&format!("{v1}/readouts/search")).await;
+    assert_eq!(off.status(), 409);
+    let on = get(&format!("{v1}/readouts/search?enable=true")).await;
+    assert_eq!(on.status(), 200);
+    let info = api.readouts().await.unwrap();
+    let h = info.iter().find(|r| r.id == "histogram").unwrap();
+    assert!(h.can_enable && h.enable_group.as_deref() == Some("histogram"));
 
     let mut m = Mcp::connect(&url).await;
     let r = m

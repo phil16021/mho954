@@ -699,11 +699,24 @@ async fn readouts(
     Ok(Json(s.backend.readouts().await?))
 }
 
-/// Reads a value set (409 if its mode is not active, e.g. cursor mode MANual).
-#[utoipa::path(get, path = "/api/v1/readouts/{id}", params(("id" = String, Path)),
+#[derive(Deserialize, utoipa::IntoParams)]
+struct ReadoutQuery {
+    /// Switch the readout's mode on first if it is off (histogram, mask test, search,
+    /// cursor mode).
+    #[serde(default)]
+    enable: bool,
+}
+
+/// Reads a value set (409 if its mode is not active, e.g. cursor mode MANual, unless
+/// `enable=true`).
+#[utoipa::path(get, path = "/api/v1/readouts/{id}", params(("id" = String, Path), ReadoutQuery),
     responses((status = 200, body = ParamMap)))]
-async fn readout(State(s): State<AppState>, Path(id): Path<String>) -> HttpResult<Json<ParamMap>> {
-    Ok(Json(s.backend.readout(id).await?))
+async fn readout(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<ReadoutQuery>,
+) -> HttpResult<Json<ParamMap>> {
+    Ok(Json(s.backend.readout(id, q.enable).await?))
 }
 
 /// One-shot commands: save/load files on the scope, resets, recording.

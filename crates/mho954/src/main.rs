@@ -163,6 +163,9 @@ pub enum Command {
         /// List the value sets.
         #[arg(long)]
         list: bool,
+        /// Switch the mode on first if it is off (histogram, mask test, search, cursor).
+        #[arg(long)]
+        enable: bool,
     },
     /// Run a one-shot command (save/load on the scope, resets, recording); `--list` shows them.
     Do {

@@ -1109,7 +1109,27 @@ impl SimTransport {
         true
     }
 
+    /// Value of a table-driven setting (stored, or its default), as the scope would answer.
+    fn setting(&self, query: &str) -> String {
+        let hdr = normalize_header(query.trim_end_matches('?'));
+        self.params.get(&hdr).cloned().unwrap_or_else(|| {
+            Self::param_spec(&hdr)
+                .map(|spec| Self::param_default(&spec))
+                .unwrap_or_default()
+        })
+    }
+
     fn command(&mut self, hdr: &str, args: &str) -> Result<(), String> {
+        // One-shot commands that need a mode (histogram, mask test, recording) fail like on
+        // the instrument when it is off.
+        if let Some(c) = crate::ops::COMMANDS
+            .iter()
+            .find(|c| c.command.split_whitespace().next() == Some(hdr))
+            && let Some(g) = c.needs
+            && !crate::ops::guard_ok(&self.setting(g.query), g.expect)
+        {
+            return Err("execute failed: mode off".into());
+        }
         if !self.opts.la_probe
             && hdr.starts_with(":BUS")
             && hdr.ends_with(":PAR:BUS")

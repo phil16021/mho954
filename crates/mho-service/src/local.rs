@@ -219,25 +219,45 @@ impl ScopeApi for LocalBackend {
     }
 
     async fn readouts(&self) -> ApiResult<Vec<mho_driver::ops::ReadoutInfo>> {
-        let trusted = self
+        use mho_driver::ops::{READOUTS, describe_readout};
+        let (trusted, available) = self
             .device
-            .call(|s| Ok(s.trusts_unverified()))
+            .call(|s| {
+                let available = READOUTS
+                    .iter()
+                    .map(|r| s.requirement_met(r.requires))
+                    .collect::<Result<Vec<bool>>>()?;
+                Ok((s.trusts_unverified(), available))
+            })
             .await
-            .unwrap_or(false);
-        Ok(mho_driver::ops::READOUTS
+            .unwrap_or_else(|_| (false, vec![true; READOUTS.len()]));
+        Ok(READOUTS
             .iter()
-            .map(|r| mho_driver::ops::describe_readout(r, trusted))
+            .zip(available)
+            .map(|(r, a)| describe_readout(r, trusted, a))
             .collect())
     }
 
-    async fn readout(&self, id: String) -> ApiResult<mho_driver::params::ParamMap> {
-        self.device.call(move |s| s.readout(&id)).await
+    async fn readout(&self, id: String, enable: bool) -> ApiResult<mho_driver::params::ParamMap> {
+        self.device.call_mut(move |s| s.readout(&id, enable)).await
     }
 
     async fn commands(&self) -> ApiResult<Vec<mho_driver::ops::CommandInfo>> {
-        Ok(mho_driver::ops::COMMANDS
+        use mho_driver::ops::{COMMANDS, describe_command};
+        let available = self
+            .device
+            .call(|s| {
+                COMMANDS
+                    .iter()
+                    .map(|c| s.requirement_met(c.requires))
+                    .collect::<Result<Vec<bool>>>()
+            })
+            .await
+            .unwrap_or_else(|_| vec![true; COMMANDS.len()]);
+        Ok(COMMANDS
             .iter()
-            .map(mho_driver::ops::describe_command)
+            .zip(available)
+            .map(|(c, a)| describe_command(c, a))
             .collect())
     }
 

@@ -38,11 +38,40 @@ pub struct Readout {
     pub title: &'static str,
     /// Query and the expected answer prefix (short form) that make the items answerable.
     pub guard: Option<(&'static str, &'static str)>,
-    /// Commands that enable the mode for verification, and restore afterwards.
+    /// Commands that enable the mode (verification, and "enable and read"), and restore
+    /// afterwards.
     pub setup: &'static [&'static str],
     pub restore: &'static [&'static str],
     pub items: &'static [ReadItem],
+    /// Settings group that switches the mode on (named in error messages).
+    pub enable_group: Option<&'static str>,
+    pub requires: params::Requires,
 }
+
+/// A state the scope must be in for a command to work: `query` answers `expect` (as in
+/// [`guard_ok`]); `hint` says how to get there.
+#[derive(Debug, Clone, Copy)]
+pub struct Guard {
+    pub query: &'static str,
+    pub expect: &'static str,
+    pub hint: &'static str,
+}
+
+const HIST_ON: Guard = Guard {
+    query: ":HIST:ENAB?",
+    expect: "1",
+    hint: "the histogram must be on (group histogram, enable=true) and have collected data",
+};
+const MASK_ON: Guard = Guard {
+    query: ":MASK:ENAB?",
+    expect: "1",
+    hint: "the mask test must be on (group mask, enable=true)",
+};
+const RECORD_ON: Guard = Guard {
+    query: ":REC:ENAB?",
+    expect: "1",
+    hint: "recording must be on (group record, enable=true)",
+};
 
 const fn real(name: &'static str, query: &'static str, unit: &'static str) -> ReadItem {
     ReadItem {
@@ -76,6 +105,8 @@ pub const READOUTS: &[Readout] = &[
             real("inv_dx", ":CURS:MAN:IXD?", "Hz"),
             real("dy", ":CURS:MAN:YDEL?", ""),
         ],
+        enable_group: Some("cursor.manual"),
+        requires: params::Requires::Nothing,
     },
     Readout {
         id: "cursor.track",
@@ -92,6 +123,8 @@ pub const READOUTS: &[Readout] = &[
             real("inv_dx", ":CURS:TRAC:IXD?", "Hz"),
             real("dy", ":CURS:TRAC:YDEL?", ""),
         ],
+        enable_group: Some("cursor.track"),
+        requires: params::Requires::Nothing,
     },
     Readout {
         id: "mask",
@@ -104,6 +137,8 @@ pub const READOUTS: &[Readout] = &[
             int("passed", ":MASK:PASS?"),
             int("total", ":MASK:TOT?"),
         ],
+        enable_group: Some("mask"),
+        requires: params::Requires::Nothing,
     },
     Readout {
         id: "search",
@@ -112,6 +147,8 @@ pub const READOUTS: &[Readout] = &[
         setup: &[":SEAR:STAT ON"],
         restore: &[":SEAR:STAT OFF"],
         items: &[int("count", ":SEAR:COUN?")],
+        enable_group: Some("search"),
+        requires: params::Requires::Nothing,
     },
     Readout {
         id: "histogram",
@@ -124,6 +161,8 @@ pub const READOUTS: &[Readout] = &[
             query: ":HIST:STAT:RES?",
             kind: ReadKind::KeyValues,
         }],
+        enable_group: Some("histogram"),
+        requires: params::Requires::Nothing,
     },
     Readout {
         id: "save",
@@ -132,6 +171,8 @@ pub const READOUTS: &[Readout] = &[
         setup: &[],
         restore: &[],
         items: &[int("done", ":SAVE:STAT?")],
+        enable_group: None,
+        requires: params::Requires::Nothing,
     },
     Readout {
         id: "afg.arb",
@@ -151,6 +192,8 @@ pub const READOUTS: &[Readout] = &[
                 kind: ReadKind::Text,
             },
         ],
+        enable_group: None,
+        requires: params::Requires::FunctionGenerator,
     },
 ];
 
@@ -178,6 +221,17 @@ pub struct Command {
     /// Destructive: only with explicit confirmation.
     pub confirm: bool,
     pub requires: params::Requires,
+    /// State the scope must be in (checked before sending).
+    pub needs: Option<Guard>,
+}
+
+impl Command {
+    const fn needs(self, g: Guard) -> Command {
+        Command {
+            needs: Some(g),
+            ..self
+        }
+    }
 }
 
 const fn cmd(id: &'static str, command: &'static str, title: &'static str) -> Command {
@@ -188,6 +242,7 @@ const fn cmd(id: &'static str, command: &'static str, title: &'static str) -> Co
         arg: CommandArg::None,
         confirm: false,
         requires: params::Requires::Nothing,
+        needs: None,
     }
 }
 
@@ -204,6 +259,7 @@ const fn save(
         arg: CommandArg::Path { extensions },
         confirm: false,
         requires: params::Requires::Nothing,
+        needs: None,
     }
 }
 
@@ -241,7 +297,8 @@ pub const COMMANDS: &[Command] = &[
         ":SAVE:MASK",
         &["pf"],
         "save the mask to a file on the scope",
-    ),
+    )
+    .needs(MASK_ON),
     save(
         "load.setup",
         ":LOAD:SET",
@@ -259,7 +316,8 @@ pub const COMMANDS: &[Command] = &[
         ":HIST:SAVE:CSV",
         &["csv"],
         "save the histogram data on the scope",
-    ),
+    )
+    .needs(HIST_ON),
     cmd(
         "display.clear",
         ":DISP:CLE",
@@ -269,13 +327,15 @@ pub const COMMANDS: &[Command] = &[
         "mask.create",
         ":MASK:CRE",
         "create the mask from the current waveform",
-    ),
-    cmd("mask.reset", ":MASK:RES", "reset the mask test counters"),
+    )
+    .needs(MASK_ON),
+    cmd("mask.reset", ":MASK:RES", "reset the mask test counters").needs(MASK_ON),
     cmd(
         "histogram.reset",
         ":HIST:RES",
         "reset the histogram statistics",
-    ),
+    )
+    .needs(HIST_ON),
     Command {
         id: "ref.save",
         title: "store the selected source into reference <1..10>",
@@ -283,6 +343,7 @@ pub const COMMANDS: &[Command] = &[
         arg: CommandArg::Index { min: 1, max: 10 },
         confirm: false,
         requires: params::Requires::Nothing,
+        needs: None,
     },
     Command {
         id: "ref.reset",
@@ -291,11 +352,12 @@ pub const COMMANDS: &[Command] = &[
         arg: CommandArg::Index { min: 1, max: 10 },
         confirm: false,
         requires: params::Requires::Nothing,
+        needs: None,
     },
-    cmd("record.start", ":REC:STAR ON", "start recording"),
-    cmd("record.stop", ":REC:STAR OFF", "stop recording"),
-    cmd("record.play", ":REC:PLAY ON", "play back the recording"),
-    cmd("record.pause", ":REC:PLAY OFF", "stop playback"),
+    cmd("record.start", ":REC:STAR ON", "start recording").needs(RECORD_ON),
+    cmd("record.stop", ":REC:STAR OFF", "stop recording").needs(RECORD_ON),
+    cmd("record.play", ":REC:PLAY ON", "play back the recording").needs(RECORD_ON),
+    cmd("record.pause", ":REC:PLAY OFF", "stop playback").needs(RECORD_ON),
     Command {
         id: "afg.align_phase",
         title: "restart GI and GII with their set frequency and phase (align phase)",
@@ -303,6 +365,7 @@ pub const COMMANDS: &[Command] = &[
         arg: CommandArg::None,
         confirm: false,
         requires: params::Requires::FunctionGenerator,
+        needs: None,
     },
     Command {
         id: "afg1.load_arb",
@@ -313,6 +376,7 @@ pub const COMMANDS: &[Command] = &[
         },
         confirm: false,
         requires: params::Requires::FunctionGenerator,
+        needs: None,
     },
     Command {
         id: "afg2.load_arb",
@@ -323,6 +387,7 @@ pub const COMMANDS: &[Command] = &[
         },
         confirm: false,
         requires: params::Requires::FunctionGenerator,
+        needs: None,
     },
     Command {
         id: "reset",
@@ -331,6 +396,7 @@ pub const COMMANDS: &[Command] = &[
         arg: CommandArg::None,
         confirm: true,
         requires: params::Requires::Nothing,
+        needs: None,
     },
 ];
 
@@ -456,6 +522,19 @@ pub struct ReadoutInfo {
     pub items: Vec<(String, String)>,
     /// All queries confirmed on the instrument (or the simulator is trusted).
     pub verified: bool,
+    /// Hardware/option present.
+    #[serde(default = "yes")]
+    pub available: bool,
+    /// The mode can be switched on by the readout itself (`enable`).
+    #[serde(default)]
+    pub can_enable: bool,
+    /// Settings group that switches the mode on.
+    #[serde(default)]
+    pub enable_group: Option<String>,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
@@ -468,9 +547,15 @@ pub struct CommandInfo {
     pub index: Option<(u8, u8)>,
     /// Must be confirmed explicitly (`confirm: true`).
     pub confirm: bool,
+    /// Hardware/option present.
+    #[serde(default = "yes")]
+    pub available: bool,
+    /// State the scope must be in, e.g. "the histogram must be on …".
+    #[serde(default)]
+    pub precondition: Option<String>,
 }
 
-pub fn describe_readout(r: &Readout, trusted: bool) -> ReadoutInfo {
+pub fn describe_readout(r: &Readout, trusted: bool, available: bool) -> ReadoutInfo {
     ReadoutInfo {
         id: r.id.into(),
         title: r.title.into(),
@@ -486,10 +571,13 @@ pub fn describe_readout(r: &Readout, trusted: bool) -> ReadoutInfo {
             })
             .collect(),
         verified: trusted || readout_verified(r),
+        available,
+        can_enable: r.guard.is_some() && !r.setup.is_empty(),
+        enable_group: r.enable_group.map(String::from),
     }
 }
 
-pub fn describe_command(c: &Command) -> CommandInfo {
+pub fn describe_command(c: &Command, available: bool) -> CommandInfo {
     CommandInfo {
         id: c.id.into(),
         title: c.title.into(),
@@ -504,6 +592,8 @@ pub fn describe_command(c: &Command) -> CommandInfo {
             _ => None,
         },
         confirm: c.confirm,
+        available,
+        precondition: c.needs.map(|g| g.hint.to_string()),
     }
 }
 

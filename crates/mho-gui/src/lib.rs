@@ -3,6 +3,7 @@
 mod app;
 mod bode;
 mod generator;
+mod meters;
 mod plot_tools;
 mod prefs;
 mod settings;

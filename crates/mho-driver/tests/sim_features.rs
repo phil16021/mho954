@@ -121,24 +121,45 @@ fn readouts_need_their_mode_and_commands_validate() {
     let mut s = Scope::open(&Connection::Sim).unwrap();
     // cursor off → refused before any value query
     assert!(matches!(
-        s.readout("cursor.manual"),
-        Err(DriverError::State(_))
+        s.readout("cursor.manual", false),
+        Err(DriverError::State(m)) if m.contains("cursor.manual")
     ));
     s.group_set("cursor.manual", None, &ParamMap::new(), true)
         .unwrap();
-    let v = s.readout("cursor.manual").unwrap();
+    let v = s.readout("cursor.manual", false).unwrap();
     assert_eq!(v.len(), 7);
     assert!(matches!(v["inv_dx"], ParamValue::Real(_)));
-    let mut on = ParamMap::new();
-    on.insert("enable".into(), ParamValue::Bool(true));
-    s.group_set("histogram", None, &on, false).unwrap();
-    let h = s.readout("histogram").unwrap();
+    // Histogram off: the error says how to switch it on; histogram commands are refused.
+    let off = s.readout("histogram", false).unwrap_err().to_string();
+    assert!(
+        off.contains("--enable") && off.contains("group histogram"),
+        "{off}"
+    );
+    let refused = s.run_command("histogram.save", Some("C:/h.csv"), false);
+    assert!(matches!(refused, Err(DriverError::State(m)) if m.contains("histogram must be on")));
+    // "Enable and read" switches it on.
+    let h = s.readout("histogram", true).unwrap();
     assert_eq!(h["statistics.bin_width"], ParamValue::Text("20ns".into()));
-    assert_eq!(s.readout("save").unwrap()["done"], ParamValue::Int(1));
-    assert!(matches!(s.readout("nope"), Err(DriverError::Invalid(_))));
+    s.run_command("histogram.save", Some("C:/h.csv"), false)
+        .unwrap();
+    assert_eq!(
+        s.readout("save", false).unwrap()["done"],
+        ParamValue::Int(1)
+    );
+    assert!(matches!(
+        s.readout("nope", false),
+        Err(DriverError::Invalid(_))
+    ));
 
     s.run_command("save.setup", Some("D:/bench1.stp"), false)
         .unwrap();
+    assert!(matches!(
+        s.run_command("mask.reset", None, false),
+        Err(DriverError::State(m)) if m.contains("group mask")
+    ));
+    let mut mask = ParamMap::new();
+    mask.insert("enable".into(), ParamValue::Bool(true));
+    s.group_set("mask", None, &mask, false).unwrap();
     s.run_command("mask.reset", None, false).unwrap();
     for (id, arg) in [
         ("save.setup", None),

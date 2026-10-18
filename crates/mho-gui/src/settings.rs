@@ -110,7 +110,26 @@ impl SettingsPanel {
         };
         if let Some((id, n, activate)) = self.pending.take() {
             match groups.iter().find(|g| g.id == id) {
-                Some(g) => self.open_at(client, g, n, activate),
+                Some(g) if g.available => self.open_at(client, g, n, activate),
+                Some(g) => {
+                    let need = match &g.requires {
+                        mho_driver::params::Requirement::Option(code) => {
+                            format!("option MHO900-{code}")
+                        }
+                        mho_driver::params::Requirement::LogicAnalyzer => {
+                            "the logic analyzer".into()
+                        }
+                        mho_driver::params::Requirement::FunctionGenerator => {
+                            "the function generator".into()
+                        }
+                        mho_driver::params::Requirement::Nothing => "nothing".into(),
+                    };
+                    self.selected = None;
+                    client.lock().log(
+                        format!("{id} is not available on this scope: needs {need}"),
+                        true,
+                    );
+                }
                 None => client
                     .lock()
                     .log(format!("unknown settings group {id}"), true),

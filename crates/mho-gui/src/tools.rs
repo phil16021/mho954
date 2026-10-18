@@ -13,8 +13,12 @@ use crate::state::{Client, Shared};
 pub struct ToolsPanel {
     requested: bool,
     readout: String,
+    /// Switch the readout's mode on if it is off (histogram, mask, search, cursor).
+    enable_mode: bool,
     command: String,
     path: String,
+    /// The path was typed by the user (kept when the command changes).
+    path_edited: bool,
     index: u8,
     confirm: bool,
 }
@@ -27,6 +31,28 @@ fn show(v: &ParamValue, unit: &str) -> String {
         ParamValue::Bool(b) => b.to_string(),
         ParamValue::Text(t) => t.clone(),
     }
+}
+
+/// Default file for a command: internal memory C:/, which always exists (D:/ needs a USB
+/// stick in the scope).
+fn default_path(ext: &str) -> String {
+    format!("C:/mho954.{ext}")
+}
+
+fn read(client: &Client, id: String, enable: bool) {
+    let failed_id = id.clone();
+    client.op_or(
+        format!("read {id}"),
+        move |api| async move {
+            let v = api.readout(id.clone(), enable).await?;
+            Ok((id, v))
+        },
+        |sh: &mut Shared, v: (String, ParamMap)| {
+            sh.readout_error = None;
+            sh.readout_values = Some(v);
+        },
+        move |sh: &mut Shared, e| sh.readout_error = Some((failed_id, e.message.clone())),
+    );
 }
 
 impl ToolsPanel {
@@ -46,6 +72,7 @@ impl ToolsPanel {
         );
     }
 
+    /// Returns a settings group to open (the readout's mode switch) if the user asked for it.
     pub fn ui(
         &mut self,
         ui: &mut egui::Ui,
@@ -53,11 +80,13 @@ impl ToolsPanel {
         readouts: Option<&[ReadoutInfo]>,
         commands: Option<&[CommandInfo]>,
         values: Option<&(String, ParamMap)>,
-    ) {
+        error: Option<&(String, String)>,
+    ) -> Option<String> {
         let (Some(readouts), Some(commands)) = (readouts, commands) else {
-            ui.label("loading…");
-            return;
+            ui.label("loading...");
+            return None;
         };
+        let mut open_group = None;
 
         ui.label(RichText::new("Read values").strong());
         ui.horizontal(|ui| {
@@ -69,7 +98,7 @@ impl ToolsPanel {
                 })
                 .width(150.0)
                 .show_ui(ui, |ui| {
-                    for r in readouts {
+                    for r in readouts.iter().filter(|r| r.available) {
                         let label = if r.verified {
                             r.id.clone()
                         } else {
@@ -82,23 +111,43 @@ impl ToolsPanel {
             let current = readouts.iter().find(|r| r.id == self.readout);
             if ui
                 .add_enabled(
-                    current.is_some_and(|r| r.verified),
+                    current.is_some_and(|r| r.verified && r.available),
                     egui::Button::new("Read"),
                 )
                 .on_disabled_hover_text("not yet verified on this scope (mho954 verify)")
                 .clicked()
             {
-                let id = self.readout.clone();
-                client.op(
-                    format!("read {id}"),
-                    move |api| async move {
-                        let v = api.readout(id.clone()).await?;
-                        Ok((id, v))
-                    },
-                    |sh: &mut Shared, v: (String, ParamMap)| sh.readout_values = Some(v),
-                );
+                read(client, self.readout.clone(), self.enable_mode);
+            }
+            if current.is_some_and(|r| r.can_enable) {
+                ui.checkbox(&mut self.enable_mode, "switch on if off")
+                    .on_hover_text("switches the mode on the scope on before reading");
             }
         });
+        let current = readouts.iter().find(|r| r.id == self.readout);
+        if let (Some((id, msg)), Some(r)) = (error, current)
+            && *id == r.id
+        {
+            ui.label(RichText::new(msg).small().color(Color32::YELLOW));
+            ui.horizontal(|ui| {
+                if r.can_enable
+                    && ui
+                        .button("Enable and read")
+                        .on_hover_text("switches the mode on the scope on, then reads")
+                        .clicked()
+                {
+                    read(client, r.id.clone(), true);
+                }
+                if let Some(g) = &r.enable_group
+                    && ui
+                        .button("Settings...")
+                        .on_hover_text(format!("open group {g}"))
+                        .clicked()
+                {
+                    open_group = Some(g.clone());
+                }
+            });
+        }
         if let Some((id, map)) = values
             && let Some(info) = readouts.iter().find(|r| &r.id == id)
         {
@@ -131,35 +180,51 @@ impl ToolsPanel {
                 })
                 .width(150.0)
                 .show_ui(ui, |ui| {
-                    for c in commands {
+                    for c in commands.iter().filter(|c| c.available) {
                         if ui
                             .selectable_value(&mut self.command, c.id.clone(), &c.id)
                             .on_hover_text(&c.title)
                             .clicked()
                         {
                             self.confirm = false;
+                            // A default path follows the command's file type; a typed one stays.
                             if let Some(ext) = c.path_extensions.as_ref().and_then(|e| e.first())
-                                && self.path.is_empty()
+                                && (self.path.is_empty() || !self.path_edited)
                             {
-                                self.path = format!("D:/mho954.{ext}");
+                                self.path = default_path(ext);
+                                self.path_edited = false;
                             }
                         }
                     }
                 });
         });
         let Some(cmd) = commands.iter().find(|c| c.id == self.command) else {
-            return;
+            return open_group;
         };
         ui.label(RichText::new(&cmd.title).small().weak());
+        if let Some(pre) = &cmd.precondition {
+            ui.label(
+                RichText::new(format!("needs: {pre}"))
+                    .small()
+                    .color(Color32::LIGHT_YELLOW),
+            );
+        }
         if let Some(ext) = &cmd.path_extensions {
             ui.horizontal(|ui| {
                 ui.label("file");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.path)
-                        .desired_width(170.0)
-                        .hint_text(format!("C:/ or D:/name.{}", ext.join("|"))),
-                );
-            });
+                if ui
+                    .add(
+                        egui::TextEdit::singleline(&mut self.path)
+                            .desired_width(170.0)
+                            .hint_text(format!("C:/ or D:/name.{}", ext.join("|"))),
+                    )
+                    .changed()
+                {
+                    self.path_edited = true;
+                }
+            })
+            .response
+            .on_hover_text("C:/ = internal memory, D:/ = USB stick in the scope");
         }
         if let Some((lo, hi)) = cmd.index {
             self.index = self.index.clamp(lo, hi);
@@ -202,5 +267,6 @@ impl ToolsPanel {
                 );
             }
         });
+        open_group
     }
 }

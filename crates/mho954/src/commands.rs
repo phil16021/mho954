@@ -615,9 +615,9 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 }
             }
         }
-        Command::Read { id, list } => match (id, list) {
+        Command::Read { id, list, enable } => match (id, list) {
             (Some(id), false) => {
-                for (k, v) in api.readout(id).await? {
+                for (k, v) in api.readout(id, enable).await? {
                     println!("{k:<22} {}", show_value(&v));
                 }
             }
@@ -628,7 +628,11 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                         "{:<14} {}{}  [{}]",
                         r.id,
                         r.title,
-                        if r.verified { "" } else { " (unverified)" },
+                        match (r.available, r.verified) {
+                            (false, _) => " (hardware/option missing)",
+                            (true, false) => " (unverified)",
+                            _ => "",
+                        },
                         names.join(", ")
                     );
                 }

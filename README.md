@@ -287,8 +287,14 @@ Weil das Scope unbekannte Queries nicht beantwortet und nach etwa fünf davon h�
 - **Lesen** einer Gruppe, Dekoder-Tabellen, FFT-Peaks, Math-Spuren im Live-Bild und das DVM gibt
   es erst, wenn die Queries mit `mho954 verify <gruppe>` am Gerät bestätigt wurden. Das Ergebnis
   steht in `docs/verified-commands.json` und wird beim nächsten Build einkompiliert. Stand
-  2026-10-18 ist alles bestätigt außer den Generator-Gruppen (`afg*`, `bode`;
-  das Test-Scope hat keinen Generator).
+  2026-10-18 (nach dem Upgrade) sind alle Gruppen und Ablesewerte bestätigt, auch Generator,
+  Bode und die Options-Protokolle.
+- **Ablesewerte** (Cursor, Maske, Suche, Histogramm) brauchen ihren Modus am Scope;
+  `mho954 read histogram --enable` (GUI: „Enable and read“, REST `?enable=true`, MCP
+  `enable: true`) schaltet ihn bei Bedarf ein. Ohne das nennt die Meldung die Gruppe.
+- **Befehle** mit Voraussetzung prüfen sie vorher: `histogram.save/reset` (Histogramm an und mit
+  Daten), `mask.create/reset`, `save.mask` (Maskentest an), `record.*` (Aufnahme an). Dateien:
+  `C:/` ist der interne Speicher, `D:/` der USB-Stick im Scope (die GUI schlägt `C:/` vor).
 - `verify` sendet jede Query einzeln, danach `*IDN?`. Nach drei unbeantworteten Queries hört es
   auf und bittet um einen Neustart des Scopes; danach `mho954 verify --reset-budget`.
 - Der Simulator lässt ungeprüfte Queries zu, damit sich alles ohne Gerät testen lässt.

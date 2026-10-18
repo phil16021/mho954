@@ -298,8 +298,8 @@ impl ScopeApi for RemoteBackend {
         self.get("/readouts").await
     }
 
-    async fn readout(&self, id: String) -> ApiResult<mho_driver::params::ParamMap> {
-        self.get(&format!("/readouts/{id}")).await
+    async fn readout(&self, id: String, enable: bool) -> ApiResult<mho_driver::params::ParamMap> {
+        self.get(&format!("/readouts/{id}?enable={enable}")).await
     }
 
     async fn commands(&self) -> ApiResult<Vec<mho_driver::ops::CommandInfo>> {

@@ -294,9 +294,10 @@ impl Scope {
             ));
         }
         self.drain_errors()?;
-        // Without a logic probe the scope rejects D15D0 (-200); the decoder is put back then.
+        // Without a logic probe the scope rejects D15D0 (-200). The decoder is put back
+        // afterwards in any case, so the capture leaves the user's decoder as it was.
         let mut before = Vec::new();
-        for node in ["MODE", "DISP", "PAR:BUS", "EVEN"] {
+        for node in ["MODE", "DISP", "PAR:BUS", "PAR:CLK", "FORM", "EVEN"] {
             let v = self.scpi().query(&format!(":BUS{bus}:{node}?"))?;
             before.push(format!(":BUS{bus}:{node} {}", v.trim()));
         }
@@ -328,9 +329,15 @@ impl Scope {
         ] {
             self.scpi().write(&c)?;
         }
-        self.check_errors()?;
-        std::thread::sleep(Duration::from_millis(300));
-        let table = self.bus_data(bus)?;
+        let table = self.check_errors().and_then(|()| {
+            std::thread::sleep(Duration::from_millis(300));
+            self.bus_data(bus)
+        });
+        for c in &before {
+            self.scpi().write(c)?;
+        }
+        self.drain_errors()?;
+        let table = table?;
         let col = table
             .columns
             .iter()

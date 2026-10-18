@@ -52,6 +52,10 @@ pub struct Shared {
     pub generator_readback: [Option<mho_driver::params::ParamMap>; 2],
     pub options: Option<Vec<mho_driver::OptionInfo>>,
     pub commands: Option<Vec<mho_driver::ops::CommandInfo>>,
+    /// Counter and DVM state and readings.
+    pub meters: crate::meters::Meters,
+    /// Last failed readout: `(readout id, message)`.
+    pub readout_error: Option<(String, String)>,
     /// Last read value set: `(readout id, values)`.
     pub readout_values: Option<(String, mho_driver::params::ParamMap)>,
     /// Scope FFT peak table: `(math channel, peaks)`.
@@ -159,6 +163,21 @@ impl Client {
         T: Send + 'static,
         Fut: Future<Output = ApiResult<T>> + Send + 'static,
     {
+        self.op_or(label, call, apply, |_, _| {});
+    }
+
+    /// [`Self::op`] that also runs `failed` after an error (to reset a running flag or show
+    /// the error where it belongs); the error is logged either way.
+    pub fn op_or<T, Fut>(
+        &self,
+        label: impl Into<String>,
+        call: impl FnOnce(Arc<RemoteBackend>) -> Fut + Send + 'static,
+        apply: impl FnOnce(&mut Shared, T) + Send + 'static,
+        failed: impl FnOnce(&mut Shared, &mho_service::ApiError) + Send + 'static,
+    ) where
+        T: Send + 'static,
+        Fut: Future<Output = ApiResult<T>> + Send + 'static,
+    {
         let label = label.into();
         let this = self.clone();
         self.lock().busy += 1;
@@ -169,7 +188,10 @@ impl Client {
                 sh.busy -= 1;
                 match r {
                     Ok(v) => apply(&mut sh, v),
-                    Err(e) => sh.log(format!("{label}: {e}"), true),
+                    Err(e) => {
+                        sh.log(format!("{label}: {e}"), true);
+                        failed(&mut sh, &e);
+                    }
                 }
             }
             this.ctx.request_repaint();

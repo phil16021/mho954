@@ -174,7 +174,8 @@ pub trait ScopeApi: Send + Sync + 'static {
     /// Catalogue of read-only value sets (cursor values, mask/search/histogram results).
     async fn readouts(&self) -> ApiResult<Vec<mho_driver::ops::ReadoutInfo>>;
     /// Reads one value set (its mode must be active, e.g. cursor mode MANual).
-    async fn readout(&self, id: String) -> ApiResult<ParamMap>;
+    /// `enable` switches the readout's mode on first if it is off (e.g. the histogram).
+    async fn readout(&self, id: String, enable: bool) -> ApiResult<ParamMap>;
     /// Catalogue of one-shot commands (save/load on the scope, resets, recording).
     async fn commands(&self) -> ApiResult<Vec<mho_driver::ops::CommandInfo>>;
     async fn run_command(&self, id: String, request: CommandRequest) -> ApiResult<()>;
