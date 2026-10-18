@@ -76,7 +76,11 @@ pub fn bode_summary(freq: &[f64], gain_db: &[f64], phase_deg: &[f64]) -> BodeSum
     let reference = g[0];
     let first_down = |level: f64| (0..n - 1).find(|&i| g[i] >= level && g[i + 1] < level);
     let corner = first_down(reference - 3.0).map(|i| crossing(f, g, i, reference - 3.0));
-    let unity = first_down(0.0).map(|i| (i, crossing(f, g, i, 0.0)));
+    // A 0 dB crossing only counts after real gain (≥ 1 dB): a flat response hovering around
+    // 0 dB would otherwise "cross" on noise.
+    let unity = (0..n - 1)
+        .find(|&i| g[i] >= 0.0 && g[i + 1] < 0.0 && g[..=i].iter().any(|&v| v >= 1.0))
+        .map(|i| (i, crossing(f, g, i, 0.0)));
     let phase_x = (0..n - 1)
         .find(|&i| ph[i] > -180.0 && ph[i + 1] <= -180.0)
         .map(|i| (i, crossing(f, &ph, i, -180.0)));
@@ -178,5 +182,8 @@ mod tests {
         assert_eq!(bode_summary(&[], &[], &[]), BodeSummary::default());
         let s = bode_summary(&[1e3, 1e4], &[0.0, 0.0], &[0.0, 0.0]);
         assert_eq!((s.corner_3db_hz, s.unity_gain_hz), (None, None));
+        // noise around 0 dB is no crossover
+        let s = bode_summary(&[1e3, 1e4, 1e5], &[0.01, -0.01, 0.0], &[0.0; 3]);
+        assert_eq!(s.unity_gain_hz, None);
     }
 }

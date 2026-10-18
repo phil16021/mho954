@@ -45,6 +45,9 @@ pub struct BodeRequest {
     pub averages: u32,
     /// Load the generator expects: `highz` (default) or `50`.
     pub load: Option<String>,
+    /// Second generator driven with the same sine, phase-aligned at every step: compares
+    /// two signal paths (e.g. GI→CH1 against GII→CH2) when no T piece is at hand.
+    pub follow: Option<u8>,
 }
 
 impl Default for BodeRequest {
@@ -60,6 +63,7 @@ impl Default for BodeRequest {
             settle_ms: 100,
             averages: 1,
             load: None,
+            follow: None,
         }
     }
 }
@@ -146,6 +150,11 @@ impl BodeRequest {
         let bad = |m: String| Err(DriverError::Invalid(m));
         if !(1..=2).contains(&self.generator) {
             return bad(format!("generator {} outside 1..=2", self.generator));
+        }
+        if let Some(f) = self.follow
+            && (!(1..=2).contains(&f) || f == self.generator)
+        {
+            return bad(format!("follow must be the other generator, got {f}"));
         }
         for c in [self.input, self.output] {
             if !(1..=4).contains(&c) {
@@ -351,18 +360,21 @@ impl Scope {
             self.channel(req.input)?.scale,
             self.channel(req.output)?.scale,
         ];
-        let g = req.generator;
+        let gens: Vec<u8> = std::iter::once(req.generator).chain(req.follow).collect();
         self.drain_errors()?;
         let load = if req.fifty_ohm()? { "FIFT" } else { "OMEG" };
-        for c in [
-            format!(":SOUR{g}:MOD:STAT OFF"),
-            format!(":SOUR{g}:FUNC SIN"),
-            format!(":SOUR{g}:IMP {load}"),
-            format!(":SOUR{g}:VOLT:AMPL {:e}", req.amplitude),
-            format!(":SOUR{g}:VOLT:OFFS 0"),
-            format!(":SOUR{g}:OUTP:STAT ON"),
-        ] {
-            self.scpi().write(&c)?;
+        for &g in &gens {
+            for c in [
+                format!(":SOUR{g}:MOD:STAT OFF"),
+                format!(":SOUR{g}:FUNC SIN"),
+                format!(":SOUR{g}:IMP {load}"),
+                format!(":SOUR{g}:VOLT:AMPL {:e}", req.amplitude),
+                format!(":SOUR{g}:VOLT:OFFS 0"),
+                format!(":SOUR{g}:PHAS 0"),
+                format!(":SOUR{g}:OUTP:STAT ON"),
+            ] {
+                self.scpi().write(&c)?;
+            }
         }
         self.check_errors()?;
         self.set_trigger(&TriggerUpdate {
@@ -373,7 +385,9 @@ impl Scope {
 
         // Restore, even after an error in the sweep.
         let restore = (|| -> Result<()> {
-            self.scpi().write(&format!(":SOUR{g}:OUTP:STAT OFF"))?;
+            for &g in &gens {
+                self.scpi().write(&format!(":SOUR{g}:OUTP:STAT OFF"))?;
+            }
             self.set_timebase(&TimebaseUpdate {
                 scale: Some(tb.scale),
                 offset: Some(tb.offset),
@@ -404,6 +418,8 @@ impl Scope {
 
     /// Runs the scope's own Bode plot and returns a screenshot of the finished plot (PNG).
     /// Polls `:BOD:RUNS?` until the sweep stops, which must be verified on the instrument.
+    /// Bode mode switches the two channels to AC coupling, 1 mV/div and a 20 MHz limit and
+    /// leaves that behind; afterwards Bode mode is switched off and the channels restored.
     pub fn bode_native(
         &mut self,
         req: &NativeBodeRequest,
@@ -435,7 +451,38 @@ impl Scope {
         );
         let sweep = if req.linear { "LINE" } else { "LOG" };
         v.insert("sweep".into(), ParamValue::Text(sweep.into()));
-        self.group_set("bode", None, &v, true)?;
+        let channels = [self.channel(req.input)?, self.channel(req.output)?];
+        let result = self.bode_native_run(req, &v, progress);
+        let restore = (|| -> Result<()> {
+            self.scpi().write(":BOD:RUNS OFF")?;
+            self.scpi().write(":BOD:ENAB OFF")?;
+            for c in &channels {
+                self.set_channel(
+                    c.channel,
+                    &ChannelUpdate {
+                        display: Some(c.display),
+                        scale: Some(c.scale),
+                        offset: Some(c.offset),
+                        coupling: Some(c.coupling),
+                        bw_limit: Some(c.bw_limit.clone()),
+                        ..Default::default()
+                    },
+                )?;
+            }
+            Ok(())
+        })();
+        let png = result?;
+        restore?;
+        Ok(png)
+    }
+
+    fn bode_native_run(
+        &mut self,
+        req: &NativeBodeRequest,
+        v: &ParamMap,
+        progress: &mut dyn FnMut(usize, usize),
+    ) -> Result<Vec<u8>> {
+        self.group_set("bode", None, v, true)?;
         let mut a = ParamMap::new();
         a.insert("all".into(), ParamValue::Real(req.amplitude));
         self.group_set("bode.amplitude", None, &a, false)?;
@@ -471,6 +518,10 @@ impl Scope {
         for (i, &f) in freqs.iter().enumerate() {
             self.scpi()
                 .write(&format!(":SOUR{}:FREQ {f:e}", req.generator))?;
+            if let Some(g2) = req.follow {
+                self.scpi().write(&format!(":SOUR{g2}:FREQ {f:e}"))?;
+                self.scpi().write(":SOUR1:PHAS:SYNC")?;
+            }
             // About five periods on screen.
             self.set_timebase(&TimebaseUpdate {
                 scale: Some(0.5 / f),

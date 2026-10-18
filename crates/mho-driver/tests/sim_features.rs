@@ -220,6 +220,22 @@ fn bode_sweep_of_simulated_low_pass() {
     );
     // timebase restored, generator off
     assert_eq!(s.timebase().unwrap().scale, before.scale);
+    // Reference sweep without a T piece: GII follows GI, CH2/CH1 compares the two paths.
+    let follow = mho_driver::BodeRequest {
+        follow: Some(2),
+        ..req.clone()
+    };
+    for p in s.bode_sweep(&follow, &mut |_, _| {}).unwrap() {
+        assert!(p.gain_db.abs() < 0.3 && p.phase_deg.abs() < 3.0, "{p:?}");
+    }
+    let bad = mho_driver::BodeRequest {
+        follow: Some(1),
+        ..req.clone()
+    };
+    assert!(
+        bad.validate().is_err(),
+        "follow must be the other generator"
+    );
     let same_channel = mho_driver::BodeRequest {
         output: 1,
         ..Default::default()

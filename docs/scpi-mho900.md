@@ -125,6 +125,15 @@ wird zuletzt eingeschaltet, beim Ausschalten zuerst.
   `:BODeplot:PHASEcurve:ENABle?`; die aus den Großbuchstaben abgeleitete Kurzform
   `:BOD:PHASE:ENAB?` blieb **unbeantwortet** (`:BOD:GAIN:ENAB?` dagegen funktioniert). Neue
   Befehle der Options-Gruppen stehen deshalb in der Langform des Guides in den Tabellen.
+- Am Gerät (2026-10-18): der Bode-Modus des Scopes treibt nur GI und stellt CH1/CH2 auf AC,
+  1 mV/div und 20 MHz Bandbreite; nach `:BOD:ENAB OFF` bleiben AC und 1 mV/div stehen.
+  `bode --native` stellt die Kanäle deshalb danach wieder her. Ein Lauf 100 Hz–10 MHz mit
+  10 Punkten/Dekade dauert ≈ 50 s.
+- **Referenz ohne T-Stück** (`bode --follow 2`): GII läuft frequenzgleich mit, Phasen per
+  `:SOUR1:PHAS:SYNC` ausgerichtet; gemessen wird CH2/CH1. Ergebnis am Gerät (1 Vpp, High-Z,
+  unterminierte Kabel): bis 10 MHz innerhalb 0,1 dB, bis 26 MHz 0,2 dB, oberhalb 40 MHz
+  +2 dB (Reflexionen); Phase linear steigend = konstante Laufzeitdifferenz ≈ 6,5 ns
+  (GII→CH2 früher als GI→CH1).
 - **Software-Sweep** (`bode`): Generator-Schritte, eine Single-Erfassung je Punkt, Ein-Bin-DFT
   auf beiden Kanälen derselben Erfassung (Phase daher unabhängig vom Trigger), optional
   komplex gemittelt. Auswertung: −3 dB, 0-dB-Durchgang, Phasen-/Amplitudenreserve,

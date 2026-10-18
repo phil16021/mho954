@@ -744,6 +744,7 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
             generator,
             load,
             averages,
+            follow,
             native,
             output,
         } => {
@@ -781,6 +782,7 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 amplitude: num(&amplitude, "amplitude")?,
                 load,
                 averages,
+                follow,
                 ..Default::default()
             };
             let pts = api.bode_sweep(req).await?;

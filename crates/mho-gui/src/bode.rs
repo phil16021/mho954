@@ -22,6 +22,8 @@ pub struct BodePanel {
     generator: u8,
     fifty_ohm: bool,
     averages: u32,
+    /// Drive the other generator in step (path comparison without a T piece).
+    follow: bool,
     /// Run the scope's own Bode plot (result as screenshot) instead of the software sweep.
     native: bool,
 }
@@ -38,6 +40,7 @@ impl Default for BodePanel {
             generator: 1,
             fifty_ohm: false,
             averages: 1,
+            follow: false,
             native: false,
         }
     }
@@ -106,6 +109,12 @@ impl BodePanel {
                 ui.label("averages");
                 ui.add(egui::Slider::new(&mut self.averages, 1..=16));
                 ui.end_row();
+                ui.label("");
+                ui.checkbox(&mut self.follow, "other generator in step")
+                    .on_hover_text(
+                        "no T piece: GI→CH1 and GII→CH2 run the same sine, CH2/CH1 compares the paths",
+                    );
+                ui.end_row();
             }
             ui.label("DUT in / out");
             ui.horizontal(|ui| {
@@ -148,6 +157,7 @@ impl BodePanel {
                 points: self.points,
                 amplitude,
                 averages: self.averages,
+                follow: self.follow.then_some(3 - self.generator),
                 load: Some(if self.fifty_ohm { "50" } else { "highz" }.into()),
                 ..Default::default()
             };

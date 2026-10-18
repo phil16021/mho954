@@ -259,6 +259,10 @@ pub enum Command {
         /// Acquisitions averaged per frequency (1..16).
         #[arg(long, default_value_t = 1)]
         averages: u32,
+        /// Drive the other generator in step (same sine, phases aligned) to compare two
+        /// signal paths, e.g. GI->CH1 against GII->CH2 without a T piece.
+        #[arg(long)]
+        follow: Option<u8>,
         /// Run the scope's own Bode plot instead and save its screenshot (-o file.png).
         /// `--points` is then per decade (10..100).
         #[arg(long)]

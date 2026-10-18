@@ -98,6 +98,7 @@ mho954 do afg1.load_arb D:/wave.csv        # Arb-Datei vom USB-Stick des Scopes
 mho954 bode --start 100 --stop 1M --dut-in 1 --dut-out 2 -o bode.csv   # Software-Sweep (AFG)
 mho954 bode --start 100 --stop 1M --averages 4 --load 50                # gemittelt, 50-Ω-Last
 mho954 bode --native --start 100 --stop 1M -o bode.png                  # Bode des Scopes (Bild)
+mho954 bode --start 100 --stop 80M --follow 2   # ohne T-Stück: GI→CH1 gegen GII→CH2 (Pfadvergleich)
 mho954 set bus.flexray -n 1 --activate source=CHAN1 baud=10000000      # Optionen FlexA/AUDIOA/AEROA
 mho954 set trigger.i2s --activate clock=CHAN1 word_select=CHAN2 data_source=CHAN3
 mho954 verify --list                       # Befehle einzeln am Gerät prüfen (siehe unten)
