@@ -341,6 +341,17 @@ impl ScopeApi for LocalBackend {
         self.device.call(|s| s.capabilities()).await
     }
 
+    /// The whole sequence runs as one device job, so no other client interleaves.
+    async fn set_generator(
+        &self,
+        channel: u8,
+        update: GeneratorUpdate,
+    ) -> ApiResult<Option<mho_driver::params::ParamMap>> {
+        self.device
+            .call_mut(move |s| s.set_generator(channel, &update))
+            .await
+    }
+
     async fn groups(&self) -> ApiResult<Vec<mho_driver::params::GroupInfo>> {
         use mho_driver::params::{GROUPS, Requires, describe};
         let (trusted, available) = self

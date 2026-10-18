@@ -61,6 +61,9 @@ pub struct TimebaseArgs {
 
 #[derive(Args)]
 pub struct TriggerArgs {
+    /// Trigger type, e.g. EDGE (other types: `set trigger.<type> --activate ...`).
+    #[arg(long)]
+    pub mode: Option<String>,
     /// CHAN1..4, EXT, ...
     #[arg(long)]
     pub source: Option<String>,
@@ -73,8 +76,10 @@ pub struct TriggerArgs {
     /// auto | normal | single.
     #[arg(long)]
     pub sweep: Option<TriggerSweep>,
+    /// DC | AC | LFReject | HFReject.
     #[arg(long)]
     pub coupling: Option<String>,
+    /// Holdoff in seconds.
     #[arg(long)]
     pub holdoff: Option<f64>,
 }
@@ -375,6 +380,32 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
         Command::Single => api.action(Action::Single).await?,
         Command::Auto => api.action(Action::Autoscale).await?,
         Command::Force => api.action(Action::Force).await?,
+        Command::Clear => api.action(Action::Clear).await?,
+        Command::Acquire {
+            depth,
+            acq_type,
+            averages,
+        } => {
+            let u = AcquireUpdate {
+                memory_depth: depth,
+                acq_type,
+                averages,
+            };
+            let a = if u == AcquireUpdate::default() {
+                api.acquire().await?
+            } else {
+                api.set_acquire(u).await?
+            };
+            println!(
+                "acquire {:?}  {}  depth {}  averages {}",
+                a.acq_type,
+                format_si(a.sample_rate, "Sa/s"),
+                a.memory_depth
+                    .map(|d| format_si(d, "pts"))
+                    .unwrap_or_else(|| "?".into()),
+                a.averages
+            );
+        }
         Command::Channel(a) => {
             let display = if a.on {
                 Some(true)
@@ -421,7 +452,7 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
         }
         Command::Trigger(a) => {
             let u = TriggerUpdate {
-                mode: None,
+                mode: a.mode,
                 sweep: a.sweep,
                 coupling: a.coupling,
                 holdoff: a.holdoff,
@@ -439,6 +470,7 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
         Command::Measure {
             items,
             source,
+            source2,
             local,
             ..
         } => {
@@ -462,7 +494,7 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                     .measure(MeasureRequest {
                         items,
                         source,
-                        source2: None,
+                        source2,
                     })
                     .await?
                 {
@@ -484,11 +516,22 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
             raw,
             output,
         } => capture(backend, source, raw, &output).await?,
-        Command::Fft { source, peaks, raw } => {
+        Command::Fft {
+            source,
+            peaks,
+            raw,
+            window,
+        } => {
+            let window = match window.to_ascii_lowercase().as_str() {
+                "rect" | "rectangular" => mho_dsp::Window::Rectangular,
+                "hann" | "hanning" => mho_dsp::Window::Hann,
+                "blackman" => mho_dsp::Window::Blackman,
+                "flattop" | "flat-top" => mho_dsp::Window::FlatTop,
+                other => bail!("window {other:?}: rectangular, hann, blackman or flattop"),
+            };
             let mode = if raw { WaveMode::Raw } else { WaveMode::Normal };
             let w = api.waveform(source, mode).await?;
-            let spec =
-                mho_dsp::spectrum(&w.volts(), w.preamble.x_increment, mho_dsp::Window::FlatTop);
+            let spec = mho_dsp::spectrum(&w.volts(), w.preamble.x_increment, window);
             println!(
                 "{}: {} points, resolution {}",
                 w.source,
@@ -575,7 +618,12 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
             source,
             source2,
             reset,
+            clear_all,
         } => {
+            if clear_all {
+                api.measure_action(mho_driver::MeasureAction::ClearAll)
+                    .await?;
+            }
             if reset {
                 api.measure_action(mho_driver::MeasureAction::ResetStatistics)
                     .await?;
@@ -746,11 +794,14 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
             dut_out,
             amplitude,
             generator,
+            settle,
             load,
             averages,
             follow,
             native,
             keep,
+            linear,
+            timeout,
             output,
         } => {
             let num = |s: &str, what: &str| -> anyhow::Result<f64> {
@@ -769,7 +820,8 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                     points_per_decade: points.clamp(10, 100) as u32,
                     amplitude: num(&amplitude, "amplitude")?,
                     keep_on_screen: keep,
-                    ..Default::default()
+                    linear,
+                    timeout_s: timeout,
                 };
                 let png = api.bode_native(req).await?;
                 if keep {
@@ -795,7 +847,7 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                 load,
                 averages,
                 follow,
-                ..Default::default()
+                settle_ms: settle,
             };
             let pts = api.bode_sweep(req).await?;
             let f: Vec<f64> = pts.iter().map(|p| p.frequency).collect();

@@ -630,7 +630,14 @@ impl Scope {
     }
 
     /// Hardware frequency counter reading (`None` when off or no signal).
+    /// Frequency counter reading. With the counter off the scope answers 0, which would read
+    /// as a measurement, so the state is checked first (like the DVM).
     pub fn counter_value(&mut self) -> Result<Option<f64>> {
+        if !self.scpi.query_bool(":COUN:ENAB?")? {
+            return Err(DriverError::State(
+                "the counter is off; enable it first (group `counter`, enable=true)".into(),
+            ));
+        }
         Ok(valid_value(self.scpi.query_f64(":COUN:CURR?")?))
     }
 

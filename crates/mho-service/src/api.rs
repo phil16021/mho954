@@ -241,6 +241,10 @@ pub trait ScopeApi: Send + Sync + 'static {
                 .group_set("afg".into(), Some(channel), output(true), false)
                 .await?;
         }
+        // Only modulation changed: report the channel all the same (if it may be read).
+        if state.is_none() && update != mho_driver::GeneratorUpdate::default() {
+            state = self.group_get("afg".into(), Some(channel)).await.ok();
+        }
         Ok(state)
     }
     async fn network(&self) -> ApiResult<NetworkState>;

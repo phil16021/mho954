@@ -215,18 +215,54 @@ async fn mcp_initialize_and_call_tool() {
     .text()
     .await
     .unwrap();
-    for tool in [
-        "get_status",
-        "measure",
-        "get_waveform",
-        "screenshot",
+    // Exactly these tools, so a new tool also gets a test and a README row.
+    let offered: std::collections::BTreeSet<&str> = list
+        .match_indices("\"name\":\"")
+        .map(|(i, m)| {
+            let rest = &list[i + m.len()..];
+            &rest[..rest.find('"').unwrap()]
+        })
+        .collect();
+    let expected: std::collections::BTreeSet<&str> = [
+        "analyze_waveform",
+        "bode_native",
+        "bode_sweep",
+        "configure_acquisition",
+        "configure_channel",
+        "configure_network",
+        "configure_settings",
+        "configure_timebase",
+        "configure_trigger",
+        "decode_bus",
         "fft_peaks",
-    ] {
-        assert!(
-            list.contains(&format!("\"name\":\"{tool}\"")),
-            "missing {tool}"
-        );
-    }
+        "get_capabilities",
+        "get_network",
+        "get_settings",
+        "get_status",
+        "get_waveform",
+        "identify",
+        "list_measurement_items",
+        "list_options",
+        "list_readouts",
+        "list_scope_commands",
+        "list_settings_groups",
+        "logic_capture",
+        "measure",
+        "measurement_action",
+        "measurement_statistics",
+        "raw_scpi",
+        "read_counter",
+        "read_dvm",
+        "read_values",
+        "run_control",
+        "run_scope_command",
+        "scope_fft_peaks",
+        "screenshot",
+        "set_generator",
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(offered, expected);
     let call = post(
         serde_json::json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{
             "name":"analyze_waveform","arguments":{"source":"CHAN2"}}}),
@@ -495,7 +531,16 @@ async fn rest_endpoints_success_and_errors() {
         .values()
         .map(|p| p.as_object().unwrap().len())
         .sum();
-    assert!(ops >= 25, "{ops} operations");
+    // Every route is documented, each with a summary.
+    assert_eq!(ops, 46, "{ops} operations");
+    for (path, item) in doc["paths"].as_object().unwrap() {
+        for (method, op) in item.as_object().unwrap() {
+            assert!(
+                op["summary"].as_str().is_some_and(|s| !s.is_empty()),
+                "{method} {path} has no summary"
+            );
+        }
+    }
     shutdown.cancel();
 }
 
@@ -795,8 +840,14 @@ async fn settings_groups_stats_counter() {
         .await
         .unwrap();
     assert!((st["average"].as_f64().unwrap() - 5e3).abs() < 50.0, "{st}");
-    let off: serde_json::Value = get(&format!("{v1}/counter")).await.json().await.unwrap();
-    assert!(off.is_null());
+    // Counter off: a clear 409 instead of a 0 that looks like a measurement.
+    let off = get(&format!("{v1}/counter")).await;
+    assert_eq!(off.status(), 409);
+    let msg: serde_json::Value = off.json().await.unwrap();
+    assert!(
+        msg["message"].as_str().unwrap().contains("group `counter`"),
+        "{msg}"
+    );
     c.put(format!("{v1}/groups/counter"))
         .json(&serde_json::json!({"enable": true, "source": "CHAN1"}))
         .send()
@@ -1070,7 +1121,14 @@ async fn mcp_settings_tools() {
         .await;
     assert!(text_of(&r).contains("average"));
     let r = m.call("read_counter", serde_json::json!({})).await;
-    assert_eq!(r["isError"], false);
+    assert_eq!(r["isError"], true, "counter is off: {r}");
+    assert!(text_of(&r).contains("group `counter`"), "{r}");
+    let r = m.call("read_dvm", serde_json::json!({})).await;
+    assert_eq!(r["isError"], true, "DVM is off: {r}");
+    let r = m.call("list_readouts", serde_json::json!({})).await;
+    assert!(text_of(&r).contains("enable_group"), "{r}");
+    let r = m.call("list_scope_commands", serde_json::json!({})).await;
+    assert!(text_of(&r).contains("precondition"), "{r}");
     let r = m
         .call(
             "measurement_action",
@@ -1313,5 +1371,188 @@ async fn bode_sweeps_stream_to_every_viewer() {
         }
     }
     assert_eq!(got.expect("late viewer").id, last.id);
+    shutdown.cancel();
+}
+
+/// Every method of the HTTP client once against the server, so each path, query parameter
+/// and body format the client uses is exercised (the GUI and the CLI with a daemon run on it).
+#[tokio::test(flavor = "multi_thread")]
+async fn remote_client_covers_every_method() {
+    use mho_driver::params::{ParamMap, ParamValue};
+    let (url, shutdown) = start(true).await;
+    let api = RemoteBackend::new(&url);
+    let one = |k: &str, v: ParamValue| -> ParamMap { [(k.to_string(), v)].into_iter().collect() };
+
+    assert!(api.info().await.unwrap().connected);
+    assert_eq!(api.status().await.unwrap().channels.len(), 4);
+    api.channel(2).await.unwrap();
+    api.set_channel(
+        2,
+        ChannelUpdate {
+            scale: Some(0.2),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let tb = api.timebase().await.unwrap();
+    api.set_timebase(mho_driver::TimebaseUpdate {
+        scale: Some(tb.scale),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    api.trigger().await.unwrap();
+    api.set_trigger(mho_driver::TriggerUpdate {
+        holdoff: Some(1e-6),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    api.acquire().await.unwrap();
+    let a = api
+        .set_acquire(mho_driver::AcquireUpdate {
+            memory_depth: Some("100k".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(a.memory_depth.is_some());
+    api.action(Action::Clear).await.unwrap();
+    let m = api
+        .measure(mho_service::MeasureRequest {
+            items: vec!["FREQ".into()],
+            source: "CHAN1".into(),
+            source2: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(m.len(), 1);
+    api.waveform("CHAN1".into(), WaveMode::Normal)
+        .await
+        .unwrap();
+    assert!(api.screenshot().await.unwrap().starts_with(b"\x89PNG"));
+    assert!(!api.options().await.unwrap().is_empty());
+    assert!(api.install_option("not-a-license".into()).await.is_err());
+    let blob = api.setup_save().await.unwrap();
+    api.setup_load(blob).await.unwrap();
+    let r = api
+        .scpi(mho_service::ScpiRequest {
+            command: "*IDN?".into(),
+            timeout_ms: None,
+        })
+        .await
+        .unwrap();
+    assert!(r.response.unwrap().contains("MHO954"));
+    let st = api
+        .measure_stats(mho_service::StatsRequest {
+            item: "VPP".into(),
+            source: "CHAN1".into(),
+            source2: None,
+        })
+        .await
+        .unwrap();
+    assert_eq!(st.item, "VPP");
+    api.measure_action(mho_driver::MeasureAction::ResetStatistics)
+        .await
+        .unwrap();
+    // counter: refused while off, a value once on
+    assert_eq!(
+        api.counter_value().await.unwrap_err().kind,
+        mho_service::ErrorKind::Conflict
+    );
+    api.group_set(
+        "counter".into(),
+        None,
+        one("enable", ParamValue::Bool(true)),
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(api.counter_value().await.unwrap().is_some());
+    assert_eq!(
+        api.dvm_value().await.unwrap_err().kind,
+        mho_service::ErrorKind::Conflict
+    );
+    // decoder table needs the decoder on
+    assert!(api.decode_bus(1).await.is_err());
+    assert!(api.fft_peaks(1).await.is_err());
+    assert!(!api.readouts().await.unwrap().is_empty());
+    // readout with ?enable=true switches the mode on
+    assert!(api.readout("mask".into(), false).await.is_err());
+    assert!(api.readout("mask".into(), true).await.is_ok());
+    assert!(!api.commands().await.unwrap().is_empty());
+    api.run_command("display.clear".into(), Default::default())
+        .await
+        .unwrap();
+    api.logic_capture(1).await.unwrap();
+    let pts = api
+        .bode_sweep(mho_driver::BodeRequest {
+            start: 1e3,
+            stop: 1e4,
+            points: 2,
+            settle_ms: 0,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(pts.len(), 2);
+    let png = api
+        .bode_native(mho_driver::NativeBodeRequest {
+            start: 100.0,
+            stop: 1e4,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(png.starts_with(b"\x89PNG"));
+    assert!(api.modules().await.unwrap().function_generator);
+    assert_eq!(api.capabilities().await.unwrap().bandwidth_hz, Some(800e6));
+    assert!(api.groups().await.unwrap().len() >= 50);
+    // instance and activate as query parameters
+    let set = api
+        .group_set(
+            "bus.rs232".into(),
+            Some(3),
+            one("baud", ParamValue::Int(9600)),
+            true,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(set["baud"], ParamValue::Int(9600));
+    assert_eq!(
+        api.group_get("bus".into(), Some(3)).await.unwrap()["display"],
+        ParamValue::Bool(true),
+        "activate=true switched decoder 3 on"
+    );
+    assert_eq!(
+        api.group_get("bus".into(), Some(2)).await.unwrap()["display"],
+        ParamValue::Bool(false)
+    );
+    // generator through PUT /generator/{n}; modulation alone still returns the state
+    let g = api
+        .set_generator(
+            2,
+            mho_driver::GeneratorUpdate {
+                modulation: Some("am".into()),
+                mod_depth: Some(40.0),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .expect("state of GII");
+    assert!(g.contains_key("frequency"));
+    let net = api.network().await.unwrap();
+    api.set_network(mho_driver::NetworkUpdate {
+        hostname: Some(net.hostname.clone()),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let mut live = api.live_config().await.unwrap();
+    live.max_fps = 7.0;
+    assert_eq!(api.set_live_config(live).await.unwrap().max_fps, 7.0);
     shutdown.cancel();
 }

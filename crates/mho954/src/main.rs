@@ -58,11 +58,13 @@ pub enum Command {
     Idn,
     /// Show what the scope can do: bandwidth with upgrades, memory limits, generator, options.
     Caps {
+        /// Print JSON instead of text.
         #[arg(long)]
         json: bool,
     },
     /// Show the full scope state.
     Status {
+        /// Print JSON instead of text.
         #[arg(long)]
         json: bool,
     },
@@ -78,6 +80,20 @@ pub enum Command {
     Auto,
     /// Force a trigger.
     Force,
+    /// Clear the waveforms on the scope screen.
+    Clear,
+    /// Show the acquisition, or change it: `acquire --depth 500M --type average --averages 16`.
+    Acquire {
+        /// AUTO, 1k ... 500M (limits per active channel count, see `caps`).
+        #[arg(long)]
+        depth: Option<String>,
+        /// normal | peak | average | hres.
+        #[arg(long = "type")]
+        acq_type: Option<mho_driver::AcquireType>,
+        /// Averages (power of two) for type average.
+        #[arg(long)]
+        averages: Option<u32>,
+    },
     /// Configure an analog channel.
     Channel(commands::ChannelArgs),
     /// Configure the timebase.
@@ -90,6 +106,9 @@ pub enum Command {
         items: Vec<String>,
         #[arg(short, long, default_value = "CHAN1")]
         source: String,
+        /// Second source for delay/phase items (RRDelay, RRPHase, ...).
+        #[arg(long)]
+        source2: Option<String>,
         /// Compute locally from the screen waveform instead of asking the scope.
         #[arg(long)]
         local: bool,
@@ -99,6 +118,7 @@ pub enum Command {
     },
     /// Save a screenshot.
     Screenshot {
+        /// PNG file to write.
         #[arg(short, long, default_value = "screenshot.png")]
         output: PathBuf,
     },
@@ -112,16 +132,21 @@ pub enum Command {
         #[arg(short, long)]
         output: PathBuf,
     },
-    /// Spectrum peaks of a channel.
+    /// Spectrum peaks of a channel (computed locally).
     Fft {
         #[arg(short, long, default_value = "CHAN1")]
         source: String,
+        /// Number of peaks.
         #[arg(short = 'n', long, default_value_t = 5)]
         peaks: usize,
+        /// Use the full acquisition memory (scope stopped) instead of the screen data.
         #[arg(long)]
         raw: bool,
+        /// rectangular | hann | blackman | flattop (flattop: accurate amplitudes).
+        #[arg(long, default_value = "flattop")]
+        window: String,
     },
-    /// Software options.
+    /// Software options; without subcommand: list them.
     Options {
         #[command(subcommand)]
         cmd: Option<commands::OptionsCmd>,
@@ -133,7 +158,8 @@ pub enum Command {
     },
     /// Restore a setup saved by `backup` (setup.bin).
     Restore { file: PathBuf },
-    /// LAN (RJ45) settings: show, or change with `net set ...` (WLAN has no SCPI interface).
+    /// LAN (RJ45) settings: without subcommand show them, or change with `net set ...` (WLAN has
+    /// no SCPI interface).
     Net {
         #[command(subcommand)]
         cmd: Option<commands::NetCmd>,
@@ -143,11 +169,15 @@ pub enum Command {
         item: String,
         #[arg(short, long, default_value = "CHAN1")]
         source: String,
+        /// Second source for delay/phase items.
         #[arg(long)]
         source2: Option<String>,
         /// Reset the statistics first.
         #[arg(long)]
         reset: bool,
+        /// Remove all measurements from the scope screen first.
+        #[arg(long)]
+        clear_all: bool,
     },
     /// Hardware frequency counter reading (configure with `set counter enable=true ...`).
     Counter {
@@ -157,7 +187,8 @@ pub enum Command {
     },
     /// Digital voltmeter reading (configure with `set dvm enable=true ...`).
     Dvm,
-    /// Read a value set: cursor.manual, cursor.track, mask, search, histogram, save.
+    /// Read a value set: cursor.manual, cursor.track, mask, search, histogram, save, afg.arb
+    /// (`--enable` switches the mode on if it is off).
     Read {
         id: Option<String>,
         /// List the value sets.
@@ -167,10 +198,12 @@ pub enum Command {
         #[arg(long)]
         enable: bool,
     },
-    /// Run a one-shot command (save/load on the scope, resets, recording); `--list` shows them.
+    /// Run a one-shot command (save/load on the scope, resets, recording, references, generator
+    /// align/arb load); `--list` shows them with their preconditions.
     Do {
         id: Option<String>,
-        /// File on the scope for save/load, e.g. D:/bench1.stp.
+        /// File on the scope for save/load (C:/ internal memory, D:/ USB stick in the scope), e.g.
+        /// C:/bench1.stp, or the number for ref.save/ref.reset.
         path: Option<String>,
         #[arg(long)]
         list: bool,
@@ -178,7 +211,8 @@ pub enum Command {
         #[arg(long)]
         yes: bool,
     },
-    /// Digital channels D0..D15 through decoder `bus` (logic probe needed).
+    /// Digital channels D0..D15 through decoder `bus` (logic probe PLA2216 needed; the decoder
+    /// is restored afterwards).
     Logic {
         #[arg(long, default_value_t = 4)]
         bus: u8,
@@ -237,12 +271,16 @@ pub enum Command {
         #[arg(long)]
         mod_wave: Option<String>,
     },
-    /// Software Bode sweep with the built-in function generator (AFG option).
+    /// Bode plot with the built-in generator (AFG option): software sweep with data and CSV, or
+    /// with --native the scope's own plot as screenshot.
     Bode {
+        /// Start frequency in Hz (SI prefixes: 100, 1k; native 10 Hz..3 MHz and <= stop/10).
         #[arg(long, default_value = "100")]
         start: String,
+        /// Stop frequency in Hz (up to the generator's sine limit; native up to 30 MHz).
         #[arg(long, default_value = "1M")]
         stop: String,
+        /// Log-spaced points (2..200); with --native points per decade (10..100).
         #[arg(long, default_value_t = 31)]
         points: usize,
         /// Channel at the DUT input.
@@ -254,8 +292,12 @@ pub enum Command {
         /// Generator amplitude in Vpp.
         #[arg(long, default_value = "1")]
         amplitude: String,
+        /// Generator 1 (GI) or 2 (GII).
         #[arg(long, default_value_t = 1)]
         generator: u8,
+        /// Wait after each frequency step in ms.
+        #[arg(long, default_value_t = 100)]
+        settle: u64,
         /// Load the generator expects: highz or 50.
         #[arg(long)]
         load: Option<String>,
@@ -274,6 +316,12 @@ pub enum Command {
         /// channels keep its AC coupling, 1 mV/div and 20 MHz limit).
         #[arg(long, requires = "native")]
         keep: bool,
+        /// With --native: linear instead of logarithmic frequency steps.
+        #[arg(long, requires = "native")]
+        linear: bool,
+        /// With --native: give up after this many seconds.
+        #[arg(long, requires = "native", default_value_t = 300)]
+        timeout: u64,
         /// Write CSV (frequency, gain, phase, unwrapped phase; summary as # lines).
         #[arg(short, long)]
         output: Option<PathBuf>,

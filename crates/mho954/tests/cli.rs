@@ -68,6 +68,26 @@ fn measurements() {
     assert!(nodata.contains("no data"), "{nodata}");
     let err = stderr_of_failure(cli(d.path()).args(["measure", "BOGUS", "-s", "1"]));
     assert!(err.contains("unknown measurement item"), "{err}");
+    // two-source item: delay CH1 -> CH2
+    let delay = stdout(cli(d.path()).args(["measure", "RRDELAY", "-s", "1", "--source2", "2"]));
+    assert!(delay.contains("RRDELAY"), "{delay}");
+    let fft = stdout(cli(d.path()).args(["fft", "-s", "1", "-n", "1", "--window", "hann"]));
+    assert!(fft.contains("1.000 kHz"), "{fft}");
+    let bad = stderr_of_failure(cli(d.path()).args(["fft", "--window", "kaiser"]));
+    assert!(bad.contains("rectangular, hann"), "{bad}");
+    // acquisition: show, set, limit; clear
+    let acq = stdout(cli(d.path()).arg("acquire"));
+    assert!(acq.contains("depth"), "{acq}");
+    let set = stdout(cli(d.path()).args(["acquire", "--type", "average", "--averages", "16"]));
+    assert!(
+        set.contains("Average") && set.contains("averages 16"),
+        "{set}"
+    );
+    let deep = stderr_of_failure(cli(d.path()).args(["acquire", "--depth", "500M"]));
+    assert!(deep.contains("250M"), "two channels on: {deep}");
+    stdout(cli(d.path()).arg("clear"));
+    let err = stderr_of_failure(cli(d.path()).arg("counter"));
+    assert!(err.contains("group `counter`"), "{err}");
 }
 
 #[test]

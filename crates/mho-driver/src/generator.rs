@@ -238,6 +238,38 @@ pub fn check_update(
     Ok(())
 }
 
+impl crate::Scope {
+    /// Changes generator channel `n` in one go: output off first (if asked), then waveform
+    /// settings and modulation, output on last. Returns the channel's state if group `afg`
+    /// may be read.
+    pub fn set_generator(&mut self, n: u8, update: &GeneratorUpdate) -> Result<Option<ParamMap>> {
+        let settings = update.settings()?;
+        let modulation = update.modulation_settings()?;
+        let output = |on: bool| {
+            let mut m = ParamMap::new();
+            m.insert("output".into(), ParamValue::Bool(on));
+            m
+        };
+        let mut state = None;
+        if update.output == Some(false) {
+            state = self.group_set("afg", Some(n), &output(false), false)?;
+        }
+        if !settings.is_empty() {
+            state = self.group_set("afg", Some(n), &settings, false)?;
+        }
+        if !modulation.is_empty() {
+            self.group_set("afg.modulation", Some(n), &modulation, false)?;
+        }
+        if update.output == Some(true) {
+            state = self.group_set("afg", Some(n), &output(true), false)?;
+        }
+        if state.is_none() && *update != GeneratorUpdate::default() {
+            state = self.group_get("afg", Some(n), false).ok();
+        }
+        Ok(state)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

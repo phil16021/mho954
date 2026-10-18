@@ -229,7 +229,9 @@ impl McpScope {
 
     #[tool(
         description = "Change settings of one analog channel. Only the given fields are changed. \
-        scale is volts/div, offset in volts, coupling DC|AC|GND, impedance OneMeg|Fifty, bw_limit OFF|20M|250M."
+        display on/off, scale is volts/div, offset in volts, coupling DC|AC|GND, impedance OneMeg|Fifty, \
+        bw_limit OFF|20M|250M (OFF = full bandwidth, see get_capabilities), probe ratio (1, 10, 100, ...), \
+        invert, vernier (fine scale)."
     )]
     async fn configure_channel(&self, Parameters(p): Parameters<ConfigureChannel>) -> ToolResult {
         ok_json(&try_api!(self.api.set_channel(p.channel, p.settings).await))
@@ -243,8 +245,10 @@ impl McpScope {
     }
 
     #[tool(
-        description = "Change the edge trigger: edge_source (CHAN1..4), edge_slope (Positive|Negative|Either), \
-        edge_level in volts, sweep (Auto|Normal|Single), coupling, holdoff in seconds."
+        description = "Change the trigger: mode (EDGE here; other types such as PULSe, RUNT, IIC, CAN, \
+        FLEXray are set up with configure_settings on group trigger.<type> with activate=true), \
+        edge_source (CHAN1..4, D0..D15), edge_slope (Positive|Negative|Either), edge_level in volts, \
+        sweep (Auto|Normal|Single), coupling (DC|AC|LFReject|HFReject), holdoff in seconds."
     )]
     async fn configure_trigger(&self, Parameters(p): Parameters<TriggerUpdate>) -> ToolResult {
         ok_json(&try_api!(self.api.set_trigger(p).await))
@@ -252,9 +256,11 @@ impl McpScope {
 
     #[tool(
         description = "Change acquisition: memory_depth (AUTO, 1k, 10k, 100k, 1M, 10M, 25M, 50M, 100M, 125M, \
-        200M, 250M, 500M; the maximum depends on the active channels and RLU05: 500M/250M/125M with \
-        1/2/3-4 channels, see get_capabilities), acq_type (Normal|Peak|Average|HighRes), averages \
-        (power of two). Deep records take minutes to download (~1.3 MB/s over USB)."
+        200M, 250M, 500M; the maximum depends on the active channels: 500M/250M/125M with 1/2/3-4 \
+        channels with option RLU05, else 100M/50M/25M, see get_capabilities), acq_type \
+        (Normal|Peak|Average|HighRes), averages (power of two). The depth is an upper limit: the \
+        record only fills at slow timebases (sample rate max 4 GSa/s; 500M needs >= 12.5 ms/div). \
+        RAW downloads run at ~1.2 MB/s over USB, ~0.9 MB/s over LAN (500M points = 1 GB ~ 15 min)."
     )]
     async fn configure_acquisition(&self, Parameters(p): Parameters<AcquireUpdate>) -> ToolResult {
         ok_json(&try_api!(self.api.set_acquire(p).await))
@@ -396,9 +402,13 @@ impl McpScope {
 
     #[tool(
         description = "List settings groups beyond the basic channel/timebase/edge trigger: all trigger \
-        types (pulse, slope, runt, window, timeout, pattern, delay, setup/hold, nth edge, RS232, I2C, SPI, CAN, \
-        LIN), measurement setup, counter, voltmeter, decoders, math, cursors, display… with each parameter's \
-        range and accepted values. `verified` groups can be read; `available` tells whether the hardware exists."
+        types (pulse, slope, video, pattern, duration, timeout, runt, window, delay, setup/hold, nth edge, \
+        RS232, I2C, SPI, CAN, LIN, and with options FlexRay, I2S, MIL-STD-1553), decoders (bus.parallel, \
+        rs232, i2c, spi, can, lin, and with options canfd, flexray, i2s, m1553), math and FFT, cursors, \
+        display, measurement setup, counter, voltmeter, histogram, mask, search, record, reference, logic \
+        analyzer (la), function generator (afg, afg.modulation) and the scope's Bode plot (bode, \
+        bode.amplitude), with each parameter's range and accepted values. `verified` groups can be read; \
+        `available` is false when the hardware or option (`requires`) is missing; such groups are refused."
     )]
     async fn list_settings_groups(&self, Parameters(p): Parameters<GroupsArgs>) -> ToolResult {
         let mut groups = try_api!(self.api.groups().await);
@@ -449,8 +459,8 @@ impl McpScope {
     }
 
     #[tool(
-        description = "Read the hardware frequency counter (configure it with group `counter`; null = no \
-        valid reading)."
+        description = "Read the hardware frequency counter. It must be on (group `counter`, enable=true, \
+        source, mode); an error says so otherwise. null = no valid reading."
     )]
     async fn read_counter(&self) -> ToolResult {
         ok_json(&serde_json::json!({ "value": try_api!(self.api.counter_value().await) }))
@@ -459,9 +469,10 @@ impl McpScope {
     #[tool(
         description = "Read the decoded events of protocol decoder bus 1..4 (time in seconds plus \
         the columns the scope reports, e.g. TX/RX, address/data, ID/data). Set the decoder up first \
-        with configure_settings: group `bus.rs232`, `bus.i2c`, `bus.spi`, `bus.can`, `bus.lin` or \
-        `bus.parallel` with activate=true (switches the decoder on), and group `bus` for the \
-        number format."
+        with configure_settings: group `bus.rs232`, `bus.i2c`, `bus.spi`, `bus.can` (+ `bus.canfd` for \
+        the CAN-FD data phase), `bus.lin`, `bus.parallel`, or with options `bus.flexray`, `bus.i2s`, \
+        `bus.m1553`, with activate=true (switches the decoder on), and group `bus` for the number \
+        format."
     )]
     async fn decode_bus(&self, Parameters(p): Parameters<DecodeArgs>) -> ToolResult {
         let mut table = try_api!(self.api.decode_bus(p.bus).await);
@@ -497,12 +508,16 @@ impl McpScope {
     }
 
     #[tool(
-        description = "Run a one-shot command on the scope. Files on the scope (path C:/… internal or \
-        D:/… USB stick, name ≤ 26 characters): save.setup (.stp), save.waveform (.csv/.bin/.wfm), \
-        save.memory (.bin/.csv), save.image (.png/.bmp/.jpg), save.mask (.pf), load.setup (.stp), \
-        load.mask (.pf), histogram.save (.csv). Without path: display.clear, mask.create, mask.reset, \
-        histogram.reset, record.start, record.stop, record.play, record.pause. reset (*RST, factory \
-        defaults) changes every setting: ask the user first and pass confirm=true only after they agreed."
+        description = "Run a one-shot command on the scope (list_scope_commands shows them with their \
+        preconditions). Files on the scope (path C:/... internal memory or D:/... USB stick in the \
+        scope, name <= 26 characters): save.setup (.stp), save.waveform (.csv/.bin/.wfm), save.memory \
+        (.bin/.csv), save.image (.png/.bmp/.jpg), save.mask (.pf), load.setup (.stp), load.mask (.pf), \
+        histogram.save (.csv), afg1.load_arb / afg2.load_arb (.csv/.arb). With an index in `path` \
+        (1..10): ref.save, ref.reset. Without argument: display.clear, mask.create, mask.reset, \
+        histogram.reset, record.start/stop/play/pause, afg.align_phase. Preconditions are checked: \
+        histogram.* needs the histogram on, mask.* and save.mask the mask test, record.* recording \
+        (group record). reset (*RST, factory defaults) changes every setting: ask the user first and \
+        pass confirm=true only after they agreed."
     )]
     async fn run_scope_command(&self, Parameters(p): Parameters<CommandArgs>) -> ToolResult {
         try_api!(
@@ -548,10 +563,13 @@ impl McpScope {
 
     #[tool(
         description = "Measure a frequency response (Bode plot) with the built-in function generator \
-        (AFG option): sine sweep from start to stop Hz (points, log spaced), generator 1|2, input/output \
-        = channel numbers probing DUT input and output, amplitude in Vpp. Returns gain in dB and phase \
-        in degrees per frequency. Switches the generator output on during the sweep: make sure the \
-        user expects a signal on the generator output."
+        (AFG option): sine sweep from start to stop Hz (points, log spaced; up to the generator's sine \
+        limit, see get_capabilities), generator 1|2, input/output = channel numbers probing DUT input \
+        and output, amplitude in Vpp, load (highz|50), averages (1..16, complex mean), settle_ms per \
+        step, follow (the other generator runs the same sine phase-aligned: compares GI->input vs \
+        GII->output paths without a T piece). Returns gain in dB and phase in degrees per frequency; \
+        GUIs watching the server draw it live. Switches the generator output(s) on during the sweep: \
+        make sure the user expects a signal there."
     )]
     async fn bode_sweep(&self, Parameters(p): Parameters<mho_driver::BodeRequest>) -> ToolResult {
         ok_json(&try_api!(self.api.bode_sweep(p).await))
@@ -594,6 +612,24 @@ impl McpScope {
     #[tool(description = "Read the digital voltmeter (enable/configure it with group `dvm`).")]
     async fn read_dvm(&self) -> ToolResult {
         ok_json(&serde_json::json!({ "value": try_api!(self.api.dvm_value().await) }))
+    }
+
+    #[tool(
+        description = "List the read-only value sets (readouts) with their items and units, whether this \
+        scope has them (available), whether their mode can be switched on by read_values with \
+        enable=true (can_enable) and which settings group switches it on (enable_group)."
+    )]
+    async fn list_readouts(&self) -> ToolResult {
+        ok_json(&try_api!(self.api.readouts().await))
+    }
+
+    #[tool(
+        description = "List the one-shot scope commands for run_scope_command: id, title, file \
+        extensions (path) or index range, whether they need confirmation, whether this scope has them \
+        (available) and their precondition (e.g. the histogram must be on)."
+    )]
+    async fn list_scope_commands(&self) -> ToolResult {
+        ok_json(&try_api!(self.api.commands().await))
     }
 
     #[tool(
@@ -726,7 +762,11 @@ impl McpScope {
 #[tool_handler(
     name = "mho954",
     instructions = "Controls a Rigol MHO954 oscilloscope (4 channels, 12-bit). Start with get_status to see the \
-        current setup. Prefer measure (scope-side) or analyze_waveform (local) over pulling raw samples. \
-        get_waveform returns decimated samples; raw=true needs a stopped scope. screenshot shows the display."
+        current setup and get_capabilities to see what this scope has (bandwidth, memory limits, \
+        generator, licensed protocol options). Prefer measure (scope-side) or analyze_waveform (local) \
+        over pulling raw samples. get_waveform returns decimated samples; raw=true needs a stopped scope. \
+        screenshot shows the display. The function generator drives real signals into whatever is \
+        connected: ask the user before switching an output on (set_generator output=true, bode_sweep, \
+        bode_native). Changes to the user's setup (autoscale, reset, network) also need their consent."
 )]
 impl ServerHandler for McpScope {}

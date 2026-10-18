@@ -199,22 +199,26 @@ fetch('/api/v1/openapi.json').then(r=>r.json()).then(doc=>{
     )
 }
 
+/// Server version, connection and scope identification (also when the scope is gone).
 #[utoipa::path(get, path = "/api/v1/info", responses((status = 200, body = ServiceInfo)))]
 async fn info(State(s): State<AppState>) -> HttpResult<Json<ServiceInfo>> {
     Ok(Json(s.backend.info().await?))
 }
 
+/// Complete scope state: channels, timebase, trigger, acquisition (~40 queries, ~1 s).
 #[utoipa::path(get, path = "/api/v1/status", responses((status = 200, body = ScopeStatus), (status = 503, body = ApiError)))]
 async fn status(State(s): State<AppState>) -> HttpResult<Json<ScopeStatus>> {
     Ok(Json(s.backend.status().await?))
 }
 
+/// One analog channel (1..4).
 #[utoipa::path(get, path = "/api/v1/channels/{n}", params(("n" = u8, Path, description = "Channel 1..4")),
     responses((status = 200, body = ChannelState)))]
 async fn channel(State(s): State<AppState>, Path(n): Path<u8>) -> HttpResult<Json<ChannelState>> {
     Ok(Json(s.backend.channel(n).await?))
 }
 
+/// Changes the given fields of a channel; returns its new state.
 #[utoipa::path(put, path = "/api/v1/channels/{n}", params(("n" = u8, Path, description = "Channel 1..4")),
     request_body = ChannelUpdate, responses((status = 200, body = ChannelState)))]
 async fn set_channel(
@@ -225,11 +229,13 @@ async fn set_channel(
     Ok(Json(s.backend.set_channel(n, u).await?))
 }
 
+/// Timebase: scale (s/div), offset, mode.
 #[utoipa::path(get, path = "/api/v1/timebase", responses((status = 200, body = TimebaseState)))]
 async fn timebase(State(s): State<AppState>) -> HttpResult<Json<TimebaseState>> {
     Ok(Json(s.backend.timebase().await?))
 }
 
+/// Changes the given timebase fields.
 #[utoipa::path(put, path = "/api/v1/timebase", request_body = TimebaseUpdate, responses((status = 200, body = TimebaseState)))]
 async fn set_timebase(
     State(s): State<AppState>,
@@ -238,11 +244,13 @@ async fn set_timebase(
     Ok(Json(s.backend.set_timebase(u).await?))
 }
 
+/// Trigger mode, sweep and edge settings (other types: settings groups `trigger.*`).
 #[utoipa::path(get, path = "/api/v1/trigger", responses((status = 200, body = TriggerState)))]
 async fn trigger(State(s): State<AppState>) -> HttpResult<Json<TriggerState>> {
     Ok(Json(s.backend.trigger().await?))
 }
 
+/// Changes the given trigger fields.
 #[utoipa::path(put, path = "/api/v1/trigger", request_body = TriggerUpdate, responses((status = 200, body = TriggerState)))]
 async fn set_trigger(
     State(s): State<AppState>,
@@ -251,11 +259,13 @@ async fn set_trigger(
     Ok(Json(s.backend.set_trigger(u).await?))
 }
 
+/// Acquisition: sample rate, memory depth, type, averages.
 #[utoipa::path(get, path = "/api/v1/acquire", responses((status = 200, body = AcquireState)))]
 async fn acquire(State(s): State<AppState>) -> HttpResult<Json<AcquireState>> {
     Ok(Json(s.backend.acquire().await?))
 }
 
+/// Changes the acquisition; the depth is checked against the limits for the active channels (see `/capabilities`).
 #[utoipa::path(put, path = "/api/v1/acquire", request_body = AcquireUpdate, responses((status = 200, body = AcquireState)))]
 async fn set_acquire(
     State(s): State<AppState>,
@@ -264,6 +274,7 @@ async fn set_acquire(
     Ok(Json(s.backend.set_acquire(u).await?))
 }
 
+/// Front-panel action: run, stop, single, autoscale, clear, force.
 #[utoipa::path(post, path = "/api/v1/actions/{action}",
     params(("action" = String, Path, description = "run | stop | single | autoscale | clear | force")),
     responses((status = 204)))]
@@ -282,6 +293,7 @@ struct MeasureQuery {
     source2: Option<String>,
 }
 
+/// Scope-side measurements of one source (`items` comma-separated).
 #[utoipa::path(get, path = "/api/v1/measure", params(MeasureQuery), responses((status = 200, body = Vec<Measurement>)))]
 async fn measure_get(
     State(s): State<AppState>,
@@ -304,6 +316,7 @@ async fn measure_get(
     ))
 }
 
+/// Scope-side measurements (JSON body).
 #[utoipa::path(post, path = "/api/v1/measure", request_body = MeasureRequest, responses((status = 200, body = Vec<Measurement>)))]
 async fn measure_post(
     State(s): State<AppState>,
@@ -312,6 +325,7 @@ async fn measure_post(
     Ok(Json(s.backend.measure(r).await?))
 }
 
+/// Catalogue of measurement items with units and whether they need two sources.
 #[utoipa::path(get, path = "/api/v1/measure/items", responses((status = 200, body = Vec<MeasureItem>)))]
 async fn measure_items() -> Json<&'static [MeasureItem]> {
     Json(MEASURE_ITEMS)
@@ -372,6 +386,7 @@ struct FftResponse {
     dbv: Option<Vec<f64>>,
 }
 
+/// Spectrum of a channel computed locally (window, peaks; `raw=true` uses the full memory of a stopped scope).
 #[utoipa::path(get, path = "/api/v1/fft", params(FftQuery), responses((status = 200, body = FftResponse)))]
 async fn fft(
     State(s): State<AppState>,
@@ -406,6 +421,7 @@ struct WaveformQuery {
     format: Option<String>,
 }
 
+/// Waveform of a source. `mode=norm` (screen, 1000 points) or `raw` (full memory, scope stopped). `format`: json (default, samples as volts), csv (time,volts), npy (raw ADC codes, preamble in header `X-Preamble`), bin (raw little-endian u16).
 #[utoipa::path(get, path = "/api/v1/waveform/{source}", params(("source" = String, Path), WaveformQuery),
     responses((status = 200, body = Waveform)))]
 async fn waveform(
@@ -476,12 +492,14 @@ async fn waveform(
     .await
 }
 
+/// Screenshot of the scope display (PNG).
 #[utoipa::path(get, path = "/api/v1/screenshot.png", responses((status = 200, content_type = "image/png", body = Vec<u8>)))]
 async fn screenshot(State(s): State<AppState>) -> HttpResult<Response> {
     let png = s.backend.screenshot().await?;
     Ok(([(header::CONTENT_TYPE, "image/png")], png).into_response())
 }
 
+/// Software options with their state; EMBD/COM/AUTO are standard features (`standard`).
 #[utoipa::path(get, path = "/api/v1/options", responses((status = 200, body = Vec<OptionInfo>)))]
 async fn options(State(s): State<AppState>) -> HttpResult<Json<Vec<OptionInfo>>> {
     Ok(Json(s.backend.options().await?))
@@ -493,6 +511,7 @@ struct InstallRequest {
     key: String,
 }
 
+/// Installs a purchased license `MHO900-<OPTION>@<code>`.
 #[utoipa::path(post, path = "/api/v1/options/install", request_body = InstallRequest, responses((status = 204)))]
 async fn install_option(
     State(s): State<AppState>,
@@ -502,18 +521,21 @@ async fn install_option(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Binary setup blob of the scope (for a later restore).
 #[utoipa::path(get, path = "/api/v1/setup", responses((status = 200, content_type = "application/octet-stream", body = Vec<u8>)))]
 async fn setup_save(State(s): State<AppState>) -> HttpResult<Response> {
     let blob = s.backend.setup_save().await?;
     Ok(([(header::CONTENT_TYPE, "application/octet-stream")], blob).into_response())
 }
 
+/// Restores a setup blob saved with GET.
 #[utoipa::path(put, path = "/api/v1/setup", request_body(content = Vec<u8>, content_type = "application/octet-stream"), responses((status = 204)))]
 async fn setup_load(State(s): State<AppState>, body: Bytes) -> HttpResult<StatusCode> {
     s.backend.setup_load(body.to_vec()).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Raw SCPI (only with `--allow-raw-scpi`). Unknown queries are not answered by the scope; after a few of them its firmware hangs.
 #[utoipa::path(post, path = "/api/v1/scpi", request_body = ScpiRequest,
     responses((status = 200, body = ScpiResponse), (status = 403, body = ApiError)))]
 async fn scpi(
@@ -523,11 +545,13 @@ async fn scpi(
     Ok(Json(s.backend.scpi(r).await?))
 }
 
+/// Live loop configuration: frame rate, measurement list.
 #[utoipa::path(get, path = "/api/v1/live", responses((status = 200, body = LiveConfig)))]
 async fn live_get(State(s): State<AppState>) -> HttpResult<Json<LiveConfig>> {
     Ok(Json(s.backend.live_config().await?))
 }
 
+/// Changes the live loop configuration (at most 10 measurements).
 #[utoipa::path(put, path = "/api/v1/live", request_body = LiveConfig, responses((status = 200, body = LiveConfig)))]
 async fn live_put(
     State(s): State<AppState>,
@@ -551,7 +575,8 @@ async fn set_network(
     Ok(Json(s.backend.set_network(u).await?))
 }
 
-/// Hardware modules: logic analyzer, function generator (`:SYST:MOD?`).
+/// Hardware modules: logic analyzer (`:SYST:MOD?`) and a usable function generator (DG field,
+/// or a licensed AFG that answered on this instrument; see `/capabilities`).
 #[utoipa::path(get, path = "/api/v1/modules", responses((status = 200, body = Modules)))]
 async fn modules(State(s): State<AppState>) -> HttpResult<Json<Modules>> {
     Ok(Json(s.backend.modules().await?))
@@ -593,13 +618,20 @@ struct GroupQuery {
     activate: bool,
 }
 
-/// Reads a settings group (403-style refusal if not yet verified on the instrument).
-#[utoipa::path(get, path = "/api/v1/groups/{id}", params(("id" = String, Path), GroupQuery),
+#[derive(Debug, Deserialize, IntoParams)]
+struct InstanceQuery {
+    /// Instance for groups that exist several times (e.g. decoder 1..4).
+    instance: Option<u8>,
+}
+
+/// Reads a settings group (refused if not yet verified on the instrument, or if the scope
+/// lacks the hardware/option the group needs).
+#[utoipa::path(get, path = "/api/v1/groups/{id}", params(("id" = String, Path), InstanceQuery),
     responses((status = 200, body = ParamMap)))]
 async fn group_get(
     State(s): State<AppState>,
     Path(id): Path<String>,
-    Query(q): Query<GroupQuery>,
+    Query(q): Query<InstanceQuery>,
 ) -> HttpResult<Json<ParamMap>> {
     Ok(Json(s.backend.group_get(id, q.instance).await?))
 }
@@ -654,8 +686,8 @@ struct BusQuery {
     format: Option<String>,
 }
 
-/// Event table of protocol decoder `n` (1..4). The decoder must be on (group `bus`);
-/// its event table is switched on if needed.
+/// Event table of protocol decoder `n` (1..4) as JSON, or CSV with `format=csv`. The decoder
+/// must be on (group `bus`); its event table is switched on if needed.
 #[utoipa::path(get, path = "/api/v1/bus/{n}/data", params(("n" = u8, Path), BusQuery),
     responses((status = 200, body = mho_dsp::DecodeTable)))]
 async fn bus_data(
@@ -748,7 +780,8 @@ struct LogicQuery {
 }
 
 /// Digital channels D0..D15, read through decoder `bus` as a 16-bit parallel bus (the
-/// MHO954 does not deliver digital channels via `:WAV:DATA?`). Needs the logic probe.
+/// MHO954 does not deliver digital channels via `:WAV:DATA?`). Needs the logic probe; the
+/// decoder is restored afterwards. JSON events, or a VCD file with `format=vcd`.
 #[utoipa::path(get, path = "/api/v1/logic/{bus}", params(("bus" = u8, Path), LogicQuery),
     responses((status = 200, body = mho_driver::LogicCapture)))]
 async fn logic(

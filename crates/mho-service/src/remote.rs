@@ -338,6 +338,17 @@ impl ScopeApi for RemoteBackend {
         self.get("/capabilities").await
     }
 
+    /// One request: the server applies the steps (output off, settings, modulation, output
+    /// on) as one device job, no other client in between.
+    async fn set_generator(
+        &self,
+        channel: u8,
+        update: GeneratorUpdate,
+    ) -> ApiResult<Option<mho_driver::params::ParamMap>> {
+        self.send(Method::PUT, &format!("/generator/{channel}"), &update)
+            .await
+    }
+
     async fn groups(&self) -> ApiResult<Vec<mho_driver::params::GroupInfo>> {
         self.get("/groups").await
     }
