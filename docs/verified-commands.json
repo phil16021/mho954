@@ -2350,5 +2350,659 @@
     "group": "dvm.value",
     "outcome": "ok",
     "detail": "7.910000E-4"
+  },
+  {
+    "command": ":SYST:DGST?",
+    "group": "system.dg",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SOUR1:OUTP:STAT?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":SOUR1:FUNC?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "SIN"
+  },
+  {
+    "command": ":SOUR1:FREQ?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "2.000000E+6"
+  },
+  {
+    "command": ":SOUR1:PER?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "5.000000E-7"
+  },
+  {
+    "command": ":SOUR1:VOLT:AMPL?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "5.000000E0"
+  },
+  {
+    "command": ":SOUR1:VOLT:OFFS?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":SOUR1:VOLT:HIGH?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "2.500000E0"
+  },
+  {
+    "command": ":SOUR1:VOLT:LOW?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "-2.500000E0"
+  },
+  {
+    "command": ":SOUR1:PHAS?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":SOUR1:FUNC:SQU:DUTY?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "5.000000E+1"
+  },
+  {
+    "command": ":SOUR1:FUNC:RAMP:SYMM?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "5.000000E+1"
+  },
+  {
+    "command": ":SOUR1:IMP?",
+    "group": "afg",
+    "outcome": "ok",
+    "detail": "OMEG"
+  },
+  {
+    "command": ":SOUR1:MOD:STAT?",
+    "group": "afg.modulation",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SOUR1:MOD:TYP?",
+    "group": "afg.modulation",
+    "outcome": "ok",
+    "detail": "AM"
+  },
+  {
+    "command": ":SOUR1:MOD:AM:DEPT?",
+    "group": "afg.modulation",
+    "outcome": "ok",
+    "detail": "1.000000E+2"
+  },
+  {
+    "command": ":SOUR1:MOD:AM:INT:FREQ?",
+    "group": "afg.modulation",
+    "outcome": "ok",
+    "detail": "1.000000E+2"
+  },
+  {
+    "command": ":SOUR1:MOD:AM:INT:FUNC?",
+    "group": "afg.modulation",
+    "outcome": "ok",
+    "detail": "SIN"
+  },
+  {
+    "command": ":SOUR1:MOD:FM:DEV?",
+    "group": "afg.modulation",
+    "outcome": "ok",
+    "detail": "1.000000E+3"
+  },
+  {
+    "command": ":SOUR1:MOD:FM:INT:FREQ?",
+    "group": "afg.modulation",
+    "outcome": "ok",
+    "detail": "1.000000E+2"
+  },
+  {
+    "command": ":SOUR1:MOD:FM:INT:FUNC?",
+    "group": "afg.modulation",
+    "outcome": "ok",
+    "detail": "SIN"
+  },
+  {
+    "command": ":SOUR1:MOD:PM:DEV?",
+    "group": "afg.modulation",
+    "outcome": "ok",
+    "detail": "9.000000E+1"
+  },
+  {
+    "command": ":SOUR1:MOD:PM:INT:FREQ?",
+    "group": "afg.modulation",
+    "outcome": "ok",
+    "detail": "1.000000E+2"
+  },
+  {
+    "command": ":SOUR1:MOD:PM:INT:FUNC?",
+    "group": "afg.modulation",
+    "outcome": "ok",
+    "detail": "SIN"
+  },
+  {
+    "command": ":SOUR1:LOAD:ARB?",
+    "group": "afg.arb",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":SOUR2:LOAD:ARB?",
+    "group": "afg.arb",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":BOD:ENAB?",
+    "group": "bode",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":BOD:RUNS?",
+    "group": "bode",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":BOD:SWE?",
+    "group": "bode",
+    "outcome": "ok",
+    "detail": "LOG"
+  },
+  {
+    "command": ":BOD:REF:IN?",
+    "group": "bode",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":BOD:REF:OUT?",
+    "group": "bode",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":BOD:STAR?",
+    "group": "bode",
+    "outcome": "ok",
+    "detail": "1.000000E+2"
+  },
+  {
+    "command": ":BOD:STOP?",
+    "group": "bode",
+    "outcome": "ok",
+    "detail": "1.000000E+6"
+  },
+  {
+    "command": ":BOD:POIN?",
+    "group": "bode",
+    "outcome": "ok",
+    "detail": "10"
+  },
+  {
+    "command": ":BOD:GAIN:ENAB?",
+    "group": "bode",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":BOD:PHASE:ENAB?",
+    "group": "bode",
+    "outcome": "no_answer",
+    "detail": "invalid argument: no answer to `:BOD:PHASE:ENAB?` (unknown query?)"
+  },
+  {
+    "command": ":BODeplot:PHASEcurve:ENABle?",
+    "group": "bode",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":BOD:VOLT? ALL",
+    "group": "bode.amplitude",
+    "outcome": "ok",
+    "detail": "2.000000E-1"
+  },
+  {
+    "command": ":BOD:VOLT? 10",
+    "group": "bode.amplitude",
+    "outcome": "ok",
+    "detail": "2.000000E-1"
+  },
+  {
+    "command": ":BOD:VOLT? 100",
+    "group": "bode.amplitude",
+    "outcome": "ok",
+    "detail": "2.000000E-1"
+  },
+  {
+    "command": ":BOD:VOLT? 1K",
+    "group": "bode.amplitude",
+    "outcome": "ok",
+    "detail": "2.000000E-1"
+  },
+  {
+    "command": ":BOD:VOLT? 10K",
+    "group": "bode.amplitude",
+    "outcome": "ok",
+    "detail": "2.000000E-1"
+  },
+  {
+    "command": ":BOD:VOLT? 100K",
+    "group": "bode.amplitude",
+    "outcome": "ok",
+    "detail": "2.000000E-1"
+  },
+  {
+    "command": ":BOD:VOLT? 1M",
+    "group": "bode.amplitude",
+    "outcome": "ok",
+    "detail": "2.000000E-1"
+  },
+  {
+    "command": ":BOD:VOLT? 10M",
+    "group": "bode.amplitude",
+    "outcome": "ok",
+    "detail": "2.000000E-1"
+  },
+  {
+    "command": ":BOD:VOLT? 25M",
+    "group": "bode.amplitude",
+    "outcome": "ok",
+    "detail": "2.000000E-1"
+  },
+  {
+    "command": ":BUS1:CAN:FDBaud?",
+    "group": "bus.canfd",
+    "outcome": "ok",
+    "detail": "1000000"
+  },
+  {
+    "command": ":BUS1:CAN:FDSPoint?",
+    "group": "bus.canfd",
+    "outcome": "ok",
+    "detail": "80"
+  },
+  {
+    "command": ":BUS1:FLEXray:SOURce?",
+    "group": "bus.flexray",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":BUS1:FLEXray:STYPe?",
+    "group": "bus.flexray",
+    "outcome": "ok",
+    "detail": "BP"
+  },
+  {
+    "command": ":BUS1:FLEXray:CHANnel?",
+    "group": "bus.flexray",
+    "outcome": "ok",
+    "detail": "A"
+  },
+  {
+    "command": ":BUS1:FLEXray:BAUD?",
+    "group": "bus.flexray",
+    "outcome": "ok",
+    "detail": "10000000"
+  },
+  {
+    "command": ":BUS1:FLEXray:SPOint?",
+    "group": "bus.flexray",
+    "outcome": "ok",
+    "detail": "50"
+  },
+  {
+    "command": ":BUS1:THR? FLEX",
+    "group": "bus.flexray",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":BUS1:IIS:SOURce:CLOCk?",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":BUS1:IIS:SOURce:WSELect?",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":BUS1:IIS:SOURce:DATA?",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "CHAN3"
+  },
+  {
+    "command": ":BUS1:IIS:CLOCk:SLOPe?",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":BUS1:IIS:ALIGnment?",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "IIS"
+  },
+  {
+    "command": ":BUS1:IIS:RWIDth?",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "4"
+  },
+  {
+    "command": ":BUS1:IIS:RECewidth?",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "4"
+  },
+  {
+    "command": ":BUS1:IIS:WSLow?",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "LEFT"
+  },
+  {
+    "command": ":BUS1:IIS:ENDian?",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "MSB"
+  },
+  {
+    "command": ":BUS1:IIS:POLarity?",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":BUS1:THR? I2SClk",
+    "group": "bus.i2s",
+    "outcome": "no_answer",
+    "detail": "invalid argument: no answer to `:BUS1:THR? I2SClk` (unknown query?)"
+  },
+  {
+    "command": ":BUS1:THR? WS",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":BUS1:THR? DATA",
+    "group": "bus.i2s",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":BUS1:M1553:SOURce?",
+    "group": "bus.m1553",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":BUS1:THR? 1553",
+    "group": "bus.m1553",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIGger:FLEXray:BAUD?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "10000000"
+  },
+  {
+    "command": ":TRIGger:FLEXray:SOURce?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIGger:FLEXray:LEVel?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIGger:FLEXray:CH?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "A"
+  },
+  {
+    "command": ":TRIGger:FLEXray:WHEN?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "FRAM"
+  },
+  {
+    "command": ":TRIGger:FLEXray:POS?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "TSS"
+  },
+  {
+    "command": ":TRIGger:FLEXray:FRAMe?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "ANY"
+  },
+  {
+    "command": ":TRIGger:FLEXray:SYMBol?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "CAS"
+  },
+  {
+    "command": ":TRIGger:FLEXray:ERRor?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "HEAD"
+  },
+  {
+    "command": ":TRIGger:FLEXray:DEFine?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "ID"
+  },
+  {
+    "command": ":TRIGger:FLEXray:IDCmp?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "EQU"
+  },
+  {
+    "command": ":TRIGger:FLEXray:MINid?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIGger:FLEXray:MAXid?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIGger:FLEXray:CYCComp?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "EQU"
+  },
+  {
+    "command": ":TRIGger:FLEXray:MINCy?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIGger:FLEXray:MAXCy?",
+    "group": "trigger.flexray",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIGger:IIS:SOURce:CLOCk?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIGger:IIS:SOURce:WSELect?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":TRIGger:IIS:SOURce:DATA?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "CHAN3"
+  },
+  {
+    "command": ":TRIGger:IIS:CLEVel?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIGger:IIS:SLEVel?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIGger:IIS:DLEVel?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIGger:IIS:CLOCk:SLOPe?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIGger:IIS:ALIGnment?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "IIS"
+  },
+  {
+    "command": ":TRIGger:IIS:WIDTh?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "4"
+  },
+  {
+    "command": ":TRIGger:IIS:UWIDth?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "4"
+  },
+  {
+    "command": ":TRIGger:IIS:AUDio?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "LEFT"
+  },
+  {
+    "command": ":TRIGger:IIS:WHEN?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "EQU"
+  },
+  {
+    "command": ":TRIGger:IIS:DATA?",
+    "group": "trigger.i2s",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIGger:M1553:SOURce?",
+    "group": "trigger.m1553",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TRIGger:M1553:WHEN?",
+    "group": "trigger.m1553",
+    "outcome": "ok",
+    "detail": "SYNC"
+  },
+  {
+    "command": ":TRIGger:M1553:POLarity?",
+    "group": "trigger.m1553",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":TRIGger:M1553:ALEVel?",
+    "group": "trigger.m1553",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIGger:M1553:BLEVel?",
+    "group": "trigger.m1553",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TRIGger:M1553:WINDow?",
+    "group": "trigger.m1553",
+    "outcome": "ok",
+    "detail": "TA"
+  },
+  {
+    "command": ":TRIGger:M1553:SYNC?",
+    "group": "trigger.m1553",
+    "outcome": "ok",
+    "detail": "DATA"
+  },
+  {
+    "command": ":TRIGger:M1553:ERRor?",
+    "group": "trigger.m1553",
+    "outcome": "ok",
+    "detail": "SYNC"
+  },
+  {
+    "command": ":TRIGger:M1553:DATComp?",
+    "group": "trigger.m1553",
+    "outcome": "ok",
+    "detail": "EQU"
+  },
+  {
+    "command": ":TRIGger:M1553:DATValue?",
+    "group": "trigger.m1553",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TRIGger:M1553:DRTA?",
+    "group": "trigger.m1553",
+    "outcome": "ok",
+    "detail": "0"
   }
 ]

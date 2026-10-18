@@ -782,7 +782,12 @@ impl SimTransport {
             let (lo, hi) = g.instances.unwrap_or((1, 1));
             g.params
                 .iter()
-                .find(|p| (lo..=hi).any(|n| crate::params::node(p, n) == hdr))
+                .find(|p| {
+                    (lo..=hi).any(|n| {
+                        let node = crate::params::node(p, n);
+                        node == hdr || normalize_header(&node) == hdr
+                    })
+                })
                 .copied()
         })
     }

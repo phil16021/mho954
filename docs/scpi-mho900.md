@@ -91,7 +91,8 @@ Stand 2026-10-18, nach dem Upgrade des Test-Scopes:
 | Aktiv: BWU05T08, RLU05, AFG50, AFG100, AUTOA (CAN-FD), FlexA, AUDIOA (I²S), AEROA (1553) | Gerät (`:SYST:OPT:STAT?`, über LAN) |
 | `*IDN?` meldet nach BWU05T08 weiter `MHO954` (Firmware `00.01.00`); die effektive Bandbreite (800 MHz bei 1–2 Kanälen, 400 MHz bei 3–4) ergibt sich nur aus den Optionen | Gerät, Guide-Modelltabelle |
 | `:SYST:MOD?` bleibt `1,0,0,0,0`, auch nach Neustart mit aktivem AFG100: das DG-Feld spiegelt die Lizenz nicht wider. Der Generator gilt als vorhanden, wenn DG = 1 **oder** eine AFG-Lizenz aktiv ist **und** `:SOUR1:OUTP:STAT?` am Gerät beantwortet wurde (`mho954 verify afg`) | Gerät |
-| `:SYST:DGST?` (DG vorhanden) | Guide 3.24; noch ungeprüft (Probe `system.dg`) |
+| `:SYST:DGST?` (DG vorhanden) | beantwortet mit `0`, obwohl der Generator arbeitet | Gerät |
+| Generator: alle `:SOUR1:*`-Abfragen beantwortet; GI → CH1 (1 kHz Sinus 2 Vpp) und GII → CH2 (5 kHz Rechteck 1 Vpp) vom Scope gemessen innerhalb 1 % Frequenz, 8–10 % Vpp (`hw`-Test) | Gerät |
 | EMBD, COM, AUTO sind Lizenznamen anderer Serien und beim MHO900 Standard; sie haben kein Status-Token und werden nie abgefragt | Guide 3.24.18 |
 | Kein SCPI-Befehl für die Bandbreite (`:SYST:BAND?` o. ä.) | Guide durchsucht |
 
@@ -120,8 +121,10 @@ wird zuletzt eingeschaltet, beim Ausschalten zuerst.
 - **Am Scope** (`:BODeplot`, Guide 3.5): Start 10 Hz–3 MHz, Stop 100 Hz–30 MHz, Start ≤ Stop/10,
   10–100 Punkte/Dekade, Amplitude 20 mV–10 V gesamt (`ALL`) oder je Bereich (`10 100 1K 10K 100K
   1M 10M 25M`). Kurve nur auf dem Bildschirm, **kein Export-Befehl** → `bode --native` liefert
-  einen Screenshot. Knoten `:BOD:PHASE:ENAB` (Langform `PHASEcurve`); `:BOD:PHAS:ENAB` aus der
-  ersten Tabellenfassung wäre unbekannt gewesen.
+  einen Screenshot. Die Phasenkurve antwortet nur auf die Langform
+  `:BODeplot:PHASEcurve:ENABle?`; die aus den Großbuchstaben abgeleitete Kurzform
+  `:BOD:PHASE:ENAB?` blieb **unbeantwortet** (`:BOD:GAIN:ENAB?` dagegen funktioniert). Neue
+  Befehle der Options-Gruppen stehen deshalb in der Langform des Guides in den Tabellen.
 - **Software-Sweep** (`bode`): Generator-Schritte, eine Single-Erfassung je Punkt, Ein-Bin-DFT
   auf beiden Kanälen derselben Erfassung (Phase daher unabhängig vom Trigger), optional
   komplex gemittelt. Auswertung: −3 dB, 0-dB-Durchgang, Phasen-/Amplitudenreserve,
@@ -133,7 +136,7 @@ wird zuletzt eingeschaltet, beim Ausschalten zuerst.
 |---|---|---|
 | `bus.canfd` | `:BUS<n>:CAN:FDBaud` 1–10 Mbit/s, `:FDSPoint` 10–90 % | AUTOA |
 | `bus.flexray` | `:BUS<n>:FLEXray:BAUD` 2,5/5/10 Mbit/s, `SOURce`, `SPOint`, `STYPe BP\|BM\|RT`, `CHANnel A\|B`; Schwelle `:BUS<n>:THR <v>,FLEX` | FlexA |
-| `bus.i2s` | `:BUS<n>:IIS:SOURce:CLOCk/DATA/WSELect`, `ALIGnment IIS\|RJ\|LJ`, `CLOCk:SLOPe`, `RWIDth`, `RECewidth`, `WSLow`, `ENDian`, `POLarity`; Schwellen `I2SClk`, `WS`, `DATA` | AUDIOA |
+| `bus.i2s` | `:BUS<n>:IIS:SOURce:CLOCk/DATA/WSELect`, `ALIGnment IIS\|RJ\|LJ`, `CLOCk:SLOPe`, `RWIDth`, `RECewidth`, `WSLow`, `ENDian`, `POLarity`; Schwellen `WS`, `DATA`. `:BUS<n>:THR? I2SClk` (Takt) blieb unbeantwortet → nicht in der Gruppe | AUDIOA |
 | `bus.m1553` | `:BUS<n>:M1553:SOURce`; Schwelle `1553` | AEROA |
 | `trigger.flexray` | `:TRIG:FLEXray:*` (BAUD, POS, ERRor, SYMBol, FRAMe, DEFine, IDCmp, CYCComp, MIN/MAXid, MIN/MAXCy, CH, SOURce, WHEN, LEVel) | FlexA |
 | `trigger.i2s` | `:TRIG:IIS:*` (ALIGnment, C/S/DLEVel, WIDTh, UWIDth, CLOCk:SLOPe, Quellen, WHEN, AUDio, DATA) | AUDIOA |
@@ -143,8 +146,10 @@ wird zuletzt eingeschaltet, beim Ausschalten zuerst.
 - Für den **CAN-FD-Trigger** dokumentiert der Guide keine Befehle; `:TRIG:CAN:DWIDth` bleibt 1–8
   Byte. FD-Triggerbedingungen lassen sich nur am Gerät einstellen.
 - Bitweise Muster (`CODE`, `CURRbit`, `DMIN/DMAX`) der Trigger sind nicht in den Tabellen.
-- Die Ereignistabellen (`:BUS<n>:DATA?`) der neuen Protokolle sind am Gerät noch nicht gesehen;
-  der Parser ist generisch.
+- Alle Abfragen der Gruppen `bus.canfd`, `bus.flexray`, `bus.i2s`, `bus.m1553`,
+  `trigger.flexray`, `trigger.i2s`, `trigger.m1553` wurden am 2026-10-18 beantwortet (Langform).
+- Die Ereignistabellen (`:BUS<n>:DATA?`) der neuen Protokolle sind am Gerät noch nicht gesehen
+  (kein Protokollsignal); der Parser ist generisch.
 
 ## Netzwerk
 

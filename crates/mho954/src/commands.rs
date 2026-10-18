@@ -1664,10 +1664,11 @@ async fn verify_cmd(
     let (results, budget, stop) = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let mut scope = Scope::open(&conn)?;
         let mut stop = None;
-        // A group whose query went unanswered is most likely missing as a whole (no
+        // A group none of whose queries was answered is most likely missing as a whole (no
         // generator, no option): its other queries and its subgroups would only burn the
-        // budget.
+        // budget. Once one query of a group was answered, a later miss is a single wrong node.
         let mut unanswered_groups = std::collections::HashSet::new();
+        let mut answered_groups = std::collections::HashSet::new();
         for cand in selected {
             // Set commands always run: they are free, and probes need their setup.
             let done = cand.kind == Kind::Query
@@ -1699,7 +1700,11 @@ async fn verify_cmd(
             println!("{:<32} {:?} {}", r.command, r.outcome, r.detail);
             if r.outcome == Outcome::NoAnswer {
                 budget.used += 1;
-                unanswered_groups.insert(cand.group.clone());
+                if !answered_groups.contains(&cand.group) {
+                    unanswered_groups.insert(cand.group.clone());
+                }
+            } else if cand.kind == Kind::Query {
+                answered_groups.insert(cand.group.clone());
             }
             let unresponsive = r.outcome == Outcome::ScopeUnresponsive;
             results.retain(|x| x.command != r.command);

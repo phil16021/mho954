@@ -8,11 +8,16 @@ fn strict_simulator_refuses_unverified_queries() {
     // `from_transport` applies the hardware gate, like a real instrument.
     let mut s = Scope::from_transport(Box::new(SimTransport::new())).unwrap();
     assert!(!s.trusts_unverified());
-    // Still unverified on the test scope: everything of the generator.
-    assert!(matches!(
-        s.group_get("afg", Some(1), false),
-        Err(DriverError::Unsupported(_))
-    ));
+    // Groups not confirmed on the instrument are refused (since the upgrade every group is
+    // verified; the rule still holds for new ones).
+    for g in mho_driver::params::GROUPS {
+        let r = s.group_get(g.id, g.instances.map(|i| i.0), false);
+        if !mho_driver::params::group_verified(g) {
+            assert!(matches!(r, Err(DriverError::Unsupported(_))), "{}", g.id);
+        }
+    }
+    // Verified after the upgrade: the generator.
+    assert!(s.group_get("afg", Some(1), false).is_ok());
     // Verified on the instrument: allowed under the gate too.
     assert!(s.group_get("bus.spi", Some(1), false).is_ok());
     // Without the AFG option the sweep is refused before anything is sent to the generator.
@@ -27,10 +32,11 @@ fn strict_simulator_refuses_unverified_queries() {
         noafg.bode_sweep(&Default::default(), &mut |_, _| {}),
         Err(DriverError::Unsupported(_))
     ));
-    // Writing is always allowed (errors land in the error queue); no read-back unverified.
+    // Verified groups return their state after writing.
     let mut v = ParamMap::new();
     v.insert("frequency".into(), ParamValue::Real(1e3));
-    assert_eq!(s.group_set("afg", Some(1), &v, true).unwrap(), None);
+    let st = s.group_set("afg", Some(1), &v, true).unwrap().unwrap();
+    assert_eq!(st["frequency"], ParamValue::Real(1e3));
 }
 
 #[test]
