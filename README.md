@@ -190,6 +190,22 @@ claude mcp add --transport http mho954 http://127.0.0.1:8954/mcp
 claude mcp add mho954 -- mho954 mcp
 ```
 
+**Scope-Plot der GUI:**
+- Linksklick setzt Cursor A. Cursor (A/B zeitlich, Y1/Y2 Pegel) lassen sich mit der Maus
+  ziehen. Mittelklick löscht alle.
+- Rechts-Ziehen zoomt auf ein Rechteck, Mausrad verschiebt, Strg+Mausrad zoomt, Doppelklick
+  setzt die Ansicht zurück. Die Leiste `view` hat reset / fit Y / X± / Y±.
+- **Rechtsklick-Menü:**
+  - Cursor A/B/Y1/Y2 hier setzen, Cursor löschen
+  - auf A–B zoomen, hier hineinzoomen, herauszoomen, vertikal anpassen, zurücksetzen
+  - „Measure A-B“: lokale Messungen nur über den Bereich, als Zeilen `CHx [A-B]`
+  - FFT über A–B oder den sichtbaren Bereich (orange schattiert), FFT über alles
+  - am Scope: Trigger-Level hier, Zeit hier zentrieren, sichtbaren Bereich als Zeitbasis
+    übernehmen (mehr Details als Zoomen in die 1000 Bildschirmpunkte), Screenshot
+- Die Cursor-Anzeige zeigt Werte je Kanal, Δt, 1/Δt und ΔY. In der div-Ansicht rechnet sie
+  ΔY je Kanal in Volt um.
+- FFT: logarithmische Frequenzachse, automatische Y-Skalierung, eigenes Rechtsklick-Menü.
+
 Die GUI merkt sich ihre Ansichtseinstellungen (FFT, Dekoder, Bode-Formular, …) in
 `~/.config/mho954/gui.json`. Lange Vorgänge wie RAW-Abruf und Bode-Sweep zeigen einen
 Fortschrittsbalken; der WebSocket sendet dafür `{"type":"progress",…}`.

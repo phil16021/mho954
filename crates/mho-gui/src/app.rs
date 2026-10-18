@@ -11,6 +11,7 @@ use mho_service::{Frame, LiveConfig, MeasureSpec, ScopeApi, StatsRequest};
 
 use crate::bode::{BodePanel, bode_plot};
 use crate::generator::GeneratorPanel;
+use crate::plot_tools::{self, Handle, PlotTools, ViewAction, gated_volts, zoom_range};
 use crate::prefs::{self, Prefs};
 use crate::settings::SettingsPanel;
 use crate::state::{Client, Shared};
@@ -36,6 +37,8 @@ const MAX_DECODE_MARKS: usize = 300;
 const MATH_SCALE_REFRESH: std::time::Duration = std::time::Duration::from_secs(10);
 
 fn channel_color(source: &str) -> Color32 {
+    // "CHAN1 [A-B]" (gated measurement rows) has the colour of CHAN1.
+    let source = source.split(' ').next().unwrap_or(source);
     if let Some(n) = source
         .strip_prefix("MATH")
         .and_then(|d| d.parse::<usize>().ok())
@@ -100,8 +103,12 @@ pub struct ScopeApp {
     decoder_bus: u8,
     fft_source: String,
     fft_window: Window,
-    cursor_a: Option<f64>,
-    cursor_b: Option<f64>,
+    /// Cursors, gated regions and pending view changes of the scope plot.
+    view: PlotTools,
+    /// Screen/plot mapping of the last frame (to find cursors under the pointer).
+    plot_transform: Option<egui_plot::PlotTransform>,
+    fft_log_x: bool,
+    fft_auto_y: bool,
     /// Offsets being edited (applied on release), per channel.
     offset_edit: [Option<f64>; 4],
     tb_offset_edit: Option<f64>,
@@ -167,8 +174,10 @@ impl ScopeApp {
             decoder_bus: p.decoder_bus.clamp(1, 4),
             fft_source: p.fft_source,
             fft_window: p.fft_window,
-            cursor_a: None,
-            cursor_b: None,
+            view: PlotTools::default(),
+            plot_transform: None,
+            fft_log_x: false,
+            fft_auto_y: false,
             offset_edit: [None; 4],
             tb_offset_edit: None,
             trig_level_edit: None,
@@ -1553,11 +1562,29 @@ impl ScopeApp {
             .map(|s| s.timebase.scale)
             .unwrap_or((t1 - t0) / H_DIVS);
 
+        // A cursor under the pointer is dragged instead of panning the view.
+        let near = self.view.drag.or_else(|| {
+            let pos = ui.ctx().pointer_hover_pos()?;
+            let tr = self.plot_transform?;
+            if !tr.frame().contains(pos) {
+                return None;
+            }
+            self.view.handle_near(
+                [pos.x, pos.y],
+                |x, y| {
+                    let p = tr.position_from_point(&egui_plot::PlotPoint::new(x, y));
+                    [p.x, p.y]
+                },
+                6.0,
+            )
+        });
+
         let mut plot = Plot::new("scope")
             .height(height)
             .legend(Legend::default())
             .show_background(true)
             .allow_double_click_reset(true)
+            .allow_drag(near.is_none())
             .x_axis_formatter(move |m, _| {
                 format_si(
                     if m.value.abs() < tdiv * 1e-6 {
@@ -1570,27 +1597,43 @@ impl ScopeApp {
             })
             .x_grid_spacer(move |input| {
                 let (lo, hi) = input.bounds;
-                let start = t0 + ((lo - t0) / tdiv).floor() * tdiv;
+                // One mark per division; when zoomed in far, a finer 1-2-5 step.
+                let span = hi - lo;
+                let step = if span < tdiv * 2.0 {
+                    let raw = span / 10.0;
+                    let e = 10f64.powf(raw.log10().floor());
+                    [1.0, 2.0, 5.0, 10.0]
+                        .iter()
+                        .map(|m| m * e)
+                        .find(|s| *s >= raw)
+                        .unwrap_or(10.0 * e)
+                } else {
+                    tdiv
+                };
+                let start = t0 + ((lo - t0) / step).floor() * step;
                 let mut marks = Vec::new();
                 let mut x = start;
                 while x <= hi && marks.len() < 200 {
                     marks.push(GridMark {
                         value: x,
-                        step_size: tdiv,
+                        step_size: step,
                     });
-                    x += tdiv;
+                    x += step;
                 }
                 marks
             });
         plot = match y_mode {
             YMode::Divisions => plot
-                .y_axis_formatter(|m, _| format!("{:+.0}", m.value))
+                .y_axis_formatter(|m, _| format!("{:+.1}", m.value))
                 .y_grid_spacer(|input| {
                     let (lo, hi) = input.bounds;
-                    (lo.floor() as i64..=hi.ceil() as i64)
+                    let step = if hi - lo < 2.0 { 0.2 } else { 1.0 };
+                    let first = (lo / step).floor() as i64;
+                    let last = (hi / step).ceil() as i64;
+                    (first..=last)
                         .map(|v| GridMark {
-                            value: v as f64,
-                            step_size: 1.0,
+                            value: v as f64 * step,
+                            step_size: step,
                         })
                         .collect()
                 })
@@ -1599,11 +1642,12 @@ impl ScopeApp {
         };
         plot = plot.default_x_bounds(t0, t1);
 
-        let reset = self.last_x_range != Some((t0, t1));
+        let new_range = self.last_x_range != Some((t0, t1));
         self.last_x_range = Some((t0, t1));
+        let pending = self.view.pending.take();
         let traces = &frame.traces;
         let trig = status.map(|s| s.trigger.clone());
-        let (cursor_a, cursor_b) = (self.cursor_a, self.cursor_b);
+        let view = &self.view;
         let math_scale = &s.math_scale;
         // Decoded events as labels along the top edge.
         let marks: Vec<(f64, String)> = match (&s.decode, self.show_decoder) {
@@ -1617,19 +1661,41 @@ impl ScopeApp {
         };
 
         let resp = plot.show(ui, |pui| {
-            if reset {
-                let y = match y_mode {
-                    YMode::Divisions => (-V_DIVS / 2.0, V_DIVS / 2.0),
-                    YMode::Volts => (pui.plot_bounds().min()[1], pui.plot_bounds().max()[1]),
-                };
+            let default_y = |pui: &egui_plot::PlotUi| match y_mode {
+                YMode::Divisions => (-V_DIVS / 2.0, V_DIVS / 2.0),
+                YMode::Volts => (pui.plot_bounds().min()[1], pui.plot_bounds().max()[1]),
+            };
+            if new_range || pending == Some(ViewAction::Reset) {
+                let y = default_y(pui);
                 pui.set_plot_bounds(PlotBounds::from_min_max([t0, y.0], [t1, y.1]));
                 if y_mode == YMode::Volts {
                     pui.set_auto_bounds([false, true]);
                 }
             }
+            match pending {
+                Some(ViewAction::Zoom { x, y, center }) => {
+                    let b = pui.plot_bounds();
+                    let c = center.unwrap_or([
+                        (b.min()[0] + b.max()[0]) / 2.0,
+                        (b.min()[1] + b.max()[1]) / 2.0,
+                    ]);
+                    let (x0, x1) = zoom_range(b.min()[0], b.max()[0], x, c[0]);
+                    let (y0, y1) = zoom_range(b.min()[1], b.max()[1], y, c[1]);
+                    pui.set_plot_bounds(PlotBounds::from_min_max([x0, y0], [x1, y1]));
+                    pui.set_auto_bounds([false, false]);
+                }
+                Some(ViewAction::ShowX(x0, x1)) => {
+                    pui.set_plot_bounds_x(x0..=x1);
+                    pui.set_auto_bounds([false, false]);
+                }
+                _ => {}
+            }
+            let visible = pui.plot_bounds();
+            let (vx0, vx1) = (visible.min()[0], visible.max()[0]);
+            let mut fit: Option<(f64, f64)> = None;
             for w in traces.iter().filter(|w| w.has_data()) {
                 let cs = chan_state(&w.source);
-                let pts: PlotPoints = (0..w.raw.len())
+                let pts: Vec<[f64; 2]> = (0..w.raw.len())
                     .map(|i| {
                         let v = w.preamble.volts(w.raw[i]);
                         let y = match (y_mode, &cs) {
@@ -1643,10 +1709,36 @@ impl ScopeApp {
                         [w.preamble.time(i), y]
                     })
                     .collect();
+                for p in pts.iter().filter(|p| (vx0..=vx1).contains(&p[0])) {
+                    fit = Some(fit.map_or((p[1], p[1]), |(lo, hi)| (lo.min(p[1]), hi.max(p[1]))));
+                }
                 pui.line(
-                    Line::new(w.source.clone(), pts)
+                    Line::new(w.source.clone(), PlotPoints::from(pts))
                         .color(channel_color(&w.source))
                         .width(1.2),
+                );
+            }
+            if pending == Some(ViewAction::FitY)
+                && let Some((lo, hi)) = fit
+            {
+                let pad = ((hi - lo) * 0.08).max(1e-9);
+                pui.set_plot_bounds_y(lo - pad..=hi + pad);
+                pui.set_auto_bounds([false, false]);
+            }
+            if let Some((g0, g1)) = view.fft_gate {
+                pui.span(
+                    egui_plot::Span::new("FFT window", g0..=g1)
+                        .fill(Color32::from_rgb(255, 150, 40).gamma_multiply(0.10))
+                        .border_color(Color32::from_rgb(255, 150, 40).gamma_multiply(0.6)),
+                );
+            }
+            if view.measure_gate
+                && let Some((g0, g1)) = view.gate()
+            {
+                pui.span(
+                    egui_plot::Span::new("A-B measured", g0..=g1)
+                        .fill(Color32::WHITE.gamma_multiply(0.05))
+                        .border_color(Color32::WHITE.gamma_multiply(0.3)),
                 );
             }
             if !marks.is_empty() {
@@ -1693,42 +1785,254 @@ impl ScopeApp {
                     .color(Color32::from_rgb(255, 140, 0))
                     .style(LineStyle::dotted_dense()),
             );
-            if let Some(a) = cursor_a {
-                pui.vline(VLine::new("cursor A", a).color(Color32::WHITE));
+            if let Some(a) = view.a {
+                pui.vline(VLine::new("cursor A", a).color(Color32::WHITE).width(1.2));
             }
-            if let Some(b) = cursor_b {
+            if let Some(b) = view.b {
                 pui.vline(
                     VLine::new("cursor B", b)
                         .color(Color32::LIGHT_GRAY)
-                        .style(LineStyle::dashed_dense()),
+                        .style(LineStyle::dashed_dense())
+                        .width(1.2),
                 );
             }
-            let pointer = pui.pointer_coordinate();
-            (
-                pointer,
-                pui.response().clicked(),
-                pui.response().secondary_clicked(),
-                pui.response().middle_clicked(),
-            )
-        });
-        let (pointer, left, right, middle) = resp.inner;
-        if let Some(p) = pointer {
-            if left {
-                self.cursor_a = Some(p.x);
+            for (name, y) in [("cursor Y1", view.y1), ("cursor Y2", view.y2)] {
+                if let Some(y) = y {
+                    pui.hline(
+                        HLine::new(name, y)
+                            .color(Color32::from_rgb(200, 200, 255))
+                            .style(if name.ends_with('2') {
+                                LineStyle::dashed_dense()
+                            } else {
+                                LineStyle::Solid
+                            }),
+                    );
+                }
             }
-            if right {
-                self.cursor_b = Some(p.x);
+            (pui.pointer_coordinate(), (vx0, vx1))
+        });
+        let (pointer, view_x) = resp.inner;
+        self.view.view_x = Some(view_x);
+        self.plot_transform = Some(resp.transform);
+        let r = &resp.response;
+        if let Some(p) = pointer {
+            if r.drag_started_by(egui::PointerButton::Primary) && near.is_some() {
+                self.view.drag = near;
+            }
+            if let Some(h) = self.view.drag
+                && r.dragged()
+            {
+                self.view.set(h, p.x, p.y);
+            }
+            if r.clicked() && near.is_none() {
+                self.view.a = Some(p.x);
+            }
+            if r.secondary_clicked() {
+                self.view.menu_at = Some([p.x, p.y]);
             }
         }
-        if middle {
-            self.cursor_a = None;
-            self.cursor_b = None;
+        if r.drag_stopped() {
+            self.view.drag = None;
+        }
+        if near.is_some() {
+            let icon = match near {
+                Some(Handle::Y1 | Handle::Y2) => egui::CursorIcon::ResizeVertical,
+                _ => egui::CursorIcon::ResizeHorizontal,
+            };
+            ui.ctx().set_cursor_icon(icon);
+        }
+        if r.middle_clicked() {
+            self.view.clear_cursors();
+        }
+        let trig_cs = trig
+            .as_ref()
+            .and_then(|t| Some((t.edge_source.clone(), chan_state(&t.edge_source)?)));
+        r.context_menu(|ui| self.plot_menu(ui, y_mode, trig_cs.as_ref()));
+    }
+
+    /// Right-click menu of the scope plot; acts at the clicked position.
+    fn plot_menu(
+        &mut self,
+        ui: &mut egui::Ui,
+        y_mode: YMode,
+        trig: Option<&(String, ChannelState)>,
+    ) {
+        let Some([x, y]) = self.view.menu_at else {
+            ui.close();
+            return;
+        };
+        let done = |ui: &mut egui::Ui| ui.close();
+        ui.label(RichText::new(format!("at {}", format_si(x, "s"))).weak());
+        if ui.button("Cursor A here").clicked() {
+            self.view.a = Some(x);
+            done(ui);
+        }
+        if ui.button("Cursor B here").clicked() {
+            self.view.b = Some(x);
+            done(ui);
+        }
+        if ui.button("Level cursor Y1 here").clicked() {
+            self.view.y1 = Some(y);
+            done(ui);
+        }
+        if ui.button("Level cursor Y2 here").clicked() {
+            self.view.y2 = Some(y);
+            done(ui);
+        }
+        if ui.button("Clear cursors").clicked() {
+            self.view.clear_cursors();
+            done(ui);
+        }
+        ui.separator();
+        let gate = self.view.gate();
+        if ui
+            .add_enabled(gate.is_some(), egui::Button::new("Zoom to A-B"))
+            .clicked()
+            && let Some((a, b)) = gate
+        {
+            self.view.pending = Some(ViewAction::ShowX(a, b));
+            done(ui);
+        }
+        if ui.button("Zoom in here (2x)").clicked() {
+            self.view.pending = Some(ViewAction::Zoom {
+                x: 2.0,
+                y: 1.0,
+                center: Some([x, y]),
+            });
+            done(ui);
+        }
+        if ui.button("Zoom out (2x)").clicked() {
+            self.view.pending = Some(ViewAction::Zoom {
+                x: 0.5,
+                y: 1.0,
+                center: Some([x, y]),
+            });
+            done(ui);
+        }
+        if ui.button("Fit vertical").clicked() {
+            self.view.pending = Some(ViewAction::FitY);
+            done(ui);
+        }
+        if ui.button("Reset view").clicked() {
+            self.view.pending = Some(ViewAction::Reset);
+            done(ui);
+        }
+        ui.separator();
+        if ui
+            .add_enabled(
+                gate.is_some(),
+                egui::Checkbox::new(&mut self.view.measure_gate, "Measure A-B"),
+            )
+            .changed()
+        {
+            done(ui);
+        }
+        if ui
+            .add_enabled(gate.is_some(), egui::Button::new("FFT of A-B"))
+            .clicked()
+        {
+            self.view.fft_gate = gate;
+            self.show_fft = true;
+            done(ui);
+        }
+        if ui.button("FFT of the visible range").clicked() {
+            self.view.fft_gate = self.view.view_x;
+            self.show_fft = true;
+            done(ui);
+        }
+        if self.view.fft_gate.is_some() && ui.button("FFT of the whole record").clicked() {
+            self.view.fft_gate = None;
+            done(ui);
+        }
+        ui.separator();
+        ui.label(RichText::new("on the scope").weak());
+        if let Some((src, cs)) = trig {
+            let volts = match y_mode {
+                YMode::Divisions => plot_tools::div_to_volts(y, cs.scale, cs.offset),
+                YMode::Volts => y,
+            };
+            if ui
+                .button(format!(
+                    "Trigger level here ({src} {})",
+                    format_si(volts, "V")
+                ))
+                .clicked()
+            {
+                self.set_trigger(TriggerUpdate {
+                    edge_level: Some(volts),
+                    ..Default::default()
+                });
+                done(ui);
+            }
+        }
+        if ui.button("Center time here").clicked() {
+            self.set_timebase(TimebaseUpdate {
+                offset: Some(x),
+                ..Default::default()
+            });
+            done(ui);
+        }
+        if let Some((x0, x1)) = self.view.view_x
+            && ui
+                .button("Apply visible range to the scope")
+                .on_hover_text(
+                    "sets timebase scale and offset so the scope acquires this range \
+                     (more detail than zooming into the 1000 screen points)",
+                )
+                .clicked()
+        {
+            let (scale, offset) = plot_tools::timebase_for_view(x0, x1);
+            self.set_timebase(TimebaseUpdate {
+                scale: Some(scale),
+                offset: Some(offset),
+                ..Default::default()
+            });
+            done(ui);
+        }
+        if ui.button("Screenshot").clicked() {
+            self.screenshot();
+            done(ui);
         }
     }
 
-    fn cursor_readout(&self, ui: &mut egui::Ui, frame: &Frame) {
-        if self.cursor_a.is_none() && self.cursor_b.is_none() {
-            ui.label(RichText::new("left-click: cursor A · right-click: cursor B · middle-click: clear · double-click: reset view").small().weak());
+    /// View buttons above the measurements.
+    fn view_toolbar(&mut self, ui: &mut egui::Ui) {
+        ui.label(RichText::new("view").weak());
+        let mut act = |ui: &mut egui::Ui, label: &str, tip: &str, a: ViewAction| {
+            if ui.small_button(label).on_hover_text(tip).clicked() {
+                self.view.pending = Some(a);
+            }
+        };
+        act(
+            ui,
+            "reset",
+            "whole record, default vertical range",
+            ViewAction::Reset,
+        );
+        act(
+            ui,
+            "fit Y",
+            "vertical range fitted to the visible data",
+            ViewAction::FitY,
+        );
+        let zoom = |x: f64, y: f64| ViewAction::Zoom { x, y, center: None };
+        act(ui, "X+", "zoom in horizontally", zoom(2.0, 1.0));
+        act(ui, "X-", "zoom out horizontally", zoom(0.5, 1.0));
+        act(ui, "Y+", "zoom in vertically", zoom(1.0, 2.0));
+        act(ui, "Y-", "zoom out vertically", zoom(1.0, 0.5));
+    }
+
+    fn cursor_readout(&self, ui: &mut egui::Ui, frame: &Frame, s: &Snapshot) {
+        let v = &self.view;
+        if v.a.is_none() && v.b.is_none() && v.y1.is_none() && v.y2.is_none() {
+            ui.label(
+                RichText::new(
+                    "left-click: cursor A - drag cursors - right-click: menu - right-drag: \
+                     zoom box - scroll: pan - ctrl+scroll: zoom - double-click: reset",
+                )
+                .small()
+                .weak(),
+            );
             return;
         }
         let value_at = |w: &Waveform, t: f64| -> Option<f64> {
@@ -1743,13 +2047,13 @@ impl ScopeApp {
             Some(p.volts(w.raw[i]) * (1.0 - f) + p.volts(w.raw[j]) * f)
         };
         ui.horizontal_wrapped(|ui| {
-            for (name, c) in [("A", self.cursor_a), ("B", self.cursor_b)] {
+            for (name, c) in [("A", v.a), ("B", v.b)] {
                 if let Some(t) = c {
                     ui.label(RichText::new(format!("{name}: {}", format_si(t, "s"))).strong());
                     for w in frame.traces.iter().filter(|w| w.has_data()) {
-                        if let Some(v) = value_at(w, t) {
+                        if let Some(val) = value_at(w, t) {
                             ui.label(
-                                RichText::new(format!("{} {}", w.source, format_si(v, "V")))
+                                RichText::new(format!("{} {}", w.source, format_si(val, "V")))
                                     .color(channel_color(&w.source)),
                             );
                         }
@@ -1757,11 +2061,11 @@ impl ScopeApp {
                     ui.separator();
                 }
             }
-            if let (Some(a), Some(b)) = (self.cursor_a, self.cursor_b) {
+            if let (Some(a), Some(b)) = (v.a, v.b) {
                 let dt = b - a;
                 ui.label(
                     RichText::new(format!(
-                        "Δt {}  1/Δt {}",
+                        "dt {}  1/dt {}",
                         format_si(dt, "s"),
                         format_si(1.0 / dt.abs(), "Hz")
                     ))
@@ -1770,9 +2074,66 @@ impl ScopeApp {
                 for w in frame.traces.iter().filter(|w| w.has_data()) {
                     if let (Some(va), Some(vb)) = (value_at(w, a), value_at(w, b)) {
                         ui.label(
-                            RichText::new(format!("Δ{} {}", w.source, format_si(vb - va, "V")))
+                            RichText::new(format!("d{} {}", w.source, format_si(vb - va, "V")))
                                 .color(channel_color(&w.source)),
                         );
+                    }
+                }
+                ui.separator();
+            }
+            // Level cursors: in the division view they mean a different voltage per channel.
+            let volts_of = |y: f64, src: &str| -> Option<f64> {
+                match self.y_mode {
+                    YMode::Volts => Some(y),
+                    YMode::Divisions => {
+                        let n = channel_of(src)?;
+                        let c = s.status.as_ref()?.channels.get((n - 1) as usize)?;
+                        Some(plot_tools::div_to_volts(y, c.scale, c.offset))
+                    }
+                }
+            };
+            let sources: Vec<&str> = frame
+                .traces
+                .iter()
+                .filter(|w| w.has_data())
+                .map(|w| w.source.as_str())
+                .collect();
+            for (name, y) in [("Y1", v.y1), ("Y2", v.y2)] {
+                if let Some(y) = y {
+                    let unit = if self.y_mode == YMode::Divisions {
+                        "div"
+                    } else {
+                        ""
+                    };
+                    ui.label(RichText::new(format!("{name}: {y:+.3} {unit}")).strong());
+                    if self.y_mode == YMode::Divisions {
+                        for src in &sources {
+                            if let Some(volts) = volts_of(y, src) {
+                                ui.label(
+                                    RichText::new(format!("{src} {}", format_si(volts, "V")))
+                                        .color(channel_color(src)),
+                                );
+                            }
+                        }
+                    }
+                    ui.separator();
+                }
+            }
+            if let (Some(y1), Some(y2)) = (v.y1, v.y2) {
+                match self.y_mode {
+                    YMode::Volts => {
+                        ui.label(RichText::new(format!("dY {}", format_si(y2 - y1, "V"))).strong());
+                    }
+                    YMode::Divisions => {
+                        ui.label(RichText::new(format!("dY {:+.3} div", y2 - y1)).strong());
+                        for src in &sources {
+                            if let (Some(a), Some(b)) = (volts_of(y1, src), volts_of(y2, src)) {
+                                ui.label(
+                                    RichText::new(format!("d{src} {}", format_si(b - a, "V")))
+                                        .color(channel_color(src)),
+                                );
+                            }
+                        }
                     }
                 }
             }
@@ -1887,6 +2248,29 @@ impl ScopeApp {
         });
         ui.horizontal(|ui| {
             ui.label(RichText::new("FFT").strong());
+            ui.checkbox(&mut self.fft_log_x, "log f")
+                .on_hover_text("logarithmic frequency axis");
+            ui.checkbox(&mut self.fft_auto_y, "auto Y")
+                .on_hover_text("vertical range follows the spectrum (else -140..+10 dBV)");
+            match self.view.fft_gate {
+                Some((a, b)) => {
+                    ui.label(
+                        RichText::new(format!(
+                            "window {} .. {}",
+                            format_si(a, "s"),
+                            format_si(b, "s")
+                        ))
+                        .color(Color32::from_rgb(255, 150, 40)),
+                    );
+                    if ui.small_button("whole record").clicked() {
+                        self.view.fft_gate = None;
+                    }
+                }
+                None => {
+                    ui.label(RichText::new("whole record").weak());
+                }
+            }
+            ui.separator();
             for w in frame.traces.iter().filter(|w| w.has_data()) {
                 ui.selectable_value(
                     &mut self.fft_source,
@@ -1913,31 +2297,75 @@ impl ScopeApp {
         else {
             return;
         };
-        let spec = mho_dsp::spectrum(&w.volts(), w.preamble.x_increment, self.fft_window);
+        // The FFT window (plot menu "FFT of A-B" / "of the visible range") selects samples.
+        let volts = match self.view.fft_gate {
+            Some((a, b)) => match gated_volts(w, a, b) {
+                Some(v) if v.len() >= 16 => v,
+                _ => {
+                    ui.label(
+                        RichText::new("FFT window holds too few samples; showing the whole record")
+                            .color(Color32::YELLOW),
+                    );
+                    w.volts()
+                }
+            },
+            None => w.volts(),
+        };
+        let spec = mho_dsp::spectrum(&volts, w.preamble.x_increment, self.fft_window);
+        let log_x = self.fft_log_x;
+        let fx = move |f: f64| if log_x { f.max(1e-12).log10() } else { f };
         let pts: PlotPoints = spec
             .dbv
             .iter()
             .enumerate()
             .skip(1)
-            .map(|(k, &d)| [spec.frequency(k), d])
+            .map(|(k, &d)| [fx(spec.frequency(k)), d])
             .collect();
         let peaks = spec.peaks(3);
-        Plot::new("fft")
-            .include_y(-140.0)
-            .include_y(10.0)
-            .x_axis_formatter(|m, _| format_si(m.value, "Hz"))
-            .y_axis_formatter(|m, _| format!("{:.0} dBV", m.value))
-            .show(ui, |pui| {
-                pui.line(Line::new("spectrum", pts).color(channel_color(&w.source)));
-                for p in peaks {
-                    pui.text(egui_plot::Text::new(
-                        "peak",
-                        egui_plot::PlotPoint::new(p.frequency, p.dbv + 3.0),
-                        RichText::new(format!("{} {:.1} dBV", format_si(p.frequency, "Hz"), p.dbv))
-                            .small(),
-                    ));
-                }
-            });
+        let mut plot = Plot::new(("fft", log_x))
+            .x_axis_formatter(move |m, _| {
+                format_si(if log_x { 10f64.powf(m.value) } else { m.value }, "Hz")
+            })
+            .y_axis_formatter(|m, _| format!("{:.0} dBV", m.value));
+        if !self.fft_auto_y {
+            plot = plot.include_y(-140.0).include_y(10.0);
+        }
+        let resp = plot.show(ui, |pui| {
+            pui.line(Line::new("spectrum", pts).color(channel_color(&w.source)));
+            for p in &peaks {
+                pui.text(egui_plot::Text::new(
+                    "peak",
+                    egui_plot::PlotPoint::new(fx(p.frequency), p.dbv + 3.0),
+                    RichText::new(format!("{} {:.1} dBV", format_si(p.frequency, "Hz"), p.dbv))
+                        .small(),
+                ));
+            }
+            pui.pointer_coordinate()
+        });
+        let at = resp.inner;
+        resp.response.context_menu(|ui| {
+            if let Some(p) = at {
+                let f = if log_x { 10f64.powf(p.x) } else { p.x };
+                ui.label(RichText::new(format!("{} {:.1} dBV", format_si(f, "Hz"), p.y)).weak());
+            }
+            if ui
+                .checkbox(&mut self.fft_log_x, "log frequency axis")
+                .changed()
+            {
+                ui.close();
+            }
+            if ui
+                .checkbox(&mut self.fft_auto_y, "auto vertical range")
+                .changed()
+            {
+                ui.close();
+            }
+            if self.view.fft_gate.is_some() && ui.button("whole record").clicked() {
+                self.view.fft_gate = None;
+                ui.close();
+            }
+            ui.label(RichText::new("double-click: reset view").weak());
+        });
     }
 }
 
@@ -1999,7 +2427,7 @@ impl eframe::App for ScopeApp {
         self.load_capabilities(&s);
         self.track_math_scale(&s);
         self.persist(false);
-        let local: Vec<(String, Measurements)> = s
+        let mut local: Vec<(String, Measurements)> = s
             .frame
             .as_ref()
             .map(|f| {
@@ -2009,6 +2437,17 @@ impl eframe::App for ScopeApp {
                     .collect()
             })
             .unwrap_or_default();
+        // Measurements of the region between the cursors ("Measure A-B" in the plot menu).
+        if self.view.measure_gate
+            && let (Some((a, b)), Some(f)) = (self.view.gate(), &s.frame)
+        {
+            for t in f.traces.iter().filter(|t| t.has_data()) {
+                if let Some(v) = gated_volts(t, a, b) {
+                    let m = mho_dsp::analyze(&v, t.preamble.x_increment);
+                    local.push((format!("{} [A-B]", t.source), m));
+                }
+            }
+        }
 
         egui::Panel::top("header").show(ui, |ui| self.header(ui, &s));
         egui::Panel::right("controls")
@@ -2027,8 +2466,10 @@ impl eframe::App for ScopeApp {
                     ui.checkbox(&mut self.show_fft, "FFT");
                     ui.checkbox(&mut self.show_decoder, "Decoder");
                     ui.separator();
+                    self.view_toolbar(ui);
+                    ui.separator();
                     if let Some(f) = &s.frame {
-                        self.cursor_readout(ui, f);
+                        self.cursor_readout(ui, f, &s);
                     }
                 });
                 ui.separator();
