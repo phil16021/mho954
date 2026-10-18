@@ -89,7 +89,17 @@ mho954 read --list                         # Ablesewerte: Cursor, Maske, Suche, 
 mho954 do save.setup D:/bench1.stp         # Datei auf dem Scope (C:/ intern, D:/ USB-Stick)
 mho954 do --list                           # Befehle; `do reset --yes` = *RST (Werkseinstellungen)
 mho954 logic --bus 4 -o capture.vcd        # D0..D15 (Logiktastkopf) als VCD für PulseView
-mho954 bode --start 100 --stop 1M --dut-in 1 --dut-out 2 -o bode.csv   # nur mit AFG-Option
+mho954 caps                                # Bandbreite (mit Upgrade), Speichertiefe, Generator, Optionen
+mho954 afg 1 --func sin --freq 1k --ampl 1 --load 50 --on   # Generator GI (AFG-Option)
+mho954 afg 2 --func squ --freq 10k --duty 25 --mod am --depth 50 --mod-freq 100 --on
+mho954 afg 1 --off                         # Ausgang aus; `afg 1` zeigt den Zustand
+mho954 do afg.align_phase                  # GI/GII phasengleich neu starten
+mho954 do afg1.load_arb D:/wave.csv        # Arb-Datei vom USB-Stick des Scopes
+mho954 bode --start 100 --stop 1M --dut-in 1 --dut-out 2 -o bode.csv   # Software-Sweep (AFG)
+mho954 bode --start 100 --stop 1M --averages 4 --load 50                # gemittelt, 50-Ω-Last
+mho954 bode --native --start 100 --stop 1M -o bode.png                  # Bode des Scopes (Bild)
+mho954 set bus.flexray -n 1 --activate source=CHAN1 baud=10000000      # Optionen FlexA/AUDIOA/AEROA
+mho954 set trigger.i2s --activate clock=CHAN1 word_select=CHAN2 data_source=CHAN3
 mho954 verify --list                       # Befehle einzeln am Gerät prüfen (siehe unten)
 ```
 
@@ -100,7 +110,7 @@ Globale Optionen: `-c/--connection`, `--url`, `--direct`, `--config`, `-v`/`-vv`
 | `usb` (Standard), `usb:SERIAL` | USBTMC im Userspace; nur MHO900 (PID 0452), sonst per Seriennummer |
 | `usbtmc`, `/dev/usbtmcN` | Linux-Kernel-Treiber (über USB/IP weniger robust) |
 | `tcp:HOST[:PORT]` | LAN/WLAN, Raw-SCPI auf Port 5555 |
-| `sim` | Simulator; `MHO954_SIM=latency=25,nosignal=1+4` stellt Latenz und Kanäle ohne Signal ein |
+| `sim` | Simulator (wie das aufgerüstete Test-Scope); `MHO954_SIM=latency=25,nosignal=1+4` stellt Latenz und Kanäle ohne Signal ein, `noopt` entfernt die Optionen, `noafg` den Generator |
 
 Umgebungsvariablen: `MHO954_CONFIG`, `MHO954_CONNECTION`, `MHO954_URL`, `MHO954_SIM`,
 `MHO954_ALLOW_ANY_MODEL=1` (andere Rigol-Modelle zulassen), `RUST_LOG`.
@@ -137,12 +147,15 @@ bevor das Gerät freigegeben wird.
 | GET | `/api/v1/measure/stats?item=VPP&source=CHAN1` | Messstatistik |
 | POST | `/api/v1/measure/actions/{reset_statistics,clear_all,clear_totalizer}` | Statistik/Messungen/Totalizer zurücksetzen |
 | GET | `/api/v1/counter`, `/api/v1/dvm`, `/api/v1/modules` | Zähler, Voltmeter, LA/AFG-Hardware |
+| GET | `/api/v1/capabilities` | effektive Bandbreite, Speichertiefe je Kanalzahl, Generator, lizenzierte Protokolle |
+| PUT | `/api/v1/generator/{n}` `{function, frequency, amplitude, offset, load, modulation, …, output}` | Generator GI/GII (Ausgang zuletzt) |
 | GET | `/api/v1/bus/{n}/data?format=json\|csv` | Dekoder-Ereignistabelle |
 | GET | `/api/v1/math/{n}/peaks` | Peak-Tabelle der Scope-FFT |
 | GET | `/api/v1/readouts`, `/api/v1/readouts/{id}` | Ablesewerte (Cursor, Maske, Suche, Histogramm, Speicherstatus) |
 | GET/POST | `/api/v1/commands`, `/api/v1/commands/{id}` `{"path","confirm"}` | Speichern/Laden auf dem Scope, Resets, Record; `reset` nur mit `confirm` |
 | GET | `/api/v1/logic/{bus}?format=json\|vcd` | Digitalkanäle über den Parallel-Dekoder |
-| POST | `/api/v1/bode` `{start, stop, points, input, output, amplitude, generator}` | Software-Bode-Sweep (AFG-Option) |
+| POST | `/api/v1/bode` `{start, stop, points, input, output, amplitude, generator, averages, load}` | Software-Bode-Sweep (AFG-Option) |
+| POST | `/api/v1/bode/native` `{start, stop, points_per_decade, input, output, amplitude}` | Bode-Diagramm des Scopes, Ergebnis als PNG |
 | POST | `/api/v1/scpi` | Raw-SCPI (nur mit `--allow-raw-scpi`) |
 | WS | `/api/v1/stream` | Live-Frames (binär) + Messwerte (JSON) |
 
@@ -196,6 +209,9 @@ freien Port, damit die CLI nicht versehentlich den Simulator steuert.
 | `read_values`, `run_scope_command` | Ablesewerte; Speichern/Laden/Resets (`reset` erst nach Rückfrage) |
 | `logic_capture` | Digitalkanäle D0..D15 (optional als VCD gespeichert) |
 | `bode_sweep` | Frequenzgang mit dem eingebauten Generator |
+| `bode_native` | Bode-Diagramm des Scopes als Bild |
+| `set_generator` | Generator GI/GII einstellen, Ausgang ein/aus |
+| `get_capabilities` | Bandbreite, Speichergrenzen, Generator, Protokoll-Optionen |
 | `screenshot` | Bild als MCP-Image |
 | `list_options` | Optionen |
 | `get_network`, `configure_network` | LAN-Einstellungen (Änderungen nur nach Rückfrage) |

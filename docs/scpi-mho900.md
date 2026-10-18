@@ -60,7 +60,7 @@ nusb). Der Kernel-Treiber `usbtmc` (`-c usbtmc`) bleibt als Alternative.
 | `:CHANn:IMP` | `OMEG`, `FIFTy` (Query: `OMEG`/`FIFT`) | Guide, Gerät |
 | `:CHANn:PROB?` | `1.000000E0` | Gerät |
 | `:ACQ:TYPE` | `NORMal`, `PEAK`, `AVERages`, `HRESolution` | Guide |
-| `:ACQ:MDEP` | `AUTO`, `1k` … `100M` (bis `500M` mit RLU-05); Query z. B. `1.0000E+04` | Guide, Gerät |
+| `:ACQ:MDEP` | `AUTO`, `1k` … `100M` (bis `500M` mit RLU-05); Query z. B. `1.0000E+04`. Maximum je aktive Kanäle: 100M/50M/25M bei 1/2/3–4 Kanälen, mit RLU05 500M/250M/125M (Guide 3.3.2; wird vor dem Senden geprüft) | Guide, Gerät |
 | `:TIM:MODE` | `MAIN`, `XY`, `ROLL` | Guide |
 | `:TRIG:STAT?` | `TD`, `WAIT`, `RUN`, `AUTO`, `STOP` | Guide, Gerät |
 | `:TRIG:COUP` | `AC`, `DC`, `LFReject`, `HFReject` | Guide |
@@ -81,6 +81,70 @@ FRPHase FFPHase ACRMs.
 | `:SYST:OPT:INST <license>` | Format `MHO900-<OPT>@<code>`; Lizenz auf rigol.com → License Activation aus gekauftem Key + Seriennummer | Guide |
 | `:SYST:OPT:UNIN` | entfernt alle offiziellen Optionen, danach Neustart | Guide |
 | `*OPT?`, `:SYST:OPT?` | existieren nicht (keine Antwort) | Gerät |
+
+## Upgrade-Optionen und Fähigkeiten (`mho954 caps`)
+
+Stand 2026-10-18, nach dem Upgrade des Test-Scopes:
+
+| Befund | Quelle |
+|---|---|
+| Aktiv: BWU05T08, RLU05, AFG50, AFG100, AUTOA (CAN-FD), FlexA, AUDIOA (I²S), AEROA (1553) | Gerät (`:SYST:OPT:STAT?`, über LAN) |
+| `*IDN?` meldet nach BWU05T08 weiter `MHO954` (Firmware `00.01.00`); die effektive Bandbreite (800 MHz bei 1–2 Kanälen, 400 MHz bei 3–4) ergibt sich nur aus den Optionen | Gerät, Guide-Modelltabelle |
+| `:SYST:MOD?` bleibt `1,0,0,0,0`, auch nach Neustart mit aktivem AFG100: das DG-Feld spiegelt die Lizenz nicht wider. Der Generator gilt als vorhanden, wenn DG = 1 **oder** eine AFG-Lizenz aktiv ist **und** `:SOUR1:OUTP:STAT?` am Gerät beantwortet wurde (`mho954 verify afg`) | Gerät |
+| `:SYST:DGST?` (DG vorhanden) | Guide 3.24; noch ungeprüft (Probe `system.dg`) |
+| EMBD, COM, AUTO sind Lizenznamen anderer Serien und beim MHO900 Standard; sie haben kein Status-Token und werden nie abgefragt | Guide 3.24.18 |
+| Kein SCPI-Befehl für die Bandbreite (`:SYST:BAND?` o. ä.) | Guide durchsucht |
+
+Gruppen mit Option prüfen die Lizenz vor jedem Lesen und Schreiben (`requires: {"option": "FlexA"}`).
+
+## Funktionsgenerator (AFG, Guide 3.25)
+
+| Befehl | Hinweis | Quelle |
+|---|---|---|
+| `:SOUR<n>:FUNC` | `SINusoid SQUare RAMP NOISe DC ARB EXPRise EXPFall ECG1 GAUSsian LORentz HAVersine SINC` | Guide |
+| `:SOUR<n>:FREQ` | Sinus 2 mHz–100 MHz (AFG100) / 20 mHz–50 MHz (AFG50); Rechteck, Arb und eingebaute Formen 20/10 MHz; Rampe 2/1 MHz; DC und Rauschen ohne Frequenz | Guide |
+| `:SOUR<n>:VOLT:AMPL` | 50 Ω: 1 mVpp–10 Vpp (≤ 50 MHz), 5 Vpp darüber; High-Z: doppelt so viel | Guide |
+| `:SOUR<n>:VOLT:OFFS` | ±(Vmax − Vpp)/2 | Guide |
+| `:SOUR<n>:PER`, `:VOLT:HIGH`, `:VOLT:LOW` | gekoppelt an Frequenz bzw. Amplitude/Offset | Guide |
+| `:SOUR<n>:IMP` | `OMEG` (High-Z) / `FIFTy` (50 Ω): erwartete Last, bestimmt die angezeigte Amplitude | Guide |
+| `:SOUR<n>:PHAS:SYNC` | „Align phase“ für GI und GII (Befehl `afg.align_phase`) | Guide |
+| `:SOUR<n>:LOAD:ARB <C:/…\|D:/…>` | lädt eine Arb-Datei vom Scope/USB-Stick; ein SCPI-Upload existiert nicht (Befehle `afg1.load_arb`, `afg2.load_arb`, Ablesewert `afg.arb`) | Guide |
+| `:SOUR<n>:MOD:*` | AM/FM/PM mit internem Modulator (Gruppe `afg.modulation`) | Guide |
+| Bündel-, Sweep-, Burst-, Kopplungsbefehle | gibt es nicht | Guide |
+
+Die Grenzen werden vor dem Schreiben geprüft (`crates/mho-driver/src/generator.rs`). Der Ausgang
+wird zuletzt eingeschaltet, beim Ausschalten zuerst.
+
+## Bode-Diagramm
+
+- **Am Scope** (`:BODeplot`, Guide 3.5): Start 10 Hz–3 MHz, Stop 100 Hz–30 MHz, Start ≤ Stop/10,
+  10–100 Punkte/Dekade, Amplitude 20 mV–10 V gesamt (`ALL`) oder je Bereich (`10 100 1K 10K 100K
+  1M 10M 25M`). Kurve nur auf dem Bildschirm, **kein Export-Befehl** → `bode --native` liefert
+  einen Screenshot. Knoten `:BOD:PHASE:ENAB` (Langform `PHASEcurve`); `:BOD:PHAS:ENAB` aus der
+  ersten Tabellenfassung wäre unbekannt gewesen.
+- **Software-Sweep** (`bode`): Generator-Schritte, eine Single-Erfassung je Punkt, Ein-Bin-DFT
+  auf beiden Kanälen derselben Erfassung (Phase daher unabhängig vom Trigger), optional
+  komplex gemittelt. Auswertung: −3 dB, 0-dB-Durchgang, Phasen-/Amplitudenreserve,
+  entfaltete Phase (`mho_dsp::bode_summary`).
+
+## Optionale Protokolle (Guide 3.4.14–18, 3.27.25–27)
+
+| Gruppe | Befehle | Option |
+|---|---|---|
+| `bus.canfd` | `:BUS<n>:CAN:FDBaud` 1–10 Mbit/s, `:FDSPoint` 10–90 % | AUTOA |
+| `bus.flexray` | `:BUS<n>:FLEXray:BAUD` 2,5/5/10 Mbit/s, `SOURce`, `SPOint`, `STYPe BP\|BM\|RT`, `CHANnel A\|B`; Schwelle `:BUS<n>:THR <v>,FLEX` | FlexA |
+| `bus.i2s` | `:BUS<n>:IIS:SOURce:CLOCk/DATA/WSELect`, `ALIGnment IIS\|RJ\|LJ`, `CLOCk:SLOPe`, `RWIDth`, `RECewidth`, `WSLow`, `ENDian`, `POLarity`; Schwellen `I2SClk`, `WS`, `DATA` | AUDIOA |
+| `bus.m1553` | `:BUS<n>:M1553:SOURce`; Schwelle `1553` | AEROA |
+| `trigger.flexray` | `:TRIG:FLEXray:*` (BAUD, POS, ERRor, SYMBol, FRAMe, DEFine, IDCmp, CYCComp, MIN/MAXid, MIN/MAXCy, CH, SOURce, WHEN, LEVel) | FlexA |
+| `trigger.i2s` | `:TRIG:IIS:*` (ALIGnment, C/S/DLEVel, WIDTh, UWIDth, CLOCk:SLOPe, Quellen, WHEN, AUDio, DATA) | AUDIOA |
+| `trigger.m1553` | `:TRIG:M1553:*` (SOURce, WHEN, POLarity, A/BLEVel, WINDow, SYNC, ERRor, DATComp, DATValue, DRTA) | AEROA |
+
+- `:BUS<n>:MODE` kennt zusätzlich `IIS`, `FLEXray`, `M1553` (Query `IIS`, `FLEX`, `M1553`).
+- Für den **CAN-FD-Trigger** dokumentiert der Guide keine Befehle; `:TRIG:CAN:DWIDth` bleibt 1–8
+  Byte. FD-Triggerbedingungen lassen sich nur am Gerät einstellen.
+- Bitweise Muster (`CODE`, `CURRbit`, `DMIN/DMAX`) der Trigger sind nicht in den Tabellen.
+- Die Ereignistabellen (`:BUS<n>:DATA?`) der neuen Protokolle sind am Gerät noch nicht gesehen;
+  der Parser ist generisch.
 
 ## Netzwerk
 
@@ -156,7 +220,24 @@ Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigg
   sind nur Buchstaben, Ziffern, `_ - . /`, damit kein `;` einen zweiten Befehl einschleusen kann.
 - Parameter mit vorangestelltem Index (`:LA:DIG:ENAB D3,ON`, `:REF:SOUR 2,CHAN1`,
   `:BOD:VOLT ALL,0.5`) sind „prefixed“ in der Tabelle; Abfrage jeweils `…? <index>`.
-- `afg*` und `bode` sind auf dem Test-Scope ohne Generator nicht verfügbar und werden nicht
-  angeboten.
+- `afg*`, `bode*` und die Options-Gruppen sind seit dem Upgrade verfügbar, aber noch am Gerät
+  zu prüfen (siehe unten, Reihenfolge der Prüfblöcke).
 - Nicht umgesetzt: `:NAVigate`, `:SAVe:SMB` (Netzlaufwerk mit Passwort), `*TST?` (Laufzeit
-  länger als der Timeout), `:SOURce<n>:LOAD:ARBitrary`.
+  länger als der Timeout).
+
+### Prüfblöcke nach dem Upgrade (je Block ein Einschaltzyklus, über USB)
+
+`verify` überspringt nach einer unbeantworteten Query den Rest der Gruppe und ihre
+Untergruppen; ein fehlender Generator kostet so 1 statt 3 Budget-Einheiten.
+
+| Block | Befehl | Aufbau |
+|---|---|---|
+| A | `mho954 verify --reset-budget afg system.dg` | GI → CH1, GII → CH2 |
+| B | `mho954 verify bode` | GI über T-Stück an CH1 und CH2 (oder RC-Glied) |
+| C | `mho954 verify bus.canfd bus.flexray` | – |
+| D | `mho954 verify bus.i2s bus.m1553` | – |
+| E | `mho954 verify trigger.flexray trigger.i2s trigger.m1553` | – |
+
+Danach `~/.local/state/mho954/verified.json` in `docs/verified-commands.json` übernehmen und
+neu bauen; Hardwaretests: `MHO954_HW=1 MHO954_HW_AFG=1 cargo test -p mho-driver --test hw --
+--ignored --test-threads=1`.
