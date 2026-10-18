@@ -94,8 +94,8 @@ mho954 counter | dvm                       # Frequenzzähler, Voltmeter (vorher 
 mho954 set bus.rs232 -n 1 --activate baud=115200 tx=CHAN2 tx_threshold=1.6
 mho954 decode 1                            # Dekoder-Ereignistabelle (--csv, -o bus1.csv)
 mho954 set math -n 1 --activate operator=mult source1=CHAN1 source2=CHAN2
-mho954 set math.fft -n 2 --activate source=CHAN2 peak_search=true peaks=5
-mho954 peaks 2                             # Peak-Tabelle der Scope-FFT
+mho954 set math.fft -n 2 --activate source=CHAN2 peak_search=true peaks=5 peak_threshold=-60
+mho954 peaks 2                             # Peak-Tabelle der Scope-FFT, z. B. " 1  1.025 kHz  -6.802dBV"
 mho954 set cursor.manual --activate ax=-100u bx=300u && mho954 read cursor.manual
 mho954 read --list                         # Ablesewerte: Cursor, Maske, Suche, Histogramm, …
 mho954 read histogram --enable             # Modus bei Bedarf einschalten, dann lesen
@@ -465,6 +465,12 @@ Details in `docs/scpi-mho900.md`.
 - **Histogramm:** Beim vertikalen Histogramm meldet Firmware 00.01.00 ein falsches `Sigma`
   (3 mV für einen Sinus mit 1 Vpp); für die Streuung `ACRMS` verwenden.
 - **Zähler:** Ausgeschaltet antwortet `:COUN:CURR?` mit 0; das Programm meldet dann „aus“.
+- **FFT-Peaks:** Die Schwelle `peak_threshold` steht in der FFT-Einheit, der Werkswert 5,5 dBV
+  blendet die Peaks der meisten Signale aus (leere Tabelle); `-60` passt für dB. Beim
+  Einheitenwechsel rechnet das Scope Schwelle und Exkursion um, deshalb schreiben Gruppen in
+  Tabellenreihenfolge (Einheit vor Schwelle). dBV bezieht sich auf den Effektivwert; mit dem
+  Flat-Top-Fenster sind die `VRMS`-Werte um den Faktor 4,64 zu klein (in dB stimmen sie). Die
+  Frequenzen liegen auf dem Bin-Raster (bei 20 kHz Span bis ~80 Hz daneben).
 - **USB-Framing:** Das Scope sendet keine USBTMC-Füllbytes, und große Antworten kommen in mehreren
   Transfers. Eine offene Antwort wird vor jedem neuen Befehl zu Ende gelesen; ein Device Clear
   mitten in einer Antwort blockierte das Scope früher.
@@ -494,6 +500,7 @@ MHO954_HW=1 cargo test -p mho-driver --test hw -- --ignored --test-threads=1
 | `MHO954_HW=1` | Hardwaretests einschalten |
 | `MHO954_HW_CONN=tcp:192.168.1.109` | Verbindung (Standard `usb`) |
 | `MHO954_HW_AFG=1` | Generatortest; Verkabelung GI → CH1, GII → CH2 (1 MΩ) |
+| `MHO954_HW_FFT_CH=4` | Eingang mit GI für den FFT-Peak-Test `fft_peak_table_from_square` (Standard 1) |
 | `MHO954_HW_BODE=1` | Bode-Test; GI über ein T-Stück an CH1 und CH2 (flacher Frequenzgang) |
 
 Die CI (`.forgejo/workflows/ci.yml`) führt fmt, clippy und Tests auf dem Host-Runner `apps-ws` aus.

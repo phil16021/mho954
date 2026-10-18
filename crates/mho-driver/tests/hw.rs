@@ -6,7 +6,8 @@
 //! caught immediately (the firmware hangs after ~5 unknown queries per power cycle).
 //!
 //! Generator tests drive real signals and need the bench cabling:
-//! - `MHO954_HW_AFG=1`: GI → CH1 and GII → CH2 (BNC cables, scope inputs 1 MΩ).
+//! - `MHO954_HW_AFG=1`: GI → CH1 and GII → CH2 (BNC cables, scope inputs 1 MΩ). The FFT
+//!   peak test uses only GI, on the input named by `MHO954_HW_FFT_CH` (default 1).
 //! - `MHO954_HW_BODE=1`: GI through a T piece to CH1 and CH2 (flat response).
 
 use std::time::Duration;
@@ -226,4 +227,223 @@ fn bode_sweep_through_a_t_piece_is_flat() {
         assert!(p.phase_deg.abs() < 5.0, "{p:?}");
     }
     healthy(&mut s);
+}
+
+fn math_fft(s: &mut Scope, values: &[(&str, ParamValue)], select: bool) {
+    let m: ParamMap = values
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect();
+    s.group_set("math.fft", Some(1), &m, select).unwrap();
+}
+
+/// Raw peak lines and their parse, printed for the documentation.
+fn peak_table(s: &mut Scope, what: &str) -> (Vec<String>, Vec<mho_dsp::ScopePeak>) {
+    std::thread::sleep(Duration::from_millis(1500));
+    let lines = s.scpi().query_lines(":MATH1:FFT:SEAR:RES?").unwrap();
+    eprintln!("--- {what}: {} line(s)", lines.len());
+    for l in &lines {
+        eprintln!("{l:?}");
+    }
+    let peaks = s.fft_peaks(1).unwrap();
+    eprintln!("parsed: {peaks:?}");
+    healthy(s);
+    (lines, peaks)
+}
+
+#[test]
+#[ignore]
+fn fft_peak_table_from_square() {
+    let Some(mut s) = generator_scope("MHO954_HW_AFG") else {
+        return;
+    };
+    // GI goes to this input (`MHO954_HW_FFT_CH`, default 1).
+    let ch: u8 = std::env::var("MHO954_HW_FFT_CH")
+        .map(|v| v.parse().expect("MHO954_HW_FFT_CH"))
+        .unwrap_or(1);
+    let src = format!("CHAN{ch}");
+    let before = s.status().unwrap();
+    let math = s.group_get("math", Some(1), false).unwrap();
+    let fft = s.group_get("math.fft", Some(1), false).unwrap();
+    // 1 Vpp square: odd harmonics only, the n-th at 4/(nπ) · 0.5 V peak.
+    generator(
+        &mut s,
+        1,
+        GeneratorUpdate {
+            function: Some("SQU".into()),
+            frequency: Some(1e3),
+            amplitude: Some(1.0),
+            offset: Some(0.0),
+            duty: Some(50.0),
+            load: Some("highz".into()),
+            output: Some(true),
+            ..Default::default()
+        },
+    );
+    s.set_channel(
+        ch,
+        &ChannelUpdate {
+            display: Some(true),
+            probe: Some(1.0),
+            scale: Some(0.25),
+            offset: Some(0.0),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    s.set_timebase(&TimebaseUpdate {
+        scale: Some(1e-3),
+        offset: Some(0.0),
+        ..Default::default()
+    })
+    .unwrap();
+    s.set_trigger(&TriggerUpdate {
+        sweep: Some(TriggerSweep::Auto),
+        edge_source: Some(src.clone()),
+        edge_slope: Some(Slope::Positive),
+        edge_level: Some(0.0),
+        ..Default::default()
+    })
+    .unwrap();
+    s.action(mho_driver::Action::Run).unwrap();
+    let text = |t: &str| ParamValue::Text(t.into());
+    math_fft(
+        &mut s,
+        &[
+            ("source", text(&src)),
+            ("window", text("FLATtop")),
+            ("unit", text("DB")),
+            ("mode", text("NORMal")),
+            ("span", ParamValue::Real(20e3)),
+            ("center", ParamValue::Real(10e3)),
+            ("peak_search", ParamValue::Bool(true)),
+            ("peaks", ParamValue::Int(5)),
+            ("peak_order", text("AMPorder")),
+            // In the unit's scale (dBV here); the factory value 5.5 hides a 1 Vpp signal.
+            ("peak_threshold", ParamValue::Real(-60.0)),
+            ("peak_excursion", ParamValue::Real(3.0)),
+        ],
+        true,
+    );
+    let checks = || {
+        std::thread::sleep(Duration::from_millis(800));
+        near("FREQ", measured(&mut s, "FREQ", ch), 1e3, 0.01);
+        // VPP includes the edge overshoot (up to 1.19 V seen); top − base does not.
+        near("VAMP", measured(&mut s, "VAMP", ch), 1.0, 0.1);
+        let (lines, peaks) = peak_table(&mut s, "DB, AMPorder, 5 peaks");
+        assert_eq!(peaks.len(), lines.len(), "unparsed lines");
+        assert_eq!(peaks.len(), 5);
+        for (i, p) in peaks.iter().enumerate() {
+            assert_eq!(p.rank as usize, i + 1);
+        }
+        let mut f: Vec<f64> = peaks.iter().map(|p| p.frequency).collect();
+        f.sort_by(f64::total_cmp);
+        // Peaks lie on the scope's bin grid (48.8 Hz at a 20 kHz span); the flat top of the
+        // window puts the reported bin up to ~1.5 bins off (1 kHz showed as 1.025 kHz,
+        // 3 kHz as 3.075 kHz).
+        for (got, want) in f.iter().zip([1e3, 3e3, 5e3, 7e3, 9e3]) {
+            assert!(
+                (got - want).abs() < 125.0,
+                "harmonic {got} Hz, expected {want} Hz"
+            );
+        }
+        let d = peaks[0].amplitude - peaks[1].amplitude;
+        assert!((d - 9.54).abs() < 1.0, "fundamental − 3rd = {d} dB");
+        eprintln!(
+            "fundamental {} (rms reference -6.93 dBV, peak reference -3.92 dBV)",
+            peaks[0].amplitude_text
+        );
+
+        // Threshold and excursion are in the unit's scale; the scope converts them when the
+        // unit changes, so they are written after it (table order).
+        let db = |s: &mut Scope, window: &str| {
+            math_fft(
+                s,
+                &[
+                    ("window", text(window)),
+                    ("unit", text("DB")),
+                    ("peak_threshold", ParamValue::Real(-60.0)),
+                    ("peak_excursion", ParamValue::Real(3.0)),
+                ],
+                false,
+            );
+        };
+        // VRMS vs dB of the same peak: the ratio shows whether VRMS is window-corrected.
+        for (window, gain) in [("FLATtop", 0.2156), ("HANNing", 0.5), ("RECTangle", 1.0)] {
+            db(&mut s, window);
+            let (_, in_db) = peak_table(&mut s, &format!("{window}, DB"));
+            math_fft(
+                &mut s,
+                &[
+                    ("unit", text("VRMS")),
+                    ("peak_threshold", ParamValue::Real(1e-3)),
+                    ("peak_excursion", ParamValue::Real(1e-3)),
+                ],
+                false,
+            );
+            let (lines, in_v) = peak_table(&mut s, &format!("{window}, VRMS"));
+            assert_eq!(in_v.len(), lines.len(), "unparsed lines");
+            let ratio = in_v[0].amplitude / 10f64.powf(in_db[0].amplitude / 20.0);
+            eprintln!("{window}: VRMS / dB = {ratio:.4} (coherent gain {gain})");
+            if window == "FLATtop" {
+                near("flat-top VRMS / dB", ratio, gain, 0.05);
+            }
+        }
+
+        db(&mut s, "FLATtop");
+        math_fft(&mut s, &[("peak_order", text("FREQorder"))], false);
+        let (lines, peaks) = peak_table(&mut s, "DB, FREQorder");
+        assert_eq!(peaks.len(), lines.len(), "unparsed lines");
+        assert!(peaks.windows(2).all(|w| w[0].frequency < w[1].frequency));
+
+        math_fft(
+            &mut s,
+            &[
+                ("peak_order", text("AMPorder")),
+                ("peaks", ParamValue::Int(15)),
+            ],
+            false,
+        );
+        let (lines, peaks) = peak_table(&mut s, "DB, AMPorder, 15 peaks");
+        assert_eq!(peaks.len(), lines.len(), "unparsed lines");
+    };
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(checks));
+    outputs_off(&mut s);
+    s.group_set("math.fft", Some(1), &fft, false).unwrap();
+    s.group_set("math", Some(1), &math, false).unwrap();
+    let c = &before.channels[ch as usize - 1];
+    s.set_channel(
+        ch,
+        &ChannelUpdate {
+            display: Some(c.display),
+            probe: Some(c.probe),
+            scale: Some(c.scale),
+            offset: Some(c.offset),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    s.set_timebase(&TimebaseUpdate {
+        scale: Some(before.timebase.scale),
+        offset: Some(before.timebase.offset),
+        ..Default::default()
+    })
+    .unwrap();
+    let t = &before.trigger;
+    s.set_trigger(&TriggerUpdate {
+        mode: Some(t.mode.clone()),
+        sweep: Some(t.sweep),
+        edge_source: Some(t.edge_source.clone()),
+        edge_slope: Some(t.edge_slope),
+        edge_level: Some(t.edge_level),
+        ..Default::default()
+    })
+    .unwrap();
+    if before.trigger_status.eq_ignore_ascii_case("STOP") {
+        s.action(mho_driver::Action::Stop).unwrap();
+    }
+    healthy(&mut s);
+    if let Err(e) = r {
+        std::panic::resume_unwind(e);
+    }
 }

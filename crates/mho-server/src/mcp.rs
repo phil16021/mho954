@@ -487,9 +487,13 @@ impl McpScope {
 
     #[tool(
         description = "Read the peak table of the scope's own FFT on math channel 1..4 (frequency in \
-        Hz, amplitude in dBV or V). Set it up first with configure_settings group `math.fft`, \
-        activate=true, values {source, window, span, center, peak_search: true, peaks}. \
-        fft_peaks computes a spectrum here from waveform data instead."
+        Hz, amplitude in dBV = rms reference, or V rms; amplitude_text as printed, e.g. \
+        `-6.802dBV`). Set it up first with configure_settings group `math.fft`, activate=true, \
+        values {source, window, span, center, peak_search: true, peaks, peak_threshold}. The \
+        threshold is in the FFT unit and its factory value 5.5 dBV hides most signals (empty \
+        list): use e.g. -60 for dB. With window FLATtop the scope's V rms values are too small \
+        by 4.64x (use unit DB). Frequencies lie on the scope's bin grid. fft_peaks computes a \
+        spectrum here from waveform data instead."
     )]
     async fn scope_fft_peaks(&self, Parameters(p): Parameters<MathArg>) -> ToolResult {
         ok_json(&try_api!(self.api.fft_peaks(p.math).await))

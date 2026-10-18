@@ -140,19 +140,29 @@ pub fn decode_csv(table: &DecodeTable) -> String {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct ScopePeak {
     pub rank: u32,
-    /// Hz.
+    /// Hz, on the scope's bin grid (at a 20 kHz span up to ~80 Hz off).
     pub frequency: f64,
-    /// In the FFT's unit (dBV or V), SI prefix applied.
+    /// In the FFT's unit, SI prefix applied: dBV (0 dBV = 1 V rms) or V rms. With the
+    /// flat-top window the scope's V rms values are too small by its coherent gain (×0.216;
+    /// firmware 00.01.00), the dBV values are right.
     pub amplitude: f64,
-    /// Amplitude as printed, e.g. `-24.98dBV`.
+    /// Amplitude as printed, e.g. `-6.802dBV` or `98.41mVrms`.
     pub amplitude_text: String,
 }
 
-/// Parses peak lines like `1,2.50000MHz,-24.98dBV`. Malformed lines are skipped.
-pub fn parse_fft_peaks(lines: &[String]) -> Vec<ScopePeak> {
-    lines
+/// Parses peak lines like `1,1.02520kHz,-6.802dBV` or `1,1.02516kHz,98.41mVrms` (MHO954,
+/// firmware 00.01.00). Empty lines are ignored and no lines mean no peaks; if there are
+/// lines but none of them can be read, the format is unknown and the first line is
+/// returned as the error.
+pub fn parse_fft_peaks(lines: &[String]) -> Result<Vec<ScopePeak>, String> {
+    let entries: Vec<&str> = lines
         .iter()
         .flat_map(|l| l.split(';'))
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let peaks: Vec<ScopePeak> = entries
+        .iter()
         .filter_map(|l| {
             let mut f = l.split(',').map(str::trim);
             let rank = f.next()?.parse::<u32>().ok()?;
@@ -165,7 +175,11 @@ pub fn parse_fft_peaks(lines: &[String]) -> Vec<ScopePeak> {
                 amplitude_text: amp.to_string(),
             })
         })
-        .collect()
+        .collect();
+    match entries.first() {
+        Some(first) if peaks.is_empty() => Err((*first).to_string()),
+        _ => Ok(peaks),
+    }
 }
 
 #[cfg(test)]
@@ -209,23 +223,51 @@ mod tests {
 
     #[test]
     fn fft_peaks() {
+        // MHO954 FW 00.01.00, 1 Vpp 1 kHz square, flat-top window, unit DB (2026-10-18).
         let lines: Vec<String> = [
-            "1,2.50000MHz,-24.98dBV",
-            "2,3.50000MHz,-27.84dBV",
-            "garbage",
-            "5,6.50125MHz,-32.34dBV",
+            "1,1.02520kHz,-6.802dBV",
+            "2,3.07531kHz,-16.33dBV",
+            "3,5.02784kHz,-20.77dBV",
+            "4,7.07808kHz,-23.73dBV",
+            "5,9.02984kHz,-25.93dBV",
         ]
         .iter()
         .map(|s| s.to_string())
         .collect();
-        let p = parse_fft_peaks(&lines);
-        assert_eq!(p.len(), 3);
+        let p = parse_fft_peaks(&lines).unwrap();
+        assert_eq!(p.len(), 5);
         assert_eq!(p[0].rank, 1);
-        assert_eq!(p[0].frequency, 2.5e6);
-        assert_eq!(p[0].amplitude, -24.98);
-        assert_eq!(p[2].amplitude_text, "-32.34dBV");
-        let v = parse_fft_peaks(&["1,1kHz,12.5mV".to_string()]);
-        assert_eq!(v[0].amplitude, 12.5e-3);
+        assert!((p[0].frequency - 1025.2).abs() < 1e-9);
+        assert_eq!(p[0].amplitude, -6.802);
+        assert_eq!(p[4].amplitude_text, "-25.93dBV");
+        // unit VRMS, integer and trimmed values
+        let v: Vec<String> = [
+            "1,1.02516kHz,98.41mVrms",
+            "4,7.07737kHz,14mVrms",
+            "6,11.0795kHz,-20.7dBV",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let v = parse_fft_peaks(&v).unwrap();
+        assert!((v[0].amplitude - 98.41e-3).abs() < 1e-12);
+        assert!((v[1].amplitude - 14e-3).abs() < 1e-12);
+        assert!((v[2].frequency - 11079.5).abs() < 1e-9);
+        assert_eq!(v[2].amplitude, -20.7);
+        // the guide's form and unreadable lines among good ones
+        let g = parse_fft_peaks(&["1,2.50000MHz,-24.98dBV".into(), "garbage".into()]).unwrap();
+        assert_eq!(g.len(), 1);
+        assert_eq!(g[0].frequency, 2.5e6);
+    }
+
+    #[test]
+    fn fft_peaks_empty_or_unknown() {
+        assert_eq!(parse_fft_peaks(&[]), Ok(vec![]));
+        assert_eq!(parse_fft_peaks(&[String::new(), " ".into()]), Ok(vec![]));
+        assert_eq!(
+            parse_fft_peaks(&["Peak 1: 1 kHz".into()]),
+            Err("Peak 1: 1 kHz".into())
+        );
     }
 
     #[test]

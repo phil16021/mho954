@@ -218,6 +218,10 @@ Options-Abfragen stammen von vor dem Upgrade, daher dort `0`).
 | Alle Abfragen der Gruppen `bus*`, `math`, `math.fft`, `autoset`, `acquire.extra`, `channel`, `timebase.extra`, `display`, `cursor*`, `save`, `histogram`, `mask`, `search`, `record`, `la`, `la.channel`, `reference` | beantwortet, ohne Einträge in der Fehlerqueue (2026-10-18) |
 | `:MATH1:FILT:TYPE?` | **keine Antwort** → aus der Gruppe `math.filter` entfernt (den Filtertyp wählt der Math-Operator LPAS/HPAS/BPAS/BST) |
 | `:MATH1:FFT:SEAR:RES?` ohne gefundene Peaks | eine leere Zeile |
+| `:MATH1:FFT:SEAR:RES?` mit Peaks (2026-10-18, FW 00.01.00, USB und LAN gleich; GI 1 Vpp/1 kHz Rechteck an CH4, 1 ms/div, Span 20 kHz) | je Peak eine Zeile `Rang,Frequenz,Amplitude`: `1,1.02520kHz,-6.802dBV` … `5,9.02984kHz,-25.93dBV`, mit `UNIT VRMS` `1,1.02516kHz,98.41mVrms`. Frequenz mit 6 Stellen, Amplitude mit 4 Stellen ohne Endnullen (`-20.7dBV`, `14mVrms`). dBV bezieht sich auf den Effektivwert (Grundwelle -6,80 dBV, Theorie -6,93 dBV), die Oberwellen-Abstände stimmen auf 0,1 dB. `SEAR:NUM 15` liefert nur die vorhandenen 10 Peaks (1…19 kHz) |
+| `:FFT:SEAR:THR` / `:EXC` (Werkswert 5,5 / 1,8) | in der Einheit von `:FFT:UNIT`. Der Werkswert 5,5 dBV blendet alle Peaks eines 1-Vpp-Signals aus: leere Tabelle, obwohl die FFT Peaks zeigt. Beim Wechsel von `UNIT` rechnet das Scope beide Werte um (−60 dBV / 3 → −0,016 V / 0,129 V); deshalb erst `UNIT`, dann Schwelle schreiben. `group_set` schreibt in Tabellenreihenfolge |
+| FFT mit `UNIT VRMS` und Fenster `FLATtop` | **VRMS zu klein** um den Kohärenzgewinn des Fensters: Grundwelle 98,41 mVrms statt 457 mV (Faktor 0,2154 ≈ 0,2156). In dB ist Flat-Top richtig. Bei Hann/Rechteck weicht VRMS reproduzierbar um −0,7 / −0,4 dB vom dB-Wert ab |
+| FFT-Peak-Frequenzen | auf dem Bin-Raster des Scopes (≈ 49 Hz bei Span 20 kHz); mit Flat-Top bis ~80 Hz daneben (1 kHz → 1,025 kHz) |
 | `:HIST:STAT:RES?` | `[Sum:0hits, Peaks:0hits, Max:0, …, Bin width:0, Sigma:0, meanPlusSigma:*****, …]` |
 | `:HIST:STAT:RES?` vertikal (`:HIST:TYPE VERT`, 2026-10-18, FW 00.01.00) | **`Sigma` falsch**: Sinus 1 Vpp an CH1 → `Sigma:3.024mV`, obwohl `ACRMS` 354,5 mV misst und `meanPlusSigma:0.508967` (50 % innerhalb ±σ, wie beim Sinus) zu σ ≈ 354 mV passt. Max/Min/Pk_Pk/Mean/Mode/Peaks/Sum stimmen. Horizontal ist `Sigma` richtig (57,73 µs bei Gleichverteilung über 200 µs = 200/√12). Für die Streuung der Spannung `ACRMS` verwenden |
 | Ablesewerte (`:CURS:MAN:AXV?` usw.) außerhalb ihres Modus | beantwortet. Die Wächter-Abfrage bleibt trotzdem, weil die Werte dann nichts bedeuten |
@@ -234,8 +238,11 @@ Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigg
   Parameter zur jeweiligen Dekodergruppe. RX/CS/PALCLK fehlen bewusst: Der Guide erlaubt sie nur
   bei aktiver Quelle, und eine unbeantwortete Query kostet Budget.
 - `:BUS<n>:PAR:WIDT/BITX/SOUR` gelten nur bei `BUS USER` und fehlen deshalb in der Gruppe.
-- `:MATH<n>:FFT:SEARch:RES?` liefert mehrere Zeilen (`1,2.50000MHz,-24.98dBV`). Gelesen wird mit
-  `Scpi::query_lines` bis zum Nachrichtenende.
+- `:MATH<n>:FFT:SEARch:RES?` liefert je Peak eine Zeile (`1,1.02520kHz,-6.802dBV` bzw.
+  `…,98.41mVrms`, siehe Messtabelle). Gelesen wird mit `Scpi::query_lines` bis zum
+  Nachrichtenende (über TCP bis 150 ms Pause; über LAN kamen dieselben Zeilen wie über USB).
+  Lässt sich keine der Zeilen lesen, meldet der Treiber „unrecognised peak table“ statt einer
+  leeren Liste. Hardware-Test: `fft_peak_table_from_square` in `crates/mho-driver/tests/hw.rs`.
 - Math-Kanäle lassen sich nur mit `:WAV:MODE NORM` lesen. FFT-Ergebnisse kommen nicht ins
   Zeit-Live-Bild.
 - Druckfehler im Guide: `:BUS <n>:PAR:END` → `:BUS<n>:PAR:END`, `:MATH<n>:MATH<n>:WAVetype`
@@ -249,9 +256,8 @@ Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigg
   kurz, alle kosten bei fehlender Antwort Budget. Set-Befehle schickt `verify` immer, auch wenn sie schon
   geprüft sind (Setup und Restore der Proben), und vor jedem Kandidaten wird die Fehlerqueue
   geleert.
-- Noch am Gerät zu prüfen: `:MATH<n>:FFT:SEAR:RES?` mit
-  echten Peaks (Format der Zeilen), Logikanalysator mit angesteckter Sonde (Bitreihenfolge
-  D15 = MSB angenommen).
+- Noch am Gerät zu prüfen: Logikanalysator mit angesteckter Sonde (Bitreihenfolge D15 = MSB
+  angenommen).
 - Pfade für `:SAVE:*`/`:LOAD:*`: `C:/` oder `D:/`, Dateiname ≤ 26 Zeichen (Guide 3.21). Erlaubt
   sind nur Buchstaben, Ziffern, `_ - . /`, damit kein `;` einen zweiten Befehl einschleusen kann.
 - Parameter mit vorangestelltem Index (`:LA:DIG:ENAB D3,ON`, `:REF:SOUR 2,CHAN1`,

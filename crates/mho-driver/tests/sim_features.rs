@@ -108,9 +108,29 @@ fn math_channel_and_fft_peaks() {
     f.insert("peak_search".into(), ParamValue::Bool(true));
     f.insert("peaks".into(), ParamValue::Int(3));
     s.group_set("math.fft", Some(1), &f, true).unwrap();
+    // the factory threshold (5.5 dBV) hides the peaks, as on the scope
+    assert!(s.fft_peaks(1).unwrap().is_empty());
+    f.clear();
+    f.insert("peak_threshold".into(), ParamValue::Real(-60.0));
+    s.group_set("math.fft", Some(1), &f, false).unwrap();
     let p = s.fft_peaks(1).unwrap();
     assert_eq!(p.len(), 3, "{p:?}");
     assert!((p[0].frequency - 5e3).abs() < 200.0, "{p:?}");
+    assert!(p[0].amplitude_text.ends_with("dBV"), "{p:?}");
+    // unit VRMS: the threshold is in volts then (written after the unit)
+    f.insert("unit".into(), ParamValue::Text("VRMS".into()));
+    f.insert("peak_threshold".into(), ParamValue::Real(1e-3));
+    f.insert("peak_order".into(), ParamValue::Text("FREQorder".into()));
+    s.group_set("math.fft", Some(1), &f, false).unwrap();
+    let p = s.fft_peaks(1).unwrap();
+    assert!(
+        !p.is_empty() && p[0].amplitude_text.ends_with("Vrms"),
+        "{p:?}"
+    );
+    assert!(
+        p.windows(2).all(|w| w[0].frequency < w[1].frequency),
+        "{p:?}"
+    );
     // FFT results are not time-domain traces
     assert_eq!(s.displayed_math().unwrap(), [2]);
     assert!(s.scpi().query("*IDN?").unwrap().contains("MHO954"));

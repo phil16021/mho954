@@ -629,8 +629,7 @@ impl Scope {
         self.check_errors()
     }
 
-    /// Hardware frequency counter reading (`None` when off or no signal).
-    /// Frequency counter reading. With the counter off the scope answers 0, which would read
+    /// Frequency counter reading (`None`: no signal). With the counter off the scope answers 0, which would read
     /// as a measurement, so the state is checked first (like the DVM).
     pub fn counter_value(&mut self) -> Result<Option<f64>> {
         if !self.scpi.query_bool(":COUN:ENAB?")? {
@@ -851,7 +850,8 @@ impl Scope {
             }
         }
         let lines = self.scpi.query_lines(&format!(":MATH{n}:FFT:SEAR:RES?"))?;
-        Ok(mho_dsp::parse_fft_peaks(&lines))
+        mho_dsp::parse_fft_peaks(&lines)
+            .map_err(|first| DriverError::Device(format!("unrecognised peak table: {first:?}")))
     }
 
     /// Math channels shown in the time domain (FFT results are left out: their x axis is
@@ -1389,11 +1389,24 @@ impl Scope {
             };
             crate::generator::check_update(&gen_caps, values, current.as_ref())?;
         }
+        if let Some(name) = values
+            .keys()
+            .find(|k| !g.params.iter().any(|p| p.name == k.as_str()))
+        {
+            return Err(DriverError::Invalid(format!(
+                "{}: unknown parameter {name:?}",
+                g.id
+            )));
+        }
+        // Table order, not the map's alphabetical one: modes and units come first in the
+        // tables, and the scope converts dependent values when they change (`:FFT:UNIT`
+        // rescales the peak threshold, a modulation type change resets its parameters).
         let mut cmds = Vec::new();
-        for (name, v) in values {
-            let spec = g.params.iter().find(|p| p.name == name).ok_or_else(|| {
-                DriverError::Invalid(format!("{}: unknown parameter {name:?}", g.id))
-            })?;
+        for spec in g.params {
+            let Some(v) = values.get(spec.name) else {
+                continue;
+            };
+            let name = spec.name;
             let encoded = params::encode(spec, v)?;
             let source = match spec.kind {
                 params::ParamKind::SourceLevel { source_param } => match values.get(source_param) {

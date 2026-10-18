@@ -2351,7 +2351,10 @@ impl ScopeApp {
                     RichText::new(format!("MATH{n}:")).color(channel_color(&format!("MATH{n}"))),
                 );
                 if peaks.is_empty() {
-                    ui.label("no peaks");
+                    ui.label("no peaks").on_hover_text(
+                        "none above the threshold (Setup…: peak_threshold, in the FFT unit; \
+                         the factory value 5.5 dBV hides most signals, try -60)",
+                    );
                 }
                 for p in peaks {
                     ui.label(

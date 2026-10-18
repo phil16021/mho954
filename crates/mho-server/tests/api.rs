@@ -938,7 +938,7 @@ async fn protocol_decoder() {
     assert_eq!(get(&format!("{v1}/math/0/peaks")).await.status(), 400);
     let r = c
         .put(format!("{v1}/groups/math.fft?instance=1&activate=true"))
-        .json(&serde_json::json!({"source": "CHAN1", "peak_search": true, "peaks": 4}))
+        .json(&serde_json::json!({"source": "CHAN1", "peak_search": true, "peaks": 4, "peak_threshold": -60.0}))
         .send()
         .await
         .unwrap();

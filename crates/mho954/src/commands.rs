@@ -873,7 +873,10 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
         Command::Peaks { math } => {
             let peaks = api.fft_peaks(math).await?;
             if peaks.is_empty() {
-                println!("no peaks");
+                println!(
+                    "no peaks above the threshold (math.fft peak_threshold, in the FFT unit; \
+                     factory value 5.5 dBV, e.g. `set math.fft -n {math} peak_threshold=-60`)"
+                );
             }
             for p in peaks {
                 println!(

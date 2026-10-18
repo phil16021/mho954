@@ -623,26 +623,62 @@ impl SimTransport {
         }
     }
 
-    /// `:MATH<n>:FFT:SEARch:RES?` lines for the FFT source of math channel `m`.
+    /// `:MATH<n>:FFT:SEARch:RES?` lines for the FFT source of math channel `m`, formatted as
+    /// the MHO954 does (2026-10-18, FW 00.01.00): `1,1.02520kHz,-6.802dBV` or
+    /// `1,1.02516kHz,98.41mVrms`. Peaks below the threshold (in the unit's scale) are left
+    /// out; in VRMS the flat-top window lacks its gain correction, as on the scope.
     fn fft_peak_lines(&mut self, m: u8) -> Vec<String> {
         let src = self.param_or(&format!(":MATH{m}:FFT:SOUR"), "CHAN1");
         let num = self
             .param_or(&format!(":MATH{m}:FFT:SEAR:NUM"), "5")
             .parse::<usize>()
             .unwrap_or(5);
+        let vrms = self.param_or(&format!(":MATH{m}:FFT:UNIT"), "DB") == "VRMS";
+        let threshold = self
+            .param_or(&format!(":MATH{m}:FFT:SEAR:THR"), "5.5")
+            .parse::<f64>()
+            .unwrap_or(5.5);
+        let wind = self.param_or(&format!(":MATH{m}:FFT:WIND"), "HANN");
+        let window = match wind.as_str() {
+            w if w.starts_with("RECT") => mho_dsp::Window::Rectangular,
+            w if w.starts_with("BLAC") => mho_dsp::Window::Blackman,
+            w if w.starts_with("FLAT") => mho_dsp::Window::FlatTop,
+            _ => mho_dsp::Window::Hann,
+        };
+        let by_freq = self
+            .param_or(&format!(":MATH{m}:FFT:SEAR:ORD"), "AMP")
+            .starts_with("FREQ");
         let (x_inc, x_org) = self.screen_timing();
         let v = self.samples(&src, 0, SCREEN_POINTS, x_inc, x_org);
-        mho_dsp::spectrum(&v, x_inc, mho_dsp::Window::Hann)
+        let flat_vrms = if vrms && window == mho_dsp::Window::FlatTop {
+            0.2156
+        } else {
+            1.0
+        };
+        let mut peaks: Vec<(f64, f64)> = mho_dsp::spectrum(&v, x_inc, window)
             .peaks(num)
             .iter()
+            .map(|p| {
+                let a = if vrms { p.vrms * flat_vrms } else { p.dbv };
+                (p.frequency, a)
+            })
+            .filter(|&(_, a)| a >= threshold)
+            .collect();
+        if by_freq {
+            peaks.sort_by(|a, b| a.0.total_cmp(&b.0));
+        }
+        peaks
+            .iter()
             .enumerate()
-            .map(|(i, p)| {
-                format!(
-                    "{},{},{:.2}dBV",
-                    i + 1,
-                    mho_dsp::format_si(p.frequency, "Hz").replace([' ', 'µ'], ""),
-                    p.dbv
-                )
+            .map(|(i, &(f, a))| {
+                let amp = if vrms {
+                    let (x, prefix) = si_scaled(a);
+                    format!("{}{prefix}Vrms", significant(x, 4, true))
+                } else {
+                    format!("{}dBV", significant(a, 4, true))
+                };
+                let (x, prefix) = si_scaled(f);
+                format!("{},{}{prefix}Hz,{amp}", i + 1, significant(x, 6, false))
             })
             .collect()
     }
@@ -803,6 +839,19 @@ impl SimTransport {
                 "VOLT:HIGH" => Some("2.500000E0"),
                 "VOLT:LOW" => Some("-2.500000E0"),
                 "FUNC:SQU:DUTY" | "FUNC:RAMP:SYMM" => Some("5.000000E1"),
+                _ => None,
+            };
+            if let Some(v) = v {
+                return v.into();
+            }
+        }
+        // FFT factory values of the MHO954 (the threshold hides a 1 Vpp signal's peaks).
+        if spec.node.starts_with(":MATH") {
+            let v = match spec.node.split_once(":FFT:").map(|(_, r)| r) {
+                Some("UNIT") => Some("DB"),
+                Some("WIND") => Some("HANN"),
+                Some("SEAR:THR") => Some("5.500000E0"),
+                Some("SEAR:EXC") => Some("1.800000E0"),
                 _ => None,
             };
             if let Some(v) = v {
@@ -1567,6 +1616,40 @@ impl Transport for SimTransport {
 
     fn describe(&self) -> String {
         "sim".into()
+    }
+}
+
+/// `(value, SI prefix)` with the value in 1..1000.
+fn si_scaled(v: f64) -> (f64, &'static str) {
+    const P: [(f64, &str); 7] = [
+        (1e9, "G"),
+        (1e6, "M"),
+        (1e3, "k"),
+        (1.0, ""),
+        (1e-3, "m"),
+        (1e-6, "u"),
+        (1e-9, "n"),
+    ];
+    let a = v.abs();
+    P.iter()
+        .find(|(s, _)| a >= *s)
+        .map(|&(s, p)| (v / s, p))
+        .unwrap_or((v / 1e-9, "n"))
+}
+
+/// `x` with `digits` significant digits, trailing zeros dropped if `trim` (`14`, `-20.7`).
+fn significant(x: f64, digits: i32, trim: bool) -> String {
+    let mag = if x == 0.0 {
+        0
+    } else {
+        x.abs().log10().floor() as i32
+    };
+    let decimals = (digits - 1 - mag).max(0) as usize;
+    let s = format!("{x:.decimals$}");
+    if trim && s.contains('.') {
+        s.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        s
     }
 }
 
