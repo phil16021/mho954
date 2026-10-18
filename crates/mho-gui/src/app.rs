@@ -207,6 +207,7 @@ impl ScopeApp {
             bode: sh.bode.clone(),
             bode_previous: sh.bode_previous.clone(),
             bode_running: sh.bode_running,
+            bode_live: sh.bode_live.clone(),
             capabilities: sh.capabilities.clone(),
             generator_output: sh.generator_output,
             options: sh.options.clone(),
@@ -1956,6 +1957,7 @@ struct Snapshot {
     bode: Option<Vec<mho_driver::BodePoint>>,
     bode_previous: Option<Vec<mho_driver::BodePoint>>,
     bode_running: bool,
+    bode_live: Option<(u64, BodeRequest, usize)>,
     capabilities: Option<Capabilities>,
     generator_output: [Option<bool>; 2],
     options: Option<Vec<OptionInfo>>,
@@ -2036,6 +2038,10 @@ impl eframe::App for ScopeApp {
                     self.decoder_panel(ui, &s);
                 }
             });
+        // A sweep started anywhere (GUI, CLI, REST, MCP) opens the window.
+        if std::mem::take(&mut self.client.lock().bode_new) {
+            self.show_bode = true;
+        }
         if self.show_bode
             && let Some(pts) = &s.bode
         {
@@ -2044,6 +2050,29 @@ impl eframe::App for ScopeApp {
                 .open(&mut open)
                 .default_size([560.0, 440.0])
                 .show(ui.ctx(), |ui| {
+                    if let Some((id, req, total)) = &s.bode_live {
+                        let follow = req
+                            .follow
+                            .map(|g| format!(", G{} in step", if g == 2 { "II" } else { "I" }))
+                            .unwrap_or_default();
+                        let state = if s.bode_running {
+                            format!("running {}/{total}", pts.len())
+                        } else {
+                            format!("{} points", pts.len())
+                        };
+                        ui.label(
+                            RichText::new(format!(
+                                "sweep #{id}: {} ... {}, {} Vpp, G{} -> CH{}/CH{}{follow} - {state}",
+                                format_si(req.start, "Hz"),
+                                format_si(req.stop, "Hz"),
+                                req.amplitude,
+                                if req.generator == 2 { "II" } else { "I" },
+                                req.input,
+                                req.output
+                            ))
+                            .small(),
+                        );
+                    }
                     bode_plot(
                         ui,
                         pts,

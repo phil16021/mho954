@@ -6,7 +6,7 @@ use mho_driver::*;
 
 use crate::api::*;
 use crate::device::Device;
-use crate::live::{LiveConfig, LiveHub, run_loop};
+use crate::live::{BodeLive, LiveConfig, LiveHub, run_loop};
 
 /// In-process backend: owns the device thread and the live loop.
 #[derive(Clone)]
@@ -257,11 +257,40 @@ impl ScopeApi for LocalBackend {
     ) -> ApiResult<Vec<mho_driver::BodePoint>> {
         request.validate().map_err(ApiError::from)?;
         let progress = self.hub.progress_reporter("Bode sweep");
+        let hub = self.hub.clone();
+        let live = BodeLive {
+            id: hub.next_bode_id(),
+            request: request.clone(),
+            points: Vec::new(),
+            total: request.points,
+            finished: false,
+            error: None,
+        };
+        hub.publish_bode(live.clone());
+        let mut state = live.clone();
         let r = self
             .device
-            .call_mut(move |s| s.bode_sweep(&request, &mut |a, b| progress(a, b)))
+            .call_mut(move |s| {
+                s.bode_sweep_with(&request, &mut |done, total, p| {
+                    progress(done, total);
+                    state.points.push(p.clone());
+                    hub.publish_bode(state.clone());
+                })
+            })
             .await;
         self.hub.progress_done("Bode sweep");
+        let mut end = self
+            .hub
+            .subscribe_bode()
+            .borrow()
+            .as_deref()
+            .cloned()
+            .unwrap_or(live);
+        end.finished = true;
+        if let Err(e) = &r {
+            end.error = Some(e.message.clone());
+        }
+        self.hub.publish_bode(end);
         r
     }
 

@@ -746,6 +746,7 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
             averages,
             follow,
             native,
+            keep,
             output,
         } => {
             let num = |s: &str, what: &str| -> anyhow::Result<f64> {
@@ -763,9 +764,16 @@ async fn run_command(cli: Cli, cfg: &Config, backend: &Backend) -> anyhow::Resul
                     stop: num(&stop, "stop")?,
                     points_per_decade: points.clamp(10, 100) as u32,
                     amplitude: num(&amplitude, "amplitude")?,
+                    keep_on_screen: keep,
                     ..Default::default()
                 };
                 let png = api.bode_native(req).await?;
+                if keep {
+                    println!(
+                        "Bode plot left on the scope screen; `mho954 set bode enable=false` ends \
+                         Bode mode (then restore CH{dut_in}/CH{dut_out}: DC, scale)"
+                    );
+                }
                 let path = output.unwrap_or_else(|| std::path::PathBuf::from("bode.png"));
                 std::fs::write(&path, png)
                     .with_context(|| format!("writing {}", path.display()))?;

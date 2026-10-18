@@ -40,6 +40,10 @@ pub struct Shared {
     pub bode: Option<Vec<mho_driver::BodePoint>>,
     pub bode_previous: Option<Vec<mho_driver::BodePoint>>,
     pub bode_running: bool,
+    /// Sweep the server reports (any client may have started it): its id, request and size.
+    pub bode_live: Option<(u64, mho_driver::BodeRequest, usize)>,
+    /// A sweep the window has not been opened for yet.
+    pub bode_new: bool,
     /// Bandwidth, memory limits, generator, licensed options (`None` until loaded).
     pub capabilities: Option<mho_driver::Capabilities>,
     /// Generator output state per channel as last read or set (`None` = unknown).
@@ -81,6 +85,27 @@ impl Shared {
     pub fn set_bode(&mut self, pts: Vec<mho_driver::BodePoint>) {
         self.bode_previous = self.bode.take();
         self.bode = Some(pts);
+    }
+
+    /// Takes over the server's sweep state (sent after every point, from any client).
+    pub fn apply_bode_live(&mut self, b: &mho_service::BodeLive) {
+        let new = self.bode_live.as_ref().is_none_or(|(id, _, _)| *id != b.id);
+        if new {
+            if self.bode_live.is_some() {
+                self.bode_previous = self.bode.take();
+            }
+            self.bode_new = !b.finished;
+        }
+        self.bode_live = Some((b.id, b.request.clone(), b.total));
+        self.bode = Some(b.points.clone());
+        self.bode_running = !b.finished;
+        if b.finished {
+            match &b.error {
+                Some(e) => self.log(format!("Bode sweep: {e}"), true),
+                None if new => {}
+                None => self.log(format!("Bode: {} points", b.points.len()), false),
+            }
+        }
     }
 
     pub fn log(&mut self, msg: impl Into<String>, error: bool) {
@@ -188,6 +213,7 @@ impl Client {
                                     LiveEvent::Progress(p) => {
                                         sh.progress = (p.total > 0).then_some(p)
                                     }
+                                    LiveEvent::Bode(b) => sh.apply_bode_live(&b),
                                 }
                             }
                             this.ctx.request_repaint();

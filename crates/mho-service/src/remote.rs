@@ -150,6 +150,7 @@ impl RemoteBackend {
                         Ok(WsText::Measurements(m)) => LiveEvent::Measurements(Arc::new(m)),
                         Ok(WsText::Error { message }) => LiveEvent::Error(message),
                         Ok(WsText::Progress(p)) => LiveEvent::Progress(p),
+                        Ok(WsText::Bode(b)) => LiveEvent::Bode(Arc::new(b)),
                         Err(e) => {
                             debug!("ignoring ws text: {e}");
                             continue;

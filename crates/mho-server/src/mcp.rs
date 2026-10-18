@@ -570,7 +570,9 @@ impl McpScope {
         description = "Run the scope's own Bode plot (AFG option) from start to stop Hz (10 Hz..30 MHz, \
         start <= stop/10) with input/output channel numbers, points per decade and sweep amplitude, \
         and return a screenshot of the finished plot. The scope cannot export the curve; use \
-        bode_sweep for numbers. Drives the generator output during the sweep."
+        bode_sweep for numbers. Drives only generator GI during the sweep. keep_on_screen=true \
+        leaves the plot on the scope display (Bode mode on, channels stay AC/1 mV/div); otherwise \
+        Bode mode is switched off and the channels restored."
     )]
     async fn bode_native(
         &self,

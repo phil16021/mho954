@@ -30,8 +30,11 @@ async fn stream(mut socket: WebSocket, s: AppState) {
     let mut meas = hub.subscribe_measurements();
     let mut errors = hub.subscribe_errors();
     let mut progress = hub.subscribe_progress();
+    let mut bode = hub.subscribe_bode();
     frames.mark_changed();
     meas.mark_changed();
+    // A viewer that connects later still gets the last sweep.
+    bode.mark_changed();
     let mut ping = tokio::time::interval(PING_INTERVAL);
     ping.tick().await;
 
@@ -66,6 +69,14 @@ async fn stream(mut socket: WebSocket, s: AppState) {
                 let p = progress.borrow_and_update().clone();
                 match p {
                     Some(p) => text(&WsText::Progress(p)),
+                    None => continue,
+                }
+            }
+            r = bode.changed() => {
+                if r.is_err() { break; }
+                let b = bode.borrow_and_update().clone();
+                match b {
+                    Some(b) => text(&WsText::Bode((*b).clone())),
                     None => continue,
                 }
             }

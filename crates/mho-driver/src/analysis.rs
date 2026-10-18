@@ -89,6 +89,10 @@ pub struct NativeBodeRequest {
     pub linear: bool,
     /// Give up after this many seconds.
     pub timeout_s: u64,
+    /// Leave the plot on the scope's screen: Bode mode stays on, and with it the channel
+    /// settings it imposes (AC coupling, 1 mV/div, 20 MHz limit). Otherwise Bode mode is
+    /// switched off and both channels are restored after the screenshot.
+    pub keep_on_screen: bool,
 }
 
 impl Default for NativeBodeRequest {
@@ -102,6 +106,7 @@ impl Default for NativeBodeRequest {
             amplitude: 0.2,
             linear: false,
             timeout_s: 300,
+            keep_on_screen: false,
         }
     }
 }
@@ -232,6 +237,19 @@ impl BodeRequest {
     }
 }
 
+/// Smallest 1-2-5 value ≥ `v` within the scope's 1 mV/div … 10 V/div.
+fn fit_125(v: f64) -> f64 {
+    let v = v.clamp(1e-3, 10.0);
+    let e = v.log10().floor();
+    let base = 10f64.powf(e);
+    [1.0, 2.0, 5.0, 10.0]
+        .iter()
+        .map(|m| m * base)
+        .find(|&s| s >= v * 0.999)
+        .unwrap_or(10.0 * base)
+        .min(10.0)
+}
+
 /// Next value of the 1-2-5 sequence above (`up`) or below `v`.
 fn step_125(v: f64, up: bool) -> f64 {
     let e = v.log10().floor();
@@ -345,6 +363,16 @@ impl Scope {
         req: &BodeRequest,
         progress: &mut dyn FnMut(usize, usize),
     ) -> Result<Vec<BodePoint>> {
+        self.bode_sweep_with(req, &mut |done, total, _| progress(done, total))
+    }
+
+    /// [`Self::bode_sweep`] reporting every point as soon as it is measured:
+    /// `on_point(done, total, point)`.
+    pub fn bode_sweep_with(
+        &mut self,
+        req: &BodeRequest,
+        on_point: &mut dyn FnMut(usize, usize, &BodePoint),
+    ) -> Result<Vec<BodePoint>> {
         req.validate()?;
         let Some(gen_caps) = self.capabilities()?.generator else {
             return Err(DriverError::Unsupported(
@@ -356,10 +384,7 @@ impl Scope {
         let tb = self.timebase()?;
         let trig = self.trigger()?;
         let running = self.trigger_status()? != "STOP";
-        let scales = [
-            self.channel(req.input)?.scale,
-            self.channel(req.output)?.scale,
-        ];
+        let saved = [self.channel(req.input)?, self.channel(req.output)?];
         let gens: Vec<u8> = std::iter::once(req.generator).chain(req.follow).collect();
         self.drain_errors()?;
         let load = if req.fifty_ohm()? { "FIFT" } else { "OMEG" };
@@ -381,7 +406,19 @@ impl Scope {
             sweep: Some(TriggerSweep::Auto),
             ..Default::default()
         })?;
-        let result = self.bode_points(req, progress);
+        // Start both channels where the generator amplitude fills ~5 div; whatever the
+        // channels were set to before (e.g. 5 mV/div) would otherwise take many rescales.
+        for ch in [req.input, req.output] {
+            self.set_channel(
+                ch,
+                &ChannelUpdate {
+                    scale: Some(fit_125(req.amplitude / 5.0)),
+                    offset: Some(0.0),
+                    ..Default::default()
+                },
+            )?;
+        }
+        let result = self.bode_points(req, on_point);
 
         // Restore, even after an error in the sweep.
         let restore = (|| -> Result<()> {
@@ -393,11 +430,12 @@ impl Scope {
                 offset: Some(tb.offset),
                 ..Default::default()
             })?;
-            for (ch, s) in [req.input, req.output].into_iter().zip(scales) {
+            for c in &saved {
                 self.set_channel(
-                    ch,
+                    c.channel,
                     &ChannelUpdate {
-                        scale: Some(s),
+                        scale: Some(c.scale),
+                        offset: Some(c.offset),
                         ..Default::default()
                     },
                 )?;
@@ -453,6 +491,9 @@ impl Scope {
         v.insert("sweep".into(), ParamValue::Text(sweep.into()));
         let channels = [self.channel(req.input)?, self.channel(req.output)?];
         let result = self.bode_native_run(req, &v, progress);
+        if req.keep_on_screen && result.is_ok() {
+            return result;
+        }
         let restore = (|| -> Result<()> {
             self.scpi().write(":BOD:RUNS OFF")?;
             self.scpi().write(":BOD:ENAB OFF")?;
@@ -511,7 +552,7 @@ impl Scope {
     fn bode_points(
         &mut self,
         req: &BodeRequest,
-        progress: &mut dyn FnMut(usize, usize),
+        on_point: &mut dyn FnMut(usize, usize, &BodePoint),
     ) -> Result<Vec<BodePoint>> {
         let freqs = req.frequencies();
         let mut out = Vec::with_capacity(freqs.len());
@@ -568,7 +609,7 @@ impl Scope {
                 input_amplitude: sum_in / n,
                 output_amplitude: sum_out / n,
             });
-            progress(i + 1, freqs.len());
+            on_point(i + 1, freqs.len(), out.last().expect("just pushed"));
         }
         Ok(out)
     }
@@ -620,12 +661,15 @@ impl Scope {
             let (amp, phase) = mho_dsp::tone(&v, w.preamble.x_increment, w.preamble.time(0), f)
                 .ok_or_else(|| DriverError::State(format!("too few periods at {f:.4e} Hz")))?;
             let scale = self.channel(ch)?.scale;
-            // Peak-to-peak in divisions: keep the tone between ~1.5 and ~7 div.
+            // Peak-to-peak in divisions: keep the tone between ~1.5 and ~7 div, aiming at ~5.
+            // A clipped tone (≥ ~7.5 div) underestimates the amplitude, so jump by 5×.
             let divs = 2.0 * amp / scale;
-            let new = if divs > 7.0 {
+            let new = if divs > 7.5 {
+                Some(fit_125(scale * 5.0))
+            } else if divs > 7.0 {
                 Some(step_125(scale, true))
             } else if divs < 1.5 && scale > 1e-3 {
-                Some(step_125(scale, false))
+                Some(fit_125(2.0 * amp / 5.0).min(step_125(scale, false)))
             } else {
                 None
             };
@@ -687,6 +731,11 @@ mod tests {
 
     #[test]
     fn helpers() {
+        assert_eq!(fit_125(0.8), 1.0);
+        assert_eq!(fit_125(0.2), 0.2);
+        assert_eq!(fit_125(0.21), 0.5);
+        assert_eq!(fit_125(1e-6), 1e-3);
+        assert_eq!(fit_125(50.0), 10.0);
         assert_eq!(step_125(0.5, true), 1.0);
         assert_eq!(step_125(0.5, false), 0.2);
         assert_eq!(step_125(2.0, false), 1.0);

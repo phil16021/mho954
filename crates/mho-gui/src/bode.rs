@@ -26,6 +26,8 @@ pub struct BodePanel {
     follow: bool,
     /// Run the scope's own Bode plot (result as screenshot) instead of the software sweep.
     native: bool,
+    /// Leave the scope's Bode plot on its screen.
+    keep_on_screen: bool,
 }
 
 impl Default for BodePanel {
@@ -42,6 +44,7 @@ impl Default for BodePanel {
             averages: 1,
             follow: false,
             native: false,
+            keep_on_screen: false,
         }
     }
 }
@@ -93,6 +96,14 @@ impl BodePanel {
                 ui.label("Vpp");
             });
             ui.end_row();
+            if self.native {
+                ui.label("");
+                ui.checkbox(&mut self.keep_on_screen, "keep on scope screen")
+                    .on_hover_text(
+                        "Bode mode stays on: the channels keep AC coupling, 1 mV/div, 20 MHz",
+                    );
+                ui.end_row();
+            }
             if !self.native {
                 ui.label("generator");
                 ui.horizontal(|ui| {
@@ -112,7 +123,7 @@ impl BodePanel {
                 ui.label("");
                 ui.checkbox(&mut self.follow, "other generator in step")
                     .on_hover_text(
-                        "no T piece: GI→CH1 and GII→CH2 run the same sine, CH2/CH1 compares the paths",
+                        "no T piece: GI->CH1 and GII->CH2 run the same sine, CH2/CH1 compares the paths",
                     );
                 ui.end_row();
             }
@@ -182,9 +193,15 @@ impl BodePanel {
                 "Bode sweep",
                 move |api| async move { api.bode_sweep(req).await },
                 |sh: &mut Shared, pts: Vec<BodePoint>| {
-                    sh.bode_running = false;
-                    sh.log(format!("Bode: {} points", pts.len()), false);
-                    sh.set_bode(pts);
+                    // Normally the live stream has delivered the sweep already; the answer
+                    // only fills in when the WebSocket is down.
+                    let streamed = sh.bode.as_ref().is_some_and(|b| b.len() == pts.len())
+                        && sh.bode_live.is_some();
+                    if !streamed {
+                        sh.bode_running = false;
+                        sh.log(format!("Bode: {} points", pts.len()), false);
+                        sh.set_bode(pts);
+                    }
                 },
             );
         }
@@ -212,6 +229,7 @@ impl BodePanel {
             stop,
             points_per_decade: self.points.clamp(10, 100) as u32,
             amplitude,
+            keep_on_screen: self.keep_on_screen,
             ..Default::default()
         };
         if let Err(e) = req.validate() {
@@ -325,8 +343,12 @@ pub fn bode_plot(
     };
     let dim = Color32::from_gray(110);
     let h = (ui.available_height() / 2.0 - 8.0).max(80.0);
+    // Minimum ranges, so a flat (partial) curve does not zoom into noise with all labels
+    // rounding to "0 dB" / "0°".
     Plot::new("bode_gain")
         .height(h)
+        .include_y(-1.0)
+        .include_y(1.0)
         .legend(Legend::default())
         .x_axis_formatter(fmt)
         .y_axis_formatter(|m, _| format!("{:.0} dB", m.value))
@@ -340,6 +362,8 @@ pub fn bode_plot(
         });
     Plot::new("bode_phase")
         .height(h)
+        .include_y(-10.0)
+        .include_y(10.0)
         .legend(Legend::default())
         .x_axis_formatter(fmt)
         .y_axis_formatter(|m, _| format!("{:.0}°", m.value))

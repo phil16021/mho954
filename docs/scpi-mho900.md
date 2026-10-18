@@ -127,8 +127,10 @@ wird zuletzt eingeschaltet, beim Ausschalten zuerst.
   Befehle der Options-Gruppen stehen deshalb in der Langform des Guides in den Tabellen.
 - Am Gerät (2026-10-18): der Bode-Modus des Scopes treibt nur GI und stellt CH1/CH2 auf AC,
   1 mV/div und 20 MHz Bandbreite; nach `:BOD:ENAB OFF` bleiben AC und 1 mV/div stehen.
-  `bode --native` stellt die Kanäle deshalb danach wieder her. Ein Lauf 100 Hz–10 MHz mit
-  10 Punkten/Dekade dauert ≈ 50 s.
+  `bode --native` stellt die Kanäle deshalb danach wieder her (mit `--keep` bleibt der Plot
+  samt Bode-Modus auf dem Display). Ein Lauf 100 Hz–10 MHz mit 10 Punkten/Dekade dauert
+  ≈ 50 s. Für eine sinnvolle Kurve muss GI am DUT-Eingang/CH1 und der DUT-Ausgang an CH2
+  liegen (T-Stück); Software-Sweep-Daten lassen sich per SCPI nicht auf dem Display zeichnen.
 - **Referenz ohne T-Stück** (`bode --follow 2`): GII läuft frequenzgleich mit, Phasen per
   `:SOUR1:PHAS:SYNC` ausgerichtet; gemessen wird CH2/CH1. Ergebnis am Gerät (1 Vpp, High-Z,
   unterminierte Kabel): bis 10 MHz innerhalb 0,1 dB, bis 26 MHz 0,2 dB, oberhalb 40 MHz

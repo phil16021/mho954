@@ -110,6 +110,22 @@ pub enum LiveEvent {
     Error(String),
     /// Progress of a long operation (`total == 0`: finished).
     Progress(Progress),
+    /// State of the current or last Bode sweep, whoever started it.
+    Bode(Arc<BodeLive>),
+}
+
+/// A Bode sweep as it progresses: sent after every measured point and once at the end, so
+/// any viewer can draw sweeps started from the GUI, CLI, REST or MCP.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, ToSchema)]
+pub struct BodeLive {
+    /// Counts sweeps since the server started.
+    pub id: u64,
+    pub request: mho_driver::BodeRequest,
+    pub points: Vec<mho_driver::BodePoint>,
+    pub total: usize,
+    pub finished: bool,
+    /// Set if the sweep ended with an error.
+    pub error: Option<String>,
 }
 
 /// Progress of a long operation such as a RAW download or a Bode sweep.
@@ -128,6 +144,7 @@ pub enum WsText {
     Measurements(MeasureSnapshot),
     Error { message: String },
     Progress(Progress),
+    Bode(BodeLive),
 }
 
 pub fn now_ms() -> u64 {
@@ -151,6 +168,7 @@ pub struct LiveHub {
     pub(crate) errors: watch::Sender<Option<String>>,
     pub(crate) config: watch::Sender<LiveConfig>,
     pub(crate) progress: watch::Sender<Option<Progress>>,
+    pub(crate) bode: watch::Sender<Option<Arc<BodeLive>>>,
 }
 
 impl LiveHub {
@@ -161,6 +179,7 @@ impl LiveHub {
             errors: watch::channel(None).0,
             config: watch::channel(config).0,
             progress: watch::channel(None).0,
+            bode: watch::channel(None).0,
         }
     }
 
@@ -178,6 +197,20 @@ impl LiveHub {
 
     pub fn subscribe_progress(&self) -> watch::Receiver<Option<Progress>> {
         self.progress.subscribe()
+    }
+
+    pub fn subscribe_bode(&self) -> watch::Receiver<Option<Arc<BodeLive>>> {
+        self.bode.subscribe()
+    }
+
+    /// Publishes the state of a Bode sweep.
+    pub fn publish_bode(&self, b: BodeLive) {
+        self.bode.send_replace(Some(Arc::new(b)));
+    }
+
+    /// Id for the next Bode sweep.
+    pub fn next_bode_id(&self) -> u64 {
+        self.bode.borrow().as_ref().map_or(1, |b| b.id + 1)
     }
 
     /// Progress callback for device jobs, rate-limited to ~10 updates per second.

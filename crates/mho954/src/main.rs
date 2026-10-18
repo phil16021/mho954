@@ -267,6 +267,10 @@ pub enum Command {
         /// `--points` is then per decade (10..100).
         #[arg(long)]
         native: bool,
+        /// With --native: leave the plot on the scope's screen (Bode mode stays on, the two
+        /// channels keep its AC coupling, 1 mV/div and 20 MHz limit).
+        #[arg(long, requires = "native")]
+        keep: bool,
         /// Write CSV (frequency, gain, phase, unwrapped phase; summary as # lines).
         #[arg(short, long)]
         output: Option<PathBuf>,

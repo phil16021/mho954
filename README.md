@@ -98,6 +98,7 @@ mho954 do afg1.load_arb D:/wave.csv        # Arb-Datei vom USB-Stick des Scopes
 mho954 bode --start 100 --stop 1M --dut-in 1 --dut-out 2 -o bode.csv   # Software-Sweep (AFG)
 mho954 bode --start 100 --stop 1M --averages 4 --load 50                # gemittelt, 50-Ω-Last
 mho954 bode --native --start 100 --stop 1M -o bode.png                  # Bode des Scopes (Bild)
+mho954 bode --native --keep --start 100 --stop 1M                       # Plot bleibt auf dem Scope-Display
 mho954 bode --start 100 --stop 80M --follow 2   # ohne T-Stück: GI→CH1 gegen GII→CH2 (Pfadvergleich)
 mho954 set bus.flexray -n 1 --activate source=CHAN1 baud=10000000      # Optionen FlexA/AUDIOA/AEROA
 mho954 set trigger.i2s --activate clock=CHAN1 word_select=CHAN2 data_source=CHAN3
@@ -169,7 +170,10 @@ Doku: <http://127.0.0.1:8954/docs>, OpenAPI: `/api/v1/openapi.json`.
 **WebSocket-Frames:** `[u32 LE Headerlänge][JSON-Header][u16 LE Samples aller Spuren]`. Der
 Header enthält `seq`, `timestamp_ms`, `trigger_status`, `fps` und `traces[]` mit `source`,
 `preamble` und `len`. Volt = `(raw − y_origin − y_reference) × y_increment`.
-Text-Nachrichten: `{"type":"measurements",...}` oder `{"type":"error",...}`.
+Text-Nachrichten: `{"type":"measurements",...}`, `{"type":"error",...}`, `{"type":"progress",...}`
+und `{"type":"bode",…}`. Letzteres kommt nach jedem Messpunkt eines Bode-Sweeps, egal ob GUI,
+CLI, REST oder MCP ihn gestartet haben; die GUI öffnet damit ihr Bode-Fenster und zeichnet die
+Kurve live. Neue Verbindungen bekommen den letzten Sweep.
 
 **Sicherheit:**
 - **Loopback-Bind (Standard):**

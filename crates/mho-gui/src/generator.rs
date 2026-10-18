@@ -186,7 +186,7 @@ impl GeneratorPanel {
                 ui.selectable_value(&mut self.channel, n, text);
             }
             ui.label(
-                RichText::new(format!("sine ≤ {}", mho_dsp::format_si(max_sine, "Hz")))
+                RichText::new(format!("sine <= {}", mho_dsp::format_si(max_sine, "Hz")))
                     .small()
                     .color(Color32::GRAY),
             );

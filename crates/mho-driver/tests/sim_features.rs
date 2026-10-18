@@ -236,6 +236,48 @@ fn bode_sweep_of_simulated_low_pass() {
         bad.validate().is_err(),
         "follow must be the other generator"
     );
+    // Starts from any vertical setting (seen on the device: CH2 at 5 mV/div, 4 Vpp).
+    s.set_channel(
+        2,
+        &mho_driver::ChannelUpdate {
+            scale: Some(5e-3),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let loud = mho_driver::BodeRequest {
+        amplitude: 4.0,
+        ..req.clone()
+    };
+    assert_eq!(s.bode_sweep(&loud, &mut |_, _| {}).unwrap().len(), 5);
+    assert_eq!(s.channel(2).unwrap().scale, 5e-3, "scale restored");
+    // Points are reported as they are measured.
+    let mut seen = Vec::new();
+    let pts = s
+        .bode_sweep_with(&req, &mut |done, total, p| {
+            seen.push((done, total, p.frequency))
+        })
+        .unwrap();
+    assert_eq!(seen.len(), pts.len());
+    for (i, &(done, total, f)) in seen.iter().enumerate() {
+        assert_eq!((done, total, f), (i + 1, 5, pts[i].frequency));
+    }
+    // The scope's own plot can stay on its screen.
+    let keep = mho_driver::NativeBodeRequest {
+        start: 100.0,
+        stop: 1e4,
+        keep_on_screen: true,
+        ..Default::default()
+    };
+    s.bode_native(&keep, &mut |_, _| {}).unwrap();
+    let enabled = |s: &mut Scope| s.group_get("bode", None, false).unwrap()["enable"].clone();
+    assert_eq!(enabled(&mut s), ParamValue::Bool(true));
+    let off = mho_driver::NativeBodeRequest {
+        keep_on_screen: false,
+        ..keep
+    };
+    s.bode_native(&off, &mut |_, _| {}).unwrap();
+    assert_eq!(enabled(&mut s), ParamValue::Bool(false));
     let same_channel = mho_driver::BodeRequest {
         output: 1,
         ..Default::default()

@@ -1237,3 +1237,59 @@ async fn progress_events_for_raw_downloads() {
     );
     shutdown.cancel();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bode_sweeps_stream_to_every_viewer() {
+    let (url, shutdown) = start(false).await;
+    let viewer = RemoteBackend::new(&url);
+    let mut rx = viewer.stream().await.unwrap();
+    // Started by another client (like the CLI or MCP while the GUI watches).
+    let api = RemoteBackend::new(&url);
+    let req = mho_driver::BodeRequest {
+        start: 1e3,
+        stop: 1e5,
+        points: 3,
+        settle_ms: 0,
+        ..Default::default()
+    };
+    let sweep = tokio::spawn(async move { api.bode_sweep(req).await });
+    let mut sizes = Vec::new();
+    let mut last = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while tokio::time::Instant::now() < deadline {
+        if let Ok(Some(LiveEvent::Bode(b))) =
+            tokio::time::timeout(Duration::from_secs(2), rx.recv()).await
+        {
+            sizes.push(b.points.len());
+            let done = b.finished;
+            last = Some(b);
+            if done {
+                break;
+            }
+        }
+    }
+    let pts = sweep.await.unwrap().unwrap();
+    let last = last.expect("no bode events");
+    assert!(last.finished && last.error.is_none(), "{last:?}");
+    assert_eq!((last.total, last.points.len(), pts.len()), (3, 3, 3));
+    assert!(sizes.windows(2).all(|w| w[0] <= w[1]), "{sizes:?}");
+    assert!(
+        sizes.contains(&1) || sizes.contains(&2),
+        "partial curves: {sizes:?}"
+    );
+    // A viewer connecting afterwards still gets the last sweep.
+    let mut late = RemoteBackend::new(&url).stream().await.unwrap();
+    let mut got = None;
+    for _ in 0..20 {
+        match tokio::time::timeout(Duration::from_secs(2), late.recv()).await {
+            Ok(Some(LiveEvent::Bode(b))) => {
+                got = Some(b);
+                break;
+            }
+            Ok(Some(_)) => continue,
+            _ => break,
+        }
+    }
+    assert_eq!(got.expect("late viewer").id, last.id);
+    shutdown.cancel();
+}
