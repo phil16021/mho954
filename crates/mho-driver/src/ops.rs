@@ -455,6 +455,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn histogram_statistics_as_sent_by_the_scope() {
+        // Firmware 00.01.00, histogram on without data.
+        let a = "[Sum:0hits, Peaks:0hits, Max:0, Min:0, Pk_Pk:0, Mean:0, Median:0, Mode:0, \
+                 Bin width:0, Sigma:0, meanPlusSigma:*****, meanPlus2Sigma:*****, \
+                 meanPlus3Sigma:*****]";
+        let kv = parse_key_values(a);
+        assert_eq!(kv.len(), 13);
+        assert_eq!(kv[0], ("Sum".into(), "0hits".into()));
+        assert_eq!(kv[8], ("Bin width".into(), "0".into()));
+        assert_eq!(kv[12], ("meanPlus3Sigma".into(), "*****".into()));
+    }
+
+    #[test]
     fn paths() {
         assert_eq!(
             validate_path("d:/setups/bench1.stp", &["stp"]).unwrap(),

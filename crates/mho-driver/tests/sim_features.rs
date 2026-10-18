@@ -8,16 +8,14 @@ fn strict_simulator_refuses_unverified_queries() {
     // `from_transport` applies the hardware gate, like a real instrument.
     let mut s = Scope::from_transport(Box::new(SimTransport::new())).unwrap();
     assert!(!s.trusts_unverified());
-    assert!(matches!(s.bus_data(1), Err(DriverError::Unsupported(_))));
+    // Still unverified on the test scope: the DVM value and everything of the generator.
     assert!(matches!(s.dvm_value(), Err(DriverError::Unsupported(_))));
     assert!(matches!(
-        s.logic_capture(1),
+        s.group_get("afg", Some(1), false),
         Err(DriverError::Unsupported(_))
     ));
-    assert!(matches!(
-        s.group_get("bus.spi", Some(1), false),
-        Err(DriverError::Unsupported(_))
-    ));
+    // Verified on the instrument: allowed under the gate too.
+    assert!(s.group_get("bus.spi", Some(1), false).is_ok());
     // Without the AFG option the sweep is refused before anything is sent to the generator.
     let mut noafg = Scope::from_transport(Box::new(SimTransport::with_options(
         mho_driver::SimOptions {
@@ -30,10 +28,10 @@ fn strict_simulator_refuses_unverified_queries() {
         noafg.bode_sweep(&Default::default(), &mut |_, _| {}),
         Err(DriverError::Unsupported(_))
     ));
-    // Writing is always allowed (errors land in the error queue).
+    // Writing is always allowed (errors land in the error queue); no read-back unverified.
     let mut v = ParamMap::new();
-    v.insert("baud".into(), ParamValue::Int(115_200));
-    assert_eq!(s.group_set("bus.rs232", Some(2), &v, true).unwrap(), None);
+    v.insert("frequency".into(), ParamValue::Real(1e3));
+    assert_eq!(s.group_set("afg", Some(1), &v, true).unwrap(), None);
 }
 
 #[test]
@@ -158,6 +156,23 @@ fn readouts_need_their_mode_and_commands_validate() {
     let c2 = s.group_get("channel", Some(2), false).unwrap();
     assert_ne!(c2["label"], ParamValue::Text("probe".into()));
     assert!(s.scpi().query("*IDN?").unwrap().contains("MHO954"));
+}
+
+#[test]
+fn logic_capture_without_probe_restores_the_decoder() {
+    let opts = mho_driver::SimOptions {
+        la_probe: false,
+        ..Default::default()
+    };
+    // `from_transport` applies the gate; the decoder queries are verified on the instrument.
+    let mut s = Scope::from_transport(Box::new(SimTransport::with_options(opts))).unwrap();
+    let err = s.logic_capture(1).unwrap_err();
+    assert!(matches!(err, DriverError::Unsupported(_)), "{err}");
+    assert!(err.to_string().contains("logic probe"), "{err}");
+    let bus = s.group_get("bus", Some(1), false).unwrap();
+    assert_eq!(bus.get("display"), Some(&ParamValue::Bool(false)));
+    let par = s.group_get("bus.parallel", Some(1), false).unwrap();
+    assert_ne!(par.get("bus"), Some(&ParamValue::Text("D15D0".into())));
 }
 
 #[test]

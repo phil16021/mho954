@@ -1038,6 +1038,1248 @@
     "detail": "0.0000E+00"
   },
   {
+    "command": ":AUT:ENAB?",
+    "group": "autoset",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":AUT:PEAK?",
+    "group": "autoset",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":AUT:OPEN?",
+    "group": "autoset",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":AUT:OVER?",
+    "group": "autoset",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":AUT:KEEP?",
+    "group": "autoset",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":AUT:LOCK?",
+    "group": "autoset",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":ACQ:BITS?",
+    "group": "acquire.extra",
+    "outcome": "ok",
+    "detail": "14"
+  },
+  {
+    "command": ":CHAN1:LAB:CONT?",
+    "group": "channel",
+    "outcome": "ok",
+    "detail": "CH1"
+  },
+  {
+    "command": ":CHAN1:LAB:SHOW?",
+    "group": "channel",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":CHAN1:UNIT?",
+    "group": "channel",
+    "outcome": "ok",
+    "detail": "VOLT"
+  },
+  {
+    "command": ":CHAN1:TCAL?",
+    "group": "channel",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TIM:MODE?",
+    "group": "timebase.extra",
+    "outcome": "ok",
+    "detail": "MAIN"
+  },
+  {
+    "command": ":TIM:DEL:ENAB?",
+    "group": "timebase.extra",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TIM:DEL:OFFS?",
+    "group": "timebase.extra",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":TIM:DEL:SCAL?",
+    "group": "timebase.extra",
+    "outcome": "ok",
+    "detail": "5.000000E-7"
+  },
+  {
+    "command": ":TIM:HREF:MODE?",
+    "group": "timebase.extra",
+    "outcome": "ok",
+    "detail": "CENT"
+  },
+  {
+    "command": ":TIM:HREF:POS?",
+    "group": "timebase.extra",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TIM:VERN?",
+    "group": "timebase.extra",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":TIM:ROLL?",
+    "group": "timebase.extra",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":TIM:XY:X?",
+    "group": "timebase.extra",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":TIM:XY:Y?",
+    "group": "timebase.extra",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":TIM:XY:GRID?",
+    "group": "timebase.extra",
+    "outcome": "ok",
+    "detail": "FULL"
+  },
+  {
+    "command": ":DISP:GRAD:TIME?",
+    "group": "display",
+    "outcome": "ok",
+    "detail": "MIN"
+  },
+  {
+    "command": ":DISP:WBR?",
+    "group": "display",
+    "outcome": "ok",
+    "detail": "100"
+  },
+  {
+    "command": ":DISP:GRID?",
+    "group": "display",
+    "outcome": "ok",
+    "detail": "FULL"
+  },
+  {
+    "command": ":DISP:GBR?",
+    "group": "display",
+    "outcome": "ok",
+    "detail": "50"
+  },
+  {
+    "command": ":DISP:CBR?",
+    "group": "display",
+    "outcome": "ok",
+    "detail": "80"
+  },
+  {
+    "command": ":DISP:RUL?",
+    "group": "display",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":DISP:MOVE?",
+    "group": "display",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":DISP:COL?",
+    "group": "display",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":DISP:WHOL?",
+    "group": "display",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":CURS:MODE?",
+    "group": "cursor",
+    "outcome": "ok",
+    "detail": "OFF"
+  },
+  {
+    "command": ":CURS:MEAS:IND?",
+    "group": "cursor",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":CURS:MAN:TYPE?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "TIME"
+  },
+  {
+    "command": ":CURS:MAN:SOUR?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":CURS:MAN:CAX?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "-6.000000000000E-06"
+  },
+  {
+    "command": ":CURS:MAN:CBX?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "+6.000000000000E-06"
+  },
+  {
+    "command": ":CURS:MAN:CAY?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "1.500000E-1"
+  },
+  {
+    "command": ":CURS:MAN:CBY?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "-1.500000E-1"
+  },
+  {
+    "command": ":CURS:TRAC:SOUR1?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":CURS:TRAC:SOUR2?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":CURS:TRAC:MODE?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "X"
+  },
+  {
+    "command": ":CURS:TRAC:CAX?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "-6.000000000000E-06"
+  },
+  {
+    "command": ":CURS:TRAC:CBX?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "+6.000000000000E-06"
+  },
+  {
+    "command": ":CURS:TRAC:CAY?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "2.184467E-1"
+  },
+  {
+    "command": ":CURS:TRAC:CBY?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "2.184467E-1"
+  },
+  {
+    "command": ":MATH1:DISP?",
+    "group": "math",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":MATH1:OPER?",
+    "group": "math",
+    "outcome": "ok",
+    "detail": "ADD"
+  },
+  {
+    "command": ":MATH1:SOUR1?",
+    "group": "math",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":MATH1:SOUR2?",
+    "group": "math",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":MATH1:SCAL?",
+    "group": "math",
+    "outcome": "ok",
+    "detail": "5.000000E-1"
+  },
+  {
+    "command": ":MATH1:OFFS?",
+    "group": "math",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":MATH1:INV?",
+    "group": "math",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":MATH1:EXP?",
+    "group": "math",
+    "outcome": "ok",
+    "detail": "GND"
+  },
+  {
+    "command": ":MATH1:LAB:SHOW?",
+    "group": "math",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":MATH1:FFT:SOUR?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":MATH1:FFT:WIND?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "HANN"
+  },
+  {
+    "command": ":MATH1:FFT:UNIT?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "DB"
+  },
+  {
+    "command": ":MATH1:FFT:MODE?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "NORM"
+  },
+  {
+    "command": ":MATH1:FFT:AVCN?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "10"
+  },
+  {
+    "command": ":MATH1:FFT:SCAL?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "2.000000E+1"
+  },
+  {
+    "command": ":MATH1:FFT:OFFS?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":MATH1:FFT:HSC?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "1.000000E+7"
+  },
+  {
+    "command": ":MATH1:FFT:HCEN?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "5.000000E+6"
+  },
+  {
+    "command": ":MATH1:FFT:SEAR:ENAB?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":MATH1:FFT:SEAR:NUM?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "5"
+  },
+  {
+    "command": ":MATH1:FFT:SEAR:THR?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "5.500000E0"
+  },
+  {
+    "command": ":MATH1:FFT:SEAR:EXC?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "1.800000E0"
+  },
+  {
+    "command": ":MATH1:FFT:SEAR:ORD?",
+    "group": "math.fft",
+    "outcome": "ok",
+    "detail": "AMP"
+  },
+  {
+    "command": ":MATH1:FILT:W1?",
+    "group": "math.filter",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":MATH1:FILT:W2?",
+    "group": "math.filter",
+    "outcome": "ok",
+    "detail": "-3.000000E-6"
+  },
+  {
+    "command": ":BUS1:MODE?",
+    "group": "bus",
+    "outcome": "ok",
+    "detail": "PAR"
+  },
+  {
+    "command": ":BUS1:DISP?",
+    "group": "bus",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":BUS1:FORM?",
+    "group": "bus",
+    "outcome": "ok",
+    "detail": "HEX"
+  },
+  {
+    "command": ":BUS1:EVEN?",
+    "group": "bus",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":BUS1:LAB?",
+    "group": "bus",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":BUS1:POS?",
+    "group": "bus",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":BUS1:PAR:BUS?",
+    "group": "bus.parallel",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":BUS1:PAR:CLK?",
+    "group": "bus.parallel",
+    "outcome": "ok",
+    "detail": "OFF"
+  },
+  {
+    "command": ":BUS1:PAR:SLOP?",
+    "group": "bus.parallel",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":BUS1:PAR:END?",
+    "group": "bus.parallel",
+    "outcome": "ok",
+    "detail": "LSB"
+  },
+  {
+    "command": ":BUS1:PAR:POL?",
+    "group": "bus.parallel",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":BUS1:THR? PAL",
+    "group": "bus.parallel",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":BUS1:RS232:TX?",
+    "group": "bus.rs232",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":BUS1:RS232:RX?",
+    "group": "bus.rs232",
+    "outcome": "ok",
+    "detail": "OFF"
+  },
+  {
+    "command": ":BUS1:RS232:POL?",
+    "group": "bus.rs232",
+    "outcome": "ok",
+    "detail": "NEG"
+  },
+  {
+    "command": ":BUS1:RS232:PAR?",
+    "group": "bus.rs232",
+    "outcome": "ok",
+    "detail": "NONE"
+  },
+  {
+    "command": ":BUS1:RS232:END?",
+    "group": "bus.rs232",
+    "outcome": "ok",
+    "detail": "LSB"
+  },
+  {
+    "command": ":BUS1:RS232:BAUD?",
+    "group": "bus.rs232",
+    "outcome": "ok",
+    "detail": "9600"
+  },
+  {
+    "command": ":BUS1:RS232:DBIT?",
+    "group": "bus.rs232",
+    "outcome": "ok",
+    "detail": "8"
+  },
+  {
+    "command": ":BUS1:RS232:SBIT?",
+    "group": "bus.rs232",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":BUS1:THR? TX",
+    "group": "bus.rs232",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":BUS1:IIC:SCLK:SOUR?",
+    "group": "bus.i2c",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":BUS1:IIC:SDA:SOUR?",
+    "group": "bus.i2c",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":BUS1:IIC:EXCH?",
+    "group": "bus.i2c",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":BUS1:IIC:ADDB?",
+    "group": "bus.i2c",
+    "outcome": "ok",
+    "detail": "7"
+  },
+  {
+    "command": ":BUS1:THR? SCL",
+    "group": "bus.i2c",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":BUS1:THR? SDA",
+    "group": "bus.i2c",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":BUS1:SPI:SCLK:SOUR?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":BUS1:SPI:SCLK:SLOP?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "NEG"
+  },
+  {
+    "command": ":BUS1:SPI:MISO:SOUR?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "CHAN2"
+  },
+  {
+    "command": ":BUS1:SPI:MOSI:SOUR?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "OFF"
+  },
+  {
+    "command": ":BUS1:SPI:POL?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "HIGH"
+  },
+  {
+    "command": ":BUS1:SPI:MISO:POL?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "HIGH"
+  },
+  {
+    "command": ":BUS1:SPI:MOSI:POL?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "HIGH"
+  },
+  {
+    "command": ":BUS1:SPI:DBIT?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "8"
+  },
+  {
+    "command": ":BUS1:SPI:END?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "MSB"
+  },
+  {
+    "command": ":BUS1:SPI:MODE?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "CS"
+  },
+  {
+    "command": ":BUS1:SPI:TIM:TIME?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":BUS1:SPI:SS:SOUR?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "CHAN3"
+  },
+  {
+    "command": ":BUS1:SPI:SS:POL?",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "LOW"
+  },
+  {
+    "command": ":BUS1:THR? CLK",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":BUS1:THR? MISO",
+    "group": "bus.spi",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":BUS1:CAN:SOUR?",
+    "group": "bus.can",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":BUS1:CAN:STYP?",
+    "group": "bus.can",
+    "outcome": "ok",
+    "detail": "CANH"
+  },
+  {
+    "command": ":BUS1:CAN:BAUD?",
+    "group": "bus.can",
+    "outcome": "ok",
+    "detail": "1000000"
+  },
+  {
+    "command": ":BUS1:CAN:SPO?",
+    "group": "bus.can",
+    "outcome": "ok",
+    "detail": "80"
+  },
+  {
+    "command": ":BUS1:THR? CAN",
+    "group": "bus.can",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":BUS1:LIN:SOUR?",
+    "group": "bus.lin",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":BUS1:LIN:STAN?",
+    "group": "bus.lin",
+    "outcome": "ok",
+    "detail": "MIX"
+  },
+  {
+    "command": ":BUS1:LIN:BAUD?",
+    "group": "bus.lin",
+    "outcome": "ok",
+    "detail": "9600"
+  },
+  {
+    "command": ":BUS1:LIN:PAR?",
+    "group": "bus.lin",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":BUS1:THR? LIN",
+    "group": "bus.lin",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":CURS:MODE MAN",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":CURS:MAN:AXV?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "-6.000E-06"
+  },
+  {
+    "command": ":CURS:MAN:AYV?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "1.500E-01"
+  },
+  {
+    "command": ":CURS:MAN:BXV?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "6.000E-06"
+  },
+  {
+    "command": ":CURS:MAN:BYV?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "-1.500E-01"
+  },
+  {
+    "command": ":CURS:MAN:XDEL?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "1.200E-05"
+  },
+  {
+    "command": ":CURS:MAN:IXD?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "8.333E+04"
+  },
+  {
+    "command": ":CURS:MAN:YDEL?",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": "-3.000E-01"
+  },
+  {
+    "command": ":CURS:MODE OFF",
+    "group": "cursor.manual",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":CURS:MODE TRAC",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":CURS:TRAC:AXV?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "-6.000E-06"
+  },
+  {
+    "command": ":CURS:TRAC:AYV?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "2.184E-01"
+  },
+  {
+    "command": ":CURS:TRAC:BXV?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "6.000E-06"
+  },
+  {
+    "command": ":CURS:TRAC:BYV?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "2.184E-01"
+  },
+  {
+    "command": ":CURS:TRAC:XDEL?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "1.200E-05"
+  },
+  {
+    "command": ":CURS:TRAC:IXD?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "8.333E+04"
+  },
+  {
+    "command": ":CURS:TRAC:YDEL?",
+    "group": "cursor.track",
+    "outcome": "ok",
+    "detail": "0.000E+00"
+  },
+  {
+    "command": ":SAVE:IMAG:FORM?",
+    "group": "save",
+    "outcome": "ok",
+    "detail": "PNG"
+  },
+  {
+    "command": ":SAVE:IMAG:COL?",
+    "group": "save",
+    "outcome": "ok",
+    "detail": "COL"
+  },
+  {
+    "command": ":SAVE:IMAG:INV?",
+    "group": "save",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SAVE:IMAG:HEAD?",
+    "group": "save",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":SAVE:OVER?",
+    "group": "save",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SAVE:PREF?",
+    "group": "save",
+    "outcome": "ok",
+    "detail": "RigolDS"
+  },
+  {
+    "command": ":HIST:ENAB?",
+    "group": "histogram",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":HIST:TYPE?",
+    "group": "histogram",
+    "outcome": "ok",
+    "detail": "HOR"
+  },
+  {
+    "command": ":HIST:SOUR?",
+    "group": "histogram",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":HIST:HEIG?",
+    "group": "histogram",
+    "outcome": "ok",
+    "detail": "2"
+  },
+  {
+    "command": ":HIST:RANG:LEFT?",
+    "group": "histogram",
+    "outcome": "ok",
+    "detail": "-1.000000E-8"
+  },
+  {
+    "command": ":HIST:RANG:RIGH?",
+    "group": "histogram",
+    "outcome": "ok",
+    "detail": "1.000000E-8"
+  },
+  {
+    "command": ":HIST:RANG:TOP?",
+    "group": "histogram",
+    "outcome": "ok",
+    "detail": "2.000000E-1"
+  },
+  {
+    "command": ":HIST:RANG:BOTT?",
+    "group": "histogram",
+    "outcome": "ok",
+    "detail": "-1.000000E-1"
+  },
+  {
+    "command": ":MASK:ENAB?",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":MASK:SOUR?",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":MASK:OPER?",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": "STOP"
+  },
+  {
+    "command": ":MASK:X?",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": "2.400000E0"
+  },
+  {
+    "command": ":MASK:Y?",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": "4.800000E0"
+  },
+  {
+    "command": ":MASK:OUTP:ENAB?",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":MASK:OUTP:EVEN?",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": "FAIL"
+  },
+  {
+    "command": ":MASK:OUTP:TIME?",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":SEAR:STAT?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SEAR:MODE?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "EDGE"
+  },
+  {
+    "command": ":SEAR:EDGE:SLOP?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":SEAR:EDGE:SOUR?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":SEAR:EDGE:THR?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":SEAR:PULS:POL?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "POS"
+  },
+  {
+    "command": ":SEAR:PULS:QUAL?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "GRE"
+  },
+  {
+    "command": ":SEAR:PULS:SOUR?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":SEAR:PULS:UWID?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "2.000000E-6"
+  },
+  {
+    "command": ":SEAR:PULS:LWID?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "1.000000E-6"
+  },
+  {
+    "command": ":SEAR:PULS:THR?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":REC:ENAB?",
+    "group": "record",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":REC:FRAM?",
+    "group": "record",
+    "outcome": "ok",
+    "detail": "1000"
+  },
+  {
+    "command": ":REC:WREC:FINT?",
+    "group": "record",
+    "outcome": "ok",
+    "detail": "1.000000E-8"
+  },
+  {
+    "command": ":REC:CURR?",
+    "group": "record",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":REC:WREP:MODE?",
+    "group": "record",
+    "outcome": "ok",
+    "detail": "SING"
+  },
+  {
+    "command": ":REC:WREP:DIR?",
+    "group": "record",
+    "outcome": "ok",
+    "detail": "FORW"
+  },
+  {
+    "command": ":REC:WREP:FINT?",
+    "group": "record",
+    "outcome": "ok",
+    "detail": "1.000000E-1"
+  },
+  {
+    "command": ":MASK:ENAB ON",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":MASK:FAIL?",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":MASK:PASS?",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":MASK:TOT?",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":MASK:ENAB OFF",
+    "group": "mask",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":SEAR:STAT ON",
+    "group": "search",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":SEAR:COUN?",
+    "group": "search",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":SEAR:STAT OFF",
+    "group": "search",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":HIST:ENAB ON",
+    "group": "histogram",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":HIST:STAT:RES?",
+    "group": "histogram",
+    "outcome": "ok",
+    "detail": "[Sum:0hits, Peaks:0hits, Max:0, Min:0, Pk_Pk:0, Mean:0, Median:0, Mode:0, Bin width:0, Sigma:0, meanPlusSigma:*****, meanPlus2Sigma:*****, meanPlus3Sigma:*****]"
+  },
+  {
+    "command": ":HIST:ENAB OFF",
+    "group": "histogram",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":SAVE:STAT?",
+    "group": "save",
+    "outcome": "ok",
+    "detail": "1"
+  },
+  {
+    "command": ":LA:ENAB?",
+    "group": "la",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":LA:ACT?",
+    "group": "la",
+    "outcome": "ok",
+    "detail": "D0"
+  },
+  {
+    "command": ":LA:AUT?",
+    "group": "la",
+    "outcome": "ok",
+    "detail": "D15D0"
+  },
+  {
+    "command": ":LA:SIZE?",
+    "group": "la",
+    "outcome": "ok",
+    "detail": "MED"
+  },
+  {
+    "command": ":LA:POD1:DISP?",
+    "group": "la",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":LA:POD2:DISP?",
+    "group": "la",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":LA:POD1:THR?",
+    "group": "la",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":LA:POD2:THR?",
+    "group": "la",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":LA:DIG:ENAB? D0",
+    "group": "la.channel",
+    "outcome": "ok",
+    "detail": "0"
+  },
+  {
+    "command": ":LA:DIG:LAB? D0",
+    "group": "la.channel",
+    "outcome": "ok",
+    "detail": "D0"
+  },
+  {
+    "command": ":REF:SOUR? 1",
+    "group": "reference",
+    "outcome": "ok",
+    "detail": "CHAN1"
+  },
+  {
+    "command": ":REF:VSC? 1",
+    "group": "reference",
+    "outcome": "ok",
+    "detail": "5.000000E-2"
+  },
+  {
+    "command": ":REF:VOFF? 1",
+    "group": "reference",
+    "outcome": "ok",
+    "detail": "0.000000"
+  },
+  {
+    "command": ":REF:COL? 1",
+    "group": "reference",
+    "outcome": "ok",
+    "detail": "ORAN"
+  },
+  {
+    "command": ":REF:LAB:CONT? 1",
+    "group": "reference",
+    "outcome": "ok",
+    "detail": "REF1"
+  },
+  {
     "command": ":BUS1:DISP ON",
     "group": "bus.data",
     "outcome": "ok",
@@ -1052,18 +2294,60 @@
   {
     "command": ":BUS1:DATA?",
     "group": "bus.data",
-    "outcome": "no_answer",
-    "detail": "invalid argument: no answer to `:BUS1:DATA?` (unknown query?)"
+    "outcome": "ok",
+    "detail": "<binary block, 31 bytes: 504152414c4c454c0a54696d652c446174612c0a2d31302e303075732c312c…>"
   },
   {
     "command": ":BUS1:EVEN OFF",
     "group": "bus.data",
-    "outcome": "rejected",
-    "detail": "-200: Command execute failed"
+    "outcome": "ok",
+    "detail": ""
   },
   {
     "command": ":BUS1:DISP OFF",
     "group": "bus.data",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":MATH1:OPER FFT",
+    "group": "math.peaks",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":MATH1:DISP ON",
+    "group": "math.peaks",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":MATH1:FFT:SEAR:ENAB ON",
+    "group": "math.peaks",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":MATH1:FFT:SEAR:RES?",
+    "group": "math.peaks",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":MATH1:FFT:SEAR:ENAB OFF",
+    "group": "math.peaks",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":MATH1:DISP OFF",
+    "group": "math.peaks",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":MATH1:OPER ADD",
+    "group": "math.peaks",
     "outcome": "ok",
     "detail": ""
   }

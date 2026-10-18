@@ -1470,17 +1470,13 @@ pub const GROUPS: &[Group] = &[
     },
     Group {
         id: "math.filter",
+        // The filter type is the math operator; `:MATH<n>:FILT:TYPE?` went unanswered on
+        // firmware 00.01.00.
         title: "Digital filter of a math channel (operator LPAS/HPAS/BPAS/BST)",
         select: None,
         instances: Some((1, 4)),
         requires: Requires::Nothing,
         params: &[
-            en(
-                "type",
-                ":MATH{n}:FILT:TYPE",
-                &["LPASs", "HPASs", "BPASs", "BSTop"],
-                "filter type",
-            ),
             real(
                 "w1",
                 ":MATH{n}:FILT:W1",

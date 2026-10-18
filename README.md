@@ -249,11 +249,14 @@ Weil das Scope unbekannte Queries nicht beantwortet und nach etwa fünf davon h�
 - **Schreiben** geht immer. Fehler landen in der Fehlerqueue und werden gemeldet.
 - **Lesen** einer Gruppe, Dekoder-Tabellen, FFT-Peaks, Math-Spuren im Live-Bild und das DVM gibt
   es erst, wenn die Queries mit `mho954 verify <gruppe>` am Gerät bestätigt wurden. Das Ergebnis
-  steht in `docs/verified-commands.json` und wird beim nächsten Build einkompiliert.
+  steht in `docs/verified-commands.json` und wird beim nächsten Build einkompiliert. Stand
+  2026-10-18 ist alles bestätigt außer dem DVM-Wert und den Generator-Gruppen (`afg*`, `bode`;
+  das Test-Scope hat keinen Generator).
 - `verify` sendet jede Query einzeln, danach `*IDN?`. Nach drei unbeantworteten Queries hört es
   auf und bittet um einen Neustart des Scopes; danach `mho954 verify --reset-budget`.
 - Der Simulator lässt ungeprüfte Queries zu, damit sich alles ohne Gerät testen lässt.
-  Mit `MHO954_SIM=strict` verhält er sich wie das Gerät.
+  Mit `MHO954_SIM=strict` verhält er sich wie das Gerät, `noafg` entfernt den Generator,
+  `noprobe` die Logiksonde.
 
 ## Logikanalysator und Bode
 
@@ -261,7 +264,8 @@ Weil das Scope unbekannte Queries nicht beantwortet und nach etwa fünf davon h�
   als 16-Bit-Parallelbus ein (D15..D0, ohne Takt, ein Ereignis pro Änderung) und liest dessen
   Ereignistabelle. Die Zeitauflösung entspricht der Abtastung des Dekoders. Die Bitreihenfolge
   (D15 = MSB bei `D15D0`) ist am Gerät noch zu bestätigen. Schwellen und Kanäle stehen in den
-  Gruppen `la` und `la.channel`.
+  Gruppen `la` und `la.channel`. Ohne angesteckte Logiksonde (PLA2216) lehnt das Scope D15..D0 als
+  Dekoderquelle ab; `logic` meldet das und stellt den Dekoder wieder her.
 - **Bode:** Die Bode-Funktion des Scopes liefert keine Messwerte über SCPI. `bode` misst selbst:
   Generator auf Sinus, je Frequenz eine Einzelaufnahme, Amplitude und Phase beider Kanäle per
   Einzel-DFT aus derselben Aufnahme, vertikale Skalierung automatisch. Danach werden Zeitbasis,

@@ -1488,11 +1488,13 @@ async fn verify_cmd(
         let mut scope = Scope::open(&conn)?;
         let mut stop = None;
         for cand in selected {
-            let confirmed = cand.kind == Kind::Query
-                && mho_driver::params::query_verified(&cand.command);
-            if confirmed
-                || results.iter().any(|r| r.command == cand.command && r.outcome == Outcome::Ok)
-            {
+            // Set commands always run: they are free, and probes need their setup.
+            let done = cand.kind == Kind::Query
+                && (mho_driver::params::query_verified(&cand.command)
+                    || results
+                        .iter()
+                        .any(|r| r.command == cand.command && r.outcome == Outcome::Ok));
+            if done {
                 println!("{:<32} already verified", cand.command);
                 continue;
             }

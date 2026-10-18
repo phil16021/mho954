@@ -37,8 +37,12 @@ fn cells(line: &str) -> Vec<String> {
     line.split(',').map(|c| c.trim().to_string()).collect()
 }
 
-/// Parses the payload of `:BUS<n>:DATA?` (without the IEEE block header).
+/// Parses the payload of `:BUS<n>:DATA?` (without the IEEE block header). Without decoded
+/// events the scope sends `null`.
 pub fn parse_decode_table(text: &str) -> DecodeTable {
+    if text.trim().eq_ignore_ascii_case("null") {
+        return DecodeTable::default();
+    }
     let mut lines = text
         .split('\n')
         .map(|l| l.trim_end_matches('\r'))
@@ -194,6 +198,7 @@ mod tests {
     #[test]
     fn empty_tables() {
         assert_eq!(parse_decode_table(""), DecodeTable::default());
+        assert_eq!(parse_decode_table("null"), DecodeTable::default());
         let t = parse_decode_table("SPI\n");
         assert_eq!(t.protocol, "SPI");
         assert!(t.columns.is_empty() && t.rows.is_empty());

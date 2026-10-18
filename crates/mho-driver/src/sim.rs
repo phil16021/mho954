@@ -153,6 +153,9 @@ pub struct SimOptions {
     /// Report logic analyzer and function generator hardware (`:SYST:MOD?`); option `noafg`
     /// turns the generator off like on the test scope.
     pub afg: bool,
+    /// A logic probe is plugged in. Without one (option `noprobe`, like the test scope) the
+    /// scope rejects D0..D15 as parallel decoder source with -200.
+    pub la_probe: bool,
 }
 
 impl Default for SimOptions {
@@ -164,6 +167,7 @@ impl Default for SimOptions {
             hang_after: 5,
             strict: false,
             afg: true,
+            la_probe: true,
         }
     }
 }
@@ -192,6 +196,7 @@ impl SimOptions {
                 "fullidn" => o.truncate_idn = false,
                 "strict" => o.strict = true,
                 "noafg" => o.afg = false,
+                "noprobe" => o.la_probe = false,
                 "hang_after" => o.hang_after = v.parse().unwrap_or(o.hang_after),
                 _ => tracing::warn!("MHO954_SIM: unknown option {k:?}"),
             }
@@ -648,6 +653,8 @@ impl SimTransport {
         } else if let Err(msg) = self.command(&hdr, args) {
             let code = if msg.starts_with("undefined header") {
                 -113
+            } else if msg.starts_with("execute failed") {
+                -200
             } else {
                 -224
             };
@@ -965,6 +972,13 @@ impl SimTransport {
     }
 
     fn command(&mut self, hdr: &str, args: &str) -> Result<(), String> {
+        if !self.opts.la_probe
+            && hdr.starts_with(":BUS")
+            && hdr.ends_with(":PAR:BUS")
+            && args.trim().starts_with(['D', 'd'])
+        {
+            return Err("execute failed: no logic probe".into());
+        }
         if let Some(spec) = Self::param_spec(hdr) {
             if let crate::params::ParamKind::SourceLevel { .. } = spec.kind {
                 let (src, v) = args.split_once(',').ok_or("missing source")?;

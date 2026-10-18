@@ -114,19 +114,22 @@ Utility → About.
 | Compound `:TIM:SCAL?;:CHAN1:SCAL?` | eine Zeile, Werte mit `;` getrennt. Das Scope braucht aber ~20 ms je Teilabfrage (10 Abfragen: 0,2 s statt 0,25 s); der Gewinn ist also klein |
 | `:WAV:SOUR D0` | **abgelehnt** (`-200 Command execute failed`) → Digitalkanäle nicht über `:WAV:DATA?` lesbar |
 | `:MEAS:ITEM VPP,CHAN1` (Set-Form) | angenommen (Messung anlegen ohne Abfrage) |
-| `:BUS1:DISP ON`, `:BUS1:EVEN ON` (Standard-Dekoder, Scope läuft, kein Signal) | angenommen |
-| `:BUS1:DATA?` direkt danach | **keine Antwort innerhalb 1,5 s** (2026-10-18). Der nächste Versuch nutzt eine Frist von 8 s; erst danach ist geklärt, ob die Abfrage zu langsam ist oder auf dieser Firmware fehlt |
-| `:BUS1:EVEN OFF` nach der unbeantworteten Abfrage | abgelehnt (`-200 Command execute failed`); `:BUS1:DISP OFF` angenommen |
+| `:BUS1:DATA?` mit Dekoder und Ereignistabelle an (Scope läuft, PARALLEL auf CH1) | `#9…PARALLEL\nTime,Data,\n-10.00us,1,`: Die Blocklänge zählt den Protokollnamen mit, danach folgt nur der Terminator. Direkt nach dem Einschalten kam innerhalb von 1,5 s keine Antwort; `verify` wartet deshalb 8 s. Mit ausgeschaltetem Dekoder lautet die Antwort `null` (4 Byte) |
+| `:BUS<n>:PAR:BUS D15D0` / `D7D0` / `D15D8` ohne Logiksonde | **abgelehnt** (`-200`), auch mit `:LA:ENAB ON`. `:SYST:MOD?` meldet nur, dass das Gerät den Logikanalysator unterstützt, nicht, ob eine Sonde steckt. `mho954 logic` meldet das und stellt den Dekoder wieder her |
+| Alle Abfragen der Gruppen `bus*`, `math`, `math.fft`, `autoset`, `acquire.extra`, `channel`, `timebase.extra`, `display`, `cursor*`, `save`, `histogram`, `mask`, `search`, `record`, `la`, `la.channel`, `reference` | beantwortet, ohne Einträge in der Fehlerqueue (2026-10-18) |
+| `:MATH1:FILT:TYPE?` | **keine Antwort** → aus der Gruppe `math.filter` entfernt (den Filtertyp wählt der Math-Operator LPAS/HPAS/BPAS/BST) |
+| `:MATH1:FFT:SEAR:RES?` ohne gefundene Peaks | eine leere Zeile |
+| `:HIST:STAT:RES?` | `[Sum:0hits, Peaks:0hits, Max:0, …, Bin width:0, Sigma:0, meanPlusSigma:*****, …]` |
+| Ablesewerte (`:CURS:MAN:AXV?` usw.) außerhalb ihres Modus | beantwortet. Die Wächter-Abfrage bleibt trotzdem, weil die Werte dann nichts bedeuten |
 | `*TST?` | bewusst nicht getestet (Selbsttest kann länger als der Timeout dauern) |
 
 Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigger`/`acquire`/`timebase`
 (`:CHANn:UNIT?/VERN?/INV?`, `:TRIG:HOLD?/SWE?`, `:ACQ:AVER?/SRAT?` usw.) und alle 14 `:LAN`-Abfragen.
 
-## Dekoder und Math (Guide-Format, noch nicht am Gerät geprüft)
+## Dekoder und Math
 
-- `:BUS<n>:DATA?` liefert laut Guide `#9…PARALLEL\nTime,Data,\n-2.47us,0,\n…`. Ob die Blocklänge
-  den Protokollnamen mitzählt, geht aus dem Beispiel nicht hervor. Der Treiber liest deshalb bis
-  zum USBTMC-Nachrichtenende (`Scpi::query_block_message`) und parst den ganzen Text.
+- `:BUS<n>:DATA?` liefert `#9…PARALLEL\nTime,Data,\n-2.47us,0,\n…`. Der Treiber liest trotzdem
+  bis zum USBTMC-Nachrichtenende (`Scpi::query_block_message`) und parst den ganzen Text.
 - `:BUS<n>:THReshold? <Leitung>` (TX, SCL, SDA, CLK, MISO, CAN, LIN, PAL) gehört als „keyed“
   Parameter zur jeweiligen Dekodergruppe. RX/CS/PALCLK fehlen bewusst: Der Guide erlaubt sie nur
   bei aktiver Quelle, und eine unbeantwortete Query kostet Budget.
@@ -142,20 +145,17 @@ Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigg
 
 - `verify <gruppe>` nimmt die Untergruppen mit (`bus` → `bus.rs232` …), die Proben `bus.data`
   und `math.peaks` aber nur, wenn sie ausdrücklich genannt werden. Sie verstellen das Scope und
-  kosten bei fehlender Antwort Budget.
-- Mit `mho954 verify` prüfen (Budget: 3 ungeprüfte Queries pro Einschaltzyklus):
-  `bus`, `bus.*`, `bus.data`, `math`, `math.fft`, `math.filter`, `math.peaks`, `dvm.value`
-  (bei eingeschaltetem DVM), `autoset`, `acquire.extra`, `channel`, `timebase.extra`, `display`,
-  `cursor*`, `save`, `histogram`, `mask`, `search`, `record`.
-- Ablesewerte (`ops.rs`) haben eine Wächter-Abfrage (z. B. `:CURS:MODE?` = MAN). Angenommen,
-  nicht belegt: Außerhalb des Modus antwortet das Scope nicht. `verify` schaltet den Modus
-  deshalb vorher ein und danach wieder aus.
+  kosten bei fehlender Antwort Budget. Set-Befehle schickt `verify` immer, auch wenn sie schon
+  geprüft sind (Setup und Restore der Proben), und vor jedem Kandidaten wird die Fehlerqueue
+  geleert.
+- Noch am Gerät zu prüfen: `dvm.value` (bei eingeschaltetem DVM), `:MATH<n>:FFT:SEAR:RES?` mit
+  echten Peaks (Format der Zeilen), Logikanalysator mit angesteckter Sonde (Bitreihenfolge
+  D15 = MSB angenommen).
 - Pfade für `:SAVE:*`/`:LOAD:*`: `C:/` oder `D:/`, Dateiname ≤ 26 Zeichen (Guide 3.21). Erlaubt
   sind nur Buchstaben, Ziffern, `_ - . /`, damit kein `;` einen zweiten Befehl einschleusen kann.
 - Parameter mit vorangestelltem Index (`:LA:DIG:ENAB D3,ON`, `:REF:SOUR 2,CHAN1`,
   `:BOD:VOLT ALL,0.5`) sind „prefixed“ in der Tabelle; Abfrage jeweils `…? <index>`.
-- `la`, `la.channel`, `reference`, `afg`, `afg.modulation`, `bode` mit `mho954 verify` prüfen.
-  `afg*` und `bode` sind auf dem Test-Scope ohne Generator nicht verfügbar und werden nicht
+- `afg*` und `bode` sind auf dem Test-Scope ohne Generator nicht verfügbar und werden nicht
   angeboten.
 - Nicht umgesetzt: `:NAVigate`, `:SAVe:SMB` (Netzlaufwerk mit Passwort), `*TST?` (Laufzeit
   länger als der Timeout), `:SOURce<n>:LOAD:ARBitrary`.

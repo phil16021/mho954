@@ -161,10 +161,34 @@ impl Scope {
             ));
         }
         self.drain_errors()?;
-        for c in [
+        // Without a logic probe the scope rejects D15D0 (-200); the decoder is put back then.
+        let mut before = Vec::new();
+        for node in ["MODE", "DISP", "PAR:BUS", "EVEN"] {
+            let v = self.scpi().query(&format!(":BUS{bus}:{node}?"))?;
+            before.push(format!(":BUS{bus}:{node} {}", v.trim()));
+        }
+        let setup = [
             format!(":BUS{bus}:MODE PAR"),
             format!(":BUS{bus}:DISP ON"),
             format!(":BUS{bus}:PAR:BUS D15D0"),
+        ];
+        for c in &setup {
+            self.scpi().write(c)?;
+        }
+        if let Err(e) = self.check_errors() {
+            for c in before.iter().rev() {
+                self.scpi().write(c)?;
+            }
+            self.drain_errors()?;
+            return Err(match e {
+                DriverError::Device(msg) => DriverError::Unsupported(format!(
+                    "the scope rejects D15..D0 as decoder source ({msg}); \
+                     is the logic probe (PLA2216) connected?"
+                )),
+                e => e,
+            });
+        }
+        for c in [
             format!(":BUS{bus}:PAR:CLK OFF"),
             format!(":BUS{bus}:FORM HEX"),
             format!(":BUS{bus}:EVEN ON"),

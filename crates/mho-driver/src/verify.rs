@@ -268,6 +268,8 @@ pub enum Outcome {
     NoAnswer,
     /// Command produced error-queue entries.
     Rejected,
+    /// Query answered but left error-queue entries: the value may be a default, not trusted.
+    AnsweredWithError,
     /// The health check after the command failed: stop immediately.
     ScopeUnresponsive,
 }
@@ -284,9 +286,20 @@ pub struct VerifyResult {
 /// Verifies one candidate. `Outcome::ScopeUnresponsive` means: stop and power-cycle.
 pub fn check(scope: &mut Scope, cand: &Candidate) -> Result<VerifyResult> {
     let timeout = cand.timeout;
+    // Earlier entries would otherwise be blamed on this candidate.
+    scope.drain_errors()?;
     let (outcome, detail) = match cand.kind {
         Kind::Query => match scope.raw(&cand.command, timeout) {
-            Ok(r) => (Outcome::Ok, r.unwrap_or_default()),
+            Ok(r) => {
+                let r = r.unwrap_or_default();
+                match scope.check_errors() {
+                    Ok(()) => (Outcome::Ok, r),
+                    Err(crate::DriverError::Device(msg)) => {
+                        (Outcome::AnsweredWithError, format!("{r} [{msg}]"))
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
             Err(e) if e.to_string().contains("power-cycle") => {
                 (Outcome::ScopeUnresponsive, e.to_string())
             }
