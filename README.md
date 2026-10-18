@@ -12,6 +12,8 @@ Control of the **Rigol MHO954** (MHO900 series) on Linux, in Rust. The program p
 - **MCP server** for LLM agents (Claude Code and others), over HTTP or stdio
 - a **simulator** that reproduces the quirks of the real instrument
 
+![Live view: CH1 square wave and CH2 sine with time cursors A/B, measurement table and controls](docs/screenshots/live.png)
+
 The connection runs over USB (own USBTMC implementation in user space, robust even over USB/IP)
 or LAN/WLAN (raw SCPI port 5555). NI-VISA is not needed.
 **Networking is optional:** the full feature set works over USB.
@@ -226,7 +228,14 @@ in blocks; `.npy` is written without an intermediate copy.
 `mho954 gui` starts the live view with an embedded server (or uses a running daemon). It
 remembers its view settings in `~/.config/mho954/gui.json`, falls back to a free port if 8954 is
 taken, and `gui --sim` always uses a free port so the CLI cannot control the simulator by
-accident.
+accident. The screenshots below were taken with `gui --sim`.
+
+![FFT with logarithmic frequency axis, Hann window and the scope's peak table](docs/screenshots/fft.png)
+
+<p>
+  <img src="docs/screenshots/bode.png" width="560" alt="Bode window: gain and phase of the simulated 10 kHz RC low-pass, live during the sweep">
+  <img src="docs/screenshots/generator.png" width="300" alt="Function generator panel with GI output on, counter and DVM readings">
+</p>
 
 - **Header:** model, bandwidth, memory depth, generator and protocol options, red indicator
   `GI ON`/`GII ON`, connection, trigger status, frame rate, progress bar for long operations.
