@@ -48,15 +48,21 @@ impl RemoteBackend {
     }
 
     /// Returns `true` if an mho954 server answers at `base` within `timeout`, including one
-    /// that refuses the request (401/403): it still owns the device.
+    /// that refuses the request (401/403): it still owns the device. A server that accepted
+    /// the connection but is slow to answer counts too: `/info` waits behind long device jobs
+    /// (a Bode sweep), and opening the scope directly would then fail with "busy".
     pub async fn probe(base: &str, timeout: Duration) -> bool {
         let url = format!("{}/api/v1/info", base.trim_end_matches('/'));
-        let Ok(client) = reqwest::Client::builder().timeout(timeout).build() else {
+        let Ok(client) = reqwest::Client::builder()
+            .connect_timeout(timeout)
+            .timeout(timeout)
+            .build()
+        else {
             return false;
         };
         match client.get(url).send().await {
             Ok(r) => r.status().is_success() || matches!(r.status().as_u16(), 401 | 403),
-            Err(_) => false,
+            Err(e) => e.is_timeout() && !e.is_connect(),
         }
     }
 
@@ -377,5 +383,30 @@ impl ScopeApi for RemoteBackend {
 
     async fn set_live_config(&self, config: LiveConfig) -> ApiResult<LiveConfig> {
         self.send(Method::PUT, "/live", &config).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn probe_counts_a_slow_server_but_not_a_missing_one() {
+        // Accepts connections but never answers, like a server busy with a long sweep.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hold = tokio::spawn(async move {
+            let mut open = Vec::new();
+            while let Ok((s, _)) = listener.accept().await {
+                open.push(s);
+            }
+        });
+        let t = Duration::from_millis(200);
+        assert!(RemoteBackend::probe(&format!("http://{addr}"), t).await);
+        hold.abort();
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = free.local_addr().unwrap().port();
+        drop(free);
+        assert!(!RemoteBackend::probe(&format!("http://127.0.0.1:{port}"), t).await);
     }
 }
