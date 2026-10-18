@@ -573,12 +573,38 @@ impl Scope {
         Ok(out)
     }
 
+    /// Screen waveform of channel `ch` once the scope has filled it. At slow timebases
+    /// (seen at 46 ms/div) the preamble still reports 0 points for a moment after the
+    /// trigger status went to STOP.
+    fn complete_screen_waveform(&mut self, ch: u8, f: f64) -> Result<crate::Waveform> {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            let w = self.screen_waveform(&format!("CHAN{ch}"), None)?;
+            if w.preamble.points >= 8 && w.raw.len() >= w.preamble.points {
+                return Ok(w);
+            }
+            if Instant::now() > deadline {
+                return Err(DriverError::State(format!(
+                    "CH{ch}: incomplete record at {f:.4e} Hz ({} of {} points)",
+                    w.raw.len(),
+                    w.preamble.points
+                )));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
     /// One single acquisition: tones `(amplitude, phase)` on input and output, and whether a
     /// channel scale had to be changed (then the caller repeats).
     fn bode_acquire(&mut self, req: &BodeRequest, f: f64) -> Result<(Tone, Tone, bool)> {
         self.action(Action::Single)?;
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while self.trigger_status()? != "STOP" {
+        let started = Instant::now();
+        // The screen spans 10 div of 0.5/f. Right after :SING the scope still reports the
+        // previous STOP for a moment; at slow timebases that was mistaken for a finished
+        // acquisition and a partial record was read ("too few periods" below ~12 Hz).
+        let window = Duration::from_secs_f64(5.0 / f);
+        let deadline = started + Duration::from_secs(5) + 2 * window;
+        while self.trigger_status()? != "STOP" || started.elapsed() < window {
             if Instant::now() > deadline {
                 return Err(DriverError::State(
                     "single acquisition did not finish".into(),
@@ -589,7 +615,7 @@ impl Scope {
         let mut tones = Vec::with_capacity(2);
         let mut rescaled = false;
         for ch in [req.input, req.output] {
-            let w = self.screen_waveform(&format!("CHAN{ch}"), None)?;
+            let w = self.complete_screen_waveform(ch, f)?;
             let v = w.volts();
             let (amp, phase) = mho_dsp::tone(&v, w.preamble.x_increment, w.preamble.time(0), f)
                 .ok_or_else(|| DriverError::State(format!("too few periods at {f:.4e} Hz")))?;
