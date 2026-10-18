@@ -1237,18 +1237,43 @@ async fn scpi_repl(api: &dyn ScopeApi) -> anyhow::Result<()> {
 
 // ---- capture ------------------------------------------------------------------------------------
 
+/// Largest record written as CSV or JSON (10 M points ≈ 400 MB of CSV).
+const TEXT_EXPORT_MAX_POINTS: usize = 10_000_000;
+
 async fn capture(
     backend: &Backend,
     source: String,
     raw: bool,
     output: &Path,
 ) -> anyhow::Result<()> {
+    let ext = output
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if raw && matches!(ext.as_str(), "csv" | "json") {
+        // CSV/JSON of a deep record would need tens of GB; refuse before the download.
+        let depth = backend.api().acquire().await?.memory_depth.unwrap_or(0.0);
+        if depth > TEXT_EXPORT_MAX_POINTS as f64 {
+            bail!(
+                "{} points are too many for .{ext}; use .npy (raw ADC codes + .json preamble)",
+                depth
+            );
+        }
+    }
     let start = Instant::now();
     let w = match (backend, raw) {
         (Backend::Local(b), true) => {
-            let progress = Arc::new(|done: usize, total: usize| {
+            let progress = Arc::new(move |done: usize, total: usize| {
+                let secs = start.elapsed().as_secs_f64();
+                let eta = if done > 0 && secs > 1.0 {
+                    let left = (total - done.min(total)) as f64 * secs / done as f64;
+                    format!(", {:.0} s left", left)
+                } else {
+                    String::new()
+                };
                 eprint!(
-                    "\r{done}/{total} points ({:.0} %)   ",
+                    "\r{done}/{total} points ({:.0} %{eta})   ",
                     100.0 * done as f64 / total.max(1) as f64
                 );
                 let _ = std::io::stderr().flush();
@@ -1265,11 +1290,6 @@ async fn capture(
         }
     };
     let secs = start.elapsed().as_secs_f64();
-    let ext = output
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
     match ext.as_str() {
         "csv" => {
             let volts = w.volts();

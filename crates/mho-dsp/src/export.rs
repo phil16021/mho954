@@ -34,7 +34,7 @@ pub fn write_csv<W: Write>(out: W, t0: f64, dt: f64, columns: &[CsvColumn<'_>]) 
 }
 
 /// Serialises raw `u16` ADC codes as a 1-D `.npy` array (format version 1.0, little endian).
-pub fn npy_bytes(raw: &[u16]) -> io::Result<Vec<u8>> {
+fn npy_header(raw: &[u16]) -> io::Result<Vec<u8>> {
     let mut header = format!(
         "{{'descr': '<u2', 'fortran_order': False, 'shape': ({},), }}",
         raw.len()
@@ -46,18 +46,32 @@ pub fn npy_bytes(raw: &[u16]) -> io::Result<Vec<u8>> {
     let header_len =
         u16::try_from(header.len()).map_err(|_| io::Error::other("npy header too long"))?;
 
-    let mut buf = Vec::with_capacity(10 + header.len() + raw.len() * 2);
+    let mut buf = Vec::with_capacity(10 + header.len());
     buf.extend_from_slice(b"\x93NUMPY\x01\x00");
     buf.extend_from_slice(&header_len.to_le_bytes());
     buf.extend_from_slice(header.as_bytes());
+    Ok(buf)
+}
+
+pub fn npy_bytes(raw: &[u16]) -> io::Result<Vec<u8>> {
+    let mut buf = npy_header(raw)?;
+    buf.reserve(raw.len() * 2);
     for v in raw {
         buf.extend_from_slice(&v.to_le_bytes());
     }
     Ok(buf)
 }
 
+/// Writes `raw` as `.npy` without building the file in memory (RAW records reach 500 Mpts).
 pub fn write_npy(path: &Path, raw: &[u16]) -> io::Result<()> {
-    std::fs::write(path, npy_bytes(raw)?)
+    use std::io::Write;
+    let mut f = io::BufWriter::with_capacity(1 << 20, std::fs::File::create(path)?);
+    f.write_all(&npy_header(raw)?)?;
+    for chunk in raw.chunks(1 << 16) {
+        let bytes: Vec<u8> = chunk.iter().flat_map(|v| v.to_le_bytes()).collect();
+        f.write_all(&bytes)?;
+    }
+    f.flush()
 }
 
 #[cfg(test)]

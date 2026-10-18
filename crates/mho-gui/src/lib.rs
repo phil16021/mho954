@@ -2,6 +2,7 @@
 
 mod app;
 mod bode;
+mod generator;
 mod prefs;
 mod settings;
 mod state;

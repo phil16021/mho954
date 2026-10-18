@@ -492,8 +492,22 @@ impl Scope {
             self.scpi.write(&format!(":ACQ:AVER {n}"))?;
         }
         if let Some(d) = &u.memory_depth {
-            self.scpi
-                .write(&format!(":ACQ:MDEP {}", token("memory_depth", d)?))?;
+            let d = token("memory_depth", d)?;
+            if let Some(points) = depth_points(d) {
+                let mut on = 0;
+                for n in 1..=CHANNELS {
+                    on += usize::from(self.channel_displayed(n)?);
+                }
+                let max = self.capabilities()?.memory_limit(on);
+                if points > max as f64 {
+                    return Err(DriverError::Invalid(format!(
+                        "memory depth {d} above the maximum of {}M with {} channel(s) on",
+                        max / 1_000_000,
+                        on.max(1)
+                    )));
+                }
+            }
+            self.scpi.write(&format!(":ACQ:MDEP {d}"))?;
         }
         self.check_errors()?;
         self.acquire()
@@ -1465,6 +1479,18 @@ fn finite(name: &str, v: f64) -> Result<()> {
     } else {
         Err(DriverError::Invalid(format!("{name} must be finite")))
     }
+}
+
+/// Points of a memory depth token (`10k`, `125M`, `1e6`, `25000000`); `None` for AUTO or
+/// anything unparsable (left to the scope).
+fn depth_points(d: &str) -> Option<f64> {
+    let u = d.trim().to_ascii_uppercase();
+    let (num, mult) = match u.as_bytes().last()? {
+        b'K' => (&u[..u.len() - 1], 1e3),
+        b'M' => (&u[..u.len() - 1], 1e6),
+        _ => (u.as_str(), 1.0),
+    };
+    num.parse::<f64>().ok().map(|v| v * mult)
 }
 
 /// Accepts a bare SCPI token (letters, digits, `.`, `+`, `-`) to prevent command injection

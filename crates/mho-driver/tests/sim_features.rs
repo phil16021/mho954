@@ -332,3 +332,25 @@ fn generator_limits_and_outputs() {
     let st = s.group_get("afg", Some(2), false).unwrap();
     assert_eq!(st["period"], ParamValue::Real(2e-4));
 }
+
+#[test]
+fn memory_depth_limited_by_channels_and_rlu05() {
+    let depth = |s: &mut Scope, d: &str| {
+        s.set_acquire(&mho_driver::AcquireUpdate {
+            memory_depth: Some(d.into()),
+            ..Default::default()
+        })
+    };
+    // CH1 and CH2 on: 250M with RLU05.
+    let mut s = sim(Default::default());
+    assert!(depth(&mut s, "250M").is_ok());
+    assert!(matches!(depth(&mut s, "500M"), Err(DriverError::Invalid(m)) if m.contains("250M")));
+    assert!(depth(&mut s, "AUTO").is_ok());
+    // Without RLU05: 50M with two channels.
+    let mut plain = sim(mho_driver::SimOptions {
+        licensed: false,
+        ..Default::default()
+    });
+    assert!(depth(&mut plain, "50M").is_ok());
+    assert!(depth(&mut plain, "100000000").is_err());
+}

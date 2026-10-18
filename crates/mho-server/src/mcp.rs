@@ -248,8 +248,10 @@ impl McpScope {
     }
 
     #[tool(
-        description = "Change acquisition: memory_depth (AUTO, 1k, 10k, 100k, 1M, 10M, 25M, 50M, 100M; up to 500M with RLU-05), \
-        acq_type (Normal|Peak|Average|HighRes), averages (power of two)."
+        description = "Change acquisition: memory_depth (AUTO, 1k, 10k, 100k, 1M, 10M, 25M, 50M, 100M, 125M, \
+        200M, 250M, 500M; the maximum depends on the active channels and RLU05: 500M/250M/125M with \
+        1/2/3-4 channels, see get_capabilities), acq_type (Normal|Peak|Average|HighRes), averages \
+        (power of two). Deep records take minutes to download (~1.3 MB/s over USB)."
     )]
     async fn configure_acquisition(&self, Parameters(p): Parameters<AcquireUpdate>) -> ToolResult {
         ok_json(&try_api!(self.api.set_acquire(p).await))

@@ -10,6 +10,7 @@ use mho_dsp::{Measurements, Window, format_si};
 use mho_service::{Frame, LiveConfig, MeasureSpec, ScopeApi, StatsRequest};
 
 use crate::bode::{BodePanel, bode_plot};
+use crate::generator::GeneratorPanel;
 use crate::prefs::{self, Prefs};
 use crate::settings::SettingsPanel;
 use crate::state::{Client, Shared};
@@ -114,10 +115,11 @@ pub struct ScopeApp {
     tools: ToolsPanel,
     bode: BodePanel,
     show_bode: bool,
+    generator: GeneratorPanel,
     /// Preferences as last written, and when.
     prefs_saved: Prefs,
     prefs_saved_at: std::time::Instant,
-    modules_requested: bool,
+    caps_requested: bool,
     options_requested: bool,
     setup_path: String,
     groups_requested: bool,
@@ -179,7 +181,8 @@ impl ScopeApp {
             tools: ToolsPanel::default(),
             bode: p.bode,
             show_bode: false,
-            modules_requested: false,
+            generator: p.generator,
+            caps_requested: false,
             options_requested: false,
             setup_path: String::new(),
             groups_requested: false,
@@ -202,8 +205,10 @@ impl ScopeApp {
             scope_peaks: sh.scope_peaks.clone(),
             readouts: sh.readouts.clone(),
             bode: sh.bode.clone(),
+            bode_previous: sh.bode_previous.clone(),
             bode_running: sh.bode_running,
-            modules: sh.modules,
+            capabilities: sh.capabilities.clone(),
+            generator_output: sh.generator_output,
             options: sh.options.clone(),
             commands: sh.commands.clone(),
             readout_values: sh.readout_values.clone(),
@@ -383,6 +388,21 @@ impl ScopeApp {
                 .map(|i| i.model.clone())
                 .unwrap_or("MHO954".into());
             ui.heading(model);
+            if let Some(c) = &s.capabilities {
+                let text = c.summary();
+                let rest = text.split_once(", ").map_or("", |(_, r)| r).to_string();
+                ui.label(RichText::new(rest).color(Color32::GRAY))
+                    .on_hover_text("effective bandwidth (1-2 channels), max. memory depth, generator, licensed protocols");
+            }
+            for (i, on) in s.generator_output.iter().enumerate() {
+                if *on == Some(true) {
+                    ui.label(
+                        RichText::new(if i == 0 { "GI ON" } else { "GII ON" })
+                            .strong()
+                            .color(Color32::LIGHT_RED),
+                    );
+                }
+            }
             let (txt, col) = match (&s.info, s.ws_connected) {
                 (Some(i), true) if i.connected => {
                     (format!("connected: {}", i.connection), Color32::LIGHT_GREEN)
@@ -577,12 +597,23 @@ impl ScopeApp {
                 .map(|d| format_si(d, ""))
                 .unwrap_or_else(|| "?".into())
         ));
+        let channels_on = st.channels.iter().filter(|c| c.display).count();
+        let depth_limit = s
+            .capabilities
+            .as_ref()
+            .map(|c| c.memory_limit(channels_on) as f64);
         ui.horizontal(|ui| {
             egui::ComboBox::from_id_salt("mdepth")
                 .selected_text("depth")
                 .width(70.0)
                 .show_ui(ui, |ui| {
-                    for d in DEPTHS {
+                    let allowed = DEPTHS
+                        .iter()
+                        .filter(|d| match (depth_parse(d), depth_limit) {
+                            (Some(v), Some(max)) => v <= max,
+                            _ => true,
+                        });
+                    for d in allowed {
                         if ui.selectable_label(false, *d).clicked() {
                             self.set_acquire(AcquireUpdate {
                                 memory_depth: Some((*d).to_string()),
@@ -689,27 +720,45 @@ impl ScopeApp {
         }
 
         ui.separator();
-        let bode = egui::CollapsingHeader::new(RichText::new("Bode sweep (AFG)").strong())
+        let max_sine = s
+            .capabilities
+            .as_ref()
+            .map(|c| c.generator.as_ref().map(|g| g.max_sine_hz));
+        let readable = s
+            .groups
+            .as_ref()
+            .and_then(|g| g.iter().find(|g| g.id == "afg"))
+            .is_some_and(|g| g.verified);
+        let gen_open =
+            egui::CollapsingHeader::new(RichText::new("Function generator (AFG)").strong())
+                .id_salt("function_generator")
+                .show(ui, |ui| match max_sine {
+                    None => {
+                        ui.spinner();
+                    }
+                    Some(m) => self
+                        .generator
+                        .ui(ui, &self.client, m, s.generator_output, readable),
+                });
+        if gen_open.body_returned.is_some() {
+            self.load_groups();
+        }
+
+        ui.separator();
+        egui::CollapsingHeader::new(RichText::new("Bode plot (AFG)").strong())
             .id_salt("bode_sweep")
             .show(ui, |ui| {
                 self.bode.ui(
                     ui,
                     &self.client,
-                    s.modules.map(|m| m.function_generator),
+                    max_sine,
                     s.bode_running,
+                    &self.capture_dir,
                 );
                 if s.bode.is_some() {
                     ui.checkbox(&mut self.show_bode, "show plot");
                 }
             });
-        if bode.body_returned.is_some() && !self.modules_requested {
-            self.modules_requested = true;
-            self.client.op(
-                "modules",
-                |api| async move { api.modules().await },
-                |sh: &mut Shared, m: mho_driver::Modules| sh.modules = Some(m),
-            );
-        }
 
         ui.separator();
         egui::CollapsingHeader::new(RichText::new("Network (RJ45)").strong())
@@ -739,6 +788,25 @@ impl ScopeApp {
                 Color32::GRAY
             }));
         }
+    }
+
+    /// Loads the capabilities once the scope is connected (again after a reconnect: a
+    /// different scope may be attached).
+    fn load_capabilities(&mut self, s: &Snapshot) {
+        let connected = s.info.as_ref().is_some_and(|i| i.connected);
+        if !connected {
+            self.caps_requested = false;
+            return;
+        }
+        if self.caps_requested {
+            return;
+        }
+        self.caps_requested = true;
+        self.client.op(
+            "capabilities",
+            |api| async move { api.capabilities().await },
+            |sh: &mut Shared, c: Capabilities| sh.capabilities = Some(c),
+        );
     }
 
     /// Loads the settings-group catalogue once.
@@ -1723,6 +1791,7 @@ impl ScopeApp {
             meas_source: self.new_meas_source.clone(),
             raw_source: self.raw_source.clone(),
             bode: self.bode.clone(),
+            generator: self.generator.clone(),
         }
     }
 
@@ -1885,8 +1954,10 @@ struct Snapshot {
     scope_peaks: Option<(u8, Vec<mho_dsp::ScopePeak>)>,
     readouts: Option<Vec<mho_driver::ops::ReadoutInfo>>,
     bode: Option<Vec<mho_driver::BodePoint>>,
+    bode_previous: Option<Vec<mho_driver::BodePoint>>,
     bode_running: bool,
-    modules: Option<mho_driver::Modules>,
+    capabilities: Option<Capabilities>,
+    generator_output: [Option<bool>; 2],
     options: Option<Vec<OptionInfo>>,
     commands: Option<Vec<mho_driver::ops::CommandInfo>>,
     readout_values: Option<(String, ParamMap)>,
@@ -1896,6 +1967,11 @@ struct Snapshot {
     progress: Option<mho_service::Progress>,
     busy: usize,
     log: Vec<(String, bool)>,
+}
+
+/// Points of a memory depth entry (`10k` → 1e4), `None` for AUTO.
+fn depth_parse(d: &str) -> Option<f64> {
+    parse_si(d)
 }
 
 /// Parses numbers with optional SI prefix and unit, e.g. `1.5m`, `200 mV`, `2us`.
@@ -1918,6 +1994,7 @@ pub(crate) fn parse_si(s: &str) -> Option<f64> {
 impl eframe::App for ScopeApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let s = self.snapshot();
+        self.load_capabilities(&s);
         self.track_math_scale(&s);
         self.persist(false);
         let local: Vec<(String, Measurements)> = s
@@ -1965,8 +2042,16 @@ impl eframe::App for ScopeApp {
             let mut open = true;
             egui::Window::new("Bode plot")
                 .open(&mut open)
-                .default_size([560.0, 420.0])
-                .show(ui.ctx(), |ui| bode_plot(ui, pts));
+                .default_size([560.0, 440.0])
+                .show(ui.ctx(), |ui| {
+                    bode_plot(
+                        ui,
+                        pts,
+                        s.bode_previous.as_deref(),
+                        &self.client,
+                        &self.capture_dir,
+                    )
+                });
             self.show_bode = open;
         }
         egui::CentralPanel::default().show(ui, |ui| {

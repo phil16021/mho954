@@ -36,11 +36,16 @@ pub struct Shared {
     /// `(scale, offset)` per math source (`MATH1`..) for the division view.
     pub math_scale: std::collections::HashMap<String, (f64, f64)>,
     pub readouts: Option<Vec<mho_driver::ops::ReadoutInfo>>,
-    /// Last Bode sweep and whether one is running.
+    /// Last Bode sweep, the one before (overlay) and whether one is running.
     pub bode: Option<Vec<mho_driver::BodePoint>>,
+    pub bode_previous: Option<Vec<mho_driver::BodePoint>>,
     pub bode_running: bool,
-    /// Hardware modules (`None` until loaded).
-    pub modules: Option<mho_driver::Modules>,
+    /// Bandwidth, memory limits, generator, licensed options (`None` until loaded).
+    pub capabilities: Option<mho_driver::Capabilities>,
+    /// Generator output state per channel as last read or set (`None` = unknown).
+    pub generator_output: [Option<bool>; 2],
+    /// Read-back of a generator channel waiting to be taken over by its form.
+    pub generator_readback: [Option<mho_driver::params::ParamMap>; 2],
     pub options: Option<Vec<mho_driver::OptionInfo>>,
     pub commands: Option<Vec<mho_driver::ops::CommandInfo>>,
     /// Last read value set: `(readout id, values)`.
@@ -59,6 +64,25 @@ pub struct Shared {
 }
 
 impl Shared {
+    /// Records a read-back of generator channel `n` (1..2).
+    pub fn set_generator_state(&mut self, n: u8, st: mho_driver::params::ParamMap) {
+        let i = (n.clamp(1, 2) - 1) as usize;
+        if let Some(mho_driver::params::ParamValue::Bool(on)) = st.get("output") {
+            self.generator_output[i] = Some(*on);
+        }
+        self.generator_readback[i] = Some(st);
+    }
+
+    pub fn take_generator_readback(&mut self, n: u8) -> Option<mho_driver::params::ParamMap> {
+        self.generator_readback[(n.clamp(1, 2) - 1) as usize].take()
+    }
+
+    /// Stores a finished Bode sweep, keeping the previous one for comparison.
+    pub fn set_bode(&mut self, pts: Vec<mho_driver::BodePoint>) {
+        self.bode_previous = self.bode.take();
+        self.bode = Some(pts);
+    }
+
     pub fn log(&mut self, msg: impl Into<String>, error: bool) {
         self.log.push_back((msg.into(), error));
         while self.log.len() > LOG_LINES {

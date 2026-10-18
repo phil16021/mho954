@@ -183,7 +183,8 @@ pub struct AcquireState {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema, ToSchema)]
 pub struct AcquireUpdate {
-    /// `AUTO`, `1k`, `10k`, `100k`, `1M`, `10M`, `25M`, `50M`, `100M` (125M…500M with RLU-05).
+    /// `AUTO`, `1k`, `10k`, `100k`, `1M`, `10M`, `25M`, `50M`, `100M`, `125M`, `200M`, `250M`,
+    /// `500M`; at most 100M/50M/25M with 1/2/3-4 channels on, 500M/250M/125M with RLU05.
     pub memory_depth: Option<String>,
     pub acq_type: Option<AcquireType>,
     /// Power of two, used with `acq_type = Average`.

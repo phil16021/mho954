@@ -7,6 +7,7 @@ use mho_dsp::Window;
 use serde::{Deserialize, Serialize};
 
 use crate::bode::BodePanel;
+use crate::generator::GeneratorPanel;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -22,6 +23,7 @@ pub struct Prefs {
     pub meas_source: String,
     pub raw_source: String,
     pub bode: BodePanel,
+    pub generator: GeneratorPanel,
 }
 
 impl Default for Prefs {
@@ -38,6 +40,7 @@ impl Default for Prefs {
             meas_source: "CHAN1".into(),
             raw_source: "CHAN1".into(),
             bode: BodePanel::default(),
+            generator: GeneratorPanel::default(),
         }
     }
 }
