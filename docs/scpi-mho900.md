@@ -158,7 +158,7 @@ wird zuletzt eingeschaltet, beim Ausschalten zuerst.
 |---|---|---|
 | `bus.canfd` | `:BUS<n>:CAN:FDBaud` 1–10 Mbit/s, `:FDSPoint` 10–90 % | AUTOA |
 | `bus.flexray` | `:BUS<n>:FLEXray:BAUD` 2,5/5/10 Mbit/s, `SOURce`, `SPOint`, `STYPe BP\|BM\|RT`, `CHANnel A\|B`; Schwelle `:BUS<n>:THR <v>,FLEX` | FlexA |
-| `bus.i2s` | `:BUS<n>:IIS:SOURce:CLOCk/DATA/WSELect`, `ALIGnment IIS\|RJ\|LJ`, `CLOCk:SLOPe`, `RWIDth`, `RECewidth`, `WSLow`, `ENDian`, `POLarity`; Schwellen `WS`, `DATA`. `:BUS<n>:THR? I2SClk` (Takt) blieb unbeantwortet → nicht in der Gruppe | AUDIOA |
+| `bus.i2s` | `:BUS<n>:IIS:SOURce:CLOCk/DATA/WSELect`, `ALIGnment IIS\|RJ\|LJ`, `CLOCk:SLOPe`, `RWIDth`, `RECewidth`, `WSLow`, `ENDian`, `POLarity`; Schwellen `CLK`, `WS`, `DATA`. Der Guide-Schlüssel `I2SClk` für den Takt ist am Gerät nur schreibbar (`:BUS<n>:THR? I2SClk` unbeantwortet); `:BUS<n>:THR <v>,I2SClk` landet im selben Wert wie `CLK` (auch im IIS-Modus geprüft), daher nutzt die Gruppe `CLK`. Die Taktschwelle ist also mit der SPI-Taktschwelle geteilt | AUDIOA |
 | `bus.m1553` | `:BUS<n>:M1553:SOURce`; Schwelle `1553` | AEROA |
 | `trigger.flexray` | `:TRIG:FLEXray:*` (BAUD, POS, ERRor, SYMBol, FRAMe, DEFine, IDCmp, CYCComp, MIN/MAXid, MIN/MAXCy, CH, SOURce, WHEN, LEVel) | FlexA |
 | `trigger.i2s` | `:TRIG:IIS:*` (ALIGnment, C/S/DLEVel, WIDTh, UWIDth, CLOCk:SLOPe, Quellen, WHEN, AUDio, DATA) | AUDIOA |

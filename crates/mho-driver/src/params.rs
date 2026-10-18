@@ -2434,8 +2434,13 @@ pub const GROUPS: &[Group] = &[
             ),
             en("endian", ":BUS{n}:IIS:ENDian", MSB_LSB, "bit order"),
             en("polarity", ":BUS{n}:IIS:POLarity", POL, "data polarity"),
-            // `:BUS<n>:THR? I2SClk` (guide token for the clock) went unanswered on the
-            // instrument, so the clock threshold is left out.
+            // The guide's clock key `I2SClk` is write-only on the instrument (its query went
+            // unanswered); writes land in the same value as key `CLK`, which can be read.
+            threshold(
+                "clock_threshold",
+                "CLK",
+                "clock threshold (shared with the SPI clock threshold)",
+            ),
             threshold("ws_threshold", "WS", "word select threshold"),
             threshold("data_threshold", "DATA", "data threshold"),
         ],
