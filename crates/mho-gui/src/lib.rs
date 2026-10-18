@@ -1,4 +1,9 @@
 //! Live view: a thin eframe client of the `mho954` REST/WebSocket API.
+//!
+//! Panels: scope plot with draggable time/level cursors, zoom, context menu, A-B measurements
+//! and gated FFT (`app`, `plot_tools`); function generator (`generator`); Bode sweep and live
+//! Bode window (`bode`); counter and DVM (`meters`); readouts and scope commands (`tools`);
+//! generic settings groups (`settings`).
 
 mod app;
 mod bode;

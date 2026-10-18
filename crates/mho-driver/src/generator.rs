@@ -238,6 +238,12 @@ pub fn check_update(
     Ok(())
 }
 
+/// Splits modulation settings into `enable`/`type` and the parameters, written in that order.
+pub fn split_modulation(m: ParamMap) -> (ParamMap, ParamMap) {
+    m.into_iter()
+        .partition(|(k, _)| k == "enable" || k == "type")
+}
+
 impl crate::Scope {
     /// Changes generator channel `n` in one go: output off first (if asked), then waveform
     /// settings and modulation, output on last. Returns the channel's state if group `afg`
@@ -257,8 +263,13 @@ impl crate::Scope {
         if !settings.is_empty() {
             state = self.group_set("afg", Some(n), &settings, false)?;
         }
-        if !modulation.is_empty() {
-            self.group_set("afg.modulation", Some(n), &modulation, false)?;
+        // Switching modulation on or changing its type resets its parameters (seen on the
+        // device: AM depth 40 % became 100 %), so state and type go first.
+        let (head, rest) = split_modulation(modulation);
+        for m in [head, rest] {
+            if !m.is_empty() {
+                self.group_set("afg.modulation", Some(n), &m, false)?;
+            }
         }
         if update.output == Some(true) {
             state = self.group_set("afg", Some(n), &output(true), false)?;
@@ -285,6 +296,22 @@ mod tests {
 
     fn map(kv: &[(&str, ParamValue)]) -> ParamMap {
         kv.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    }
+
+    #[test]
+    fn modulation_state_goes_first() {
+        let u = GeneratorUpdate {
+            modulation: Some("am".into()),
+            mod_depth: Some(40.0),
+            mod_frequency: Some(10.0),
+            ..Default::default()
+        };
+        let (head, rest) = split_modulation(u.modulation_settings().unwrap());
+        assert_eq!(head.keys().collect::<Vec<_>>(), ["enable", "type"]);
+        assert_eq!(
+            rest.keys().collect::<Vec<_>>(),
+            ["am_depth", "am_frequency"]
+        );
     }
 
     #[test]

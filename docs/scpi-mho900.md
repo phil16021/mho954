@@ -1,8 +1,9 @@
 # MHO900 SCPI – verifizierte Notizen
 
 Quelle: *MHO900 Programming Guide* (Rigol, Feb. 2026, 518 S.) plus Messungen am eigenen
-MHO954 (Serie `MHO9X000000000`, `*IDN?`-Firmware `00.01.00`, USB über USB/IP vom Windows-Host).
-„Gerät“ = am Scope beobachtet, „Guide“ = laut Programmierhandbuch.
+MHO954 (Serie `MHO9X000000000`, `*IDN?`-Firmware `00.01.00`). Bis 2026-10-18 hing es per USB/IP
+am Windows-Host; seit dem Upgrade (800 MHz, 500 Mpts, AFG, Protokoll-Optionen) per USB und LAN
+(192.168.1.109). „Gerät“ = am Scope beobachtet, „Guide“ = laut Programmierhandbuch.
 
 ## Transport
 
@@ -21,14 +22,15 @@ nusb). Der Kernel-Treiber `usbtmc` (`-c usbtmc`) bleibt als Alternative.
 | Kernel-Treiber `usbtmc` | Transfers > 4 KiB laufen über `usbtmc_generic_read`, das über USB/IP zu früh endet (Rest = „wrong MsgID“); mit `-c usbtmc` sind Reads daher auf 4080 Bytes begrenzt. `ABORT_BULK_IN` hängt im Kernel (D-State) → nie verwenden. Nach Desync („wrong bTag“) hilft nur ein Neustart | Gerät, Kernel-Quelltext |
 | `*OPC?` | liefert `1` (anders als bei DHO800/900, wo es immer `0` liefert) | Gerät |
 | `:SYST:VERS?` | `3.0` (SCPI-Version, nicht die Firmware) | Gerät, Guide |
-| LAN | `:LAN:STAT?` → `UNLINK`, `:LAN:IPAD?` → `0.0.0.0` (kein Kabel) | Gerät |
-| TCP | kein Device Clear im Raw-Socket-Protokoll → der Transport baut die Verbindung neu auf | Implementierung |
+| LAN | ohne Kabel `:LAN:STAT?` → `UNLINK`, `:LAN:IPAD?` → `0.0.0.0`; mit Kabel (DHCP) `CONNECTED`, 192.168.1.109 | Gerät |
+| TCP | kein Device Clear im Raw-Socket-Protokoll → der Transport baut die Verbindung neu auf. Am Gerät geprüft (2026-10-18): IDN, Status, Optionen, Benchmark, RAW 10M bitgleich zu USB. Unbekannte Queries nur über USB prüfen | Gerät, Implementierung |
 
-## Messwerte am Gerät (USB/IP, Userspace-USBTMC, 64-KiB-Requests)
+## Messwerte am Gerät
 
-Nach dem Upgrade (2026-10-18, USB direkt bzw. LAN 192.168.1.109): `*IDN?` 25 ms (USB) /
+**Nach dem Upgrade** (2026-10-18, USB direkt bzw. LAN 192.168.1.109): `*IDN?` 25 ms (USB) /
 29 ms (LAN), RAW 10M Punkte WORD (20 MB) 16,9 s ≈ 1,18 MB/s über USB, 21,7 s ≈ 0,92 MB/s über
-LAN; beide Dateien bitgleich.
+LAN; beide Dateien bitgleich. RAW 500M Punkte (1 GB, 20 ms/div, 2 GSa/s) über USB 718 s
+≈ 1,39 MB/s, 995 MB RAM.
 
 - Die Speichertiefe ist eine Obergrenze: Bei 200 µs/div (2 ms Fenster, max. 4 GSa/s) enthält
   der Speicher nur ≈ 10M Punkte, auch bei `MDEP 500M`. Volle 500M brauchen ≥ 12,5 ms/div
@@ -36,6 +38,8 @@ LAN; beide Dateien bitgleich.
 - Die Präambel meldet im RAW-Modus das eingestellte Lesefenster `:WAV:STAR`..`:WAV:STOP`, nicht
   den Datensatz, und reicht bis 500 000 000 (Guide: 50 000 000). Der RAW-Abruf öffnet das
   Fenster deshalb vorher auf `:ACQ:MDEP?`.
+
+**Vor dem Upgrade** (USB/IP vom Windows-Host, Userspace-USBTMC, 64-KiB-Requests):
 
 | Vorgang | Zeit |
 |---|---|
@@ -121,7 +125,7 @@ Gruppen mit Option prüfen die Lizenz vor jedem Lesen und Schreiben (`requires: 
 | `:SOUR<n>:IMP` | `OMEG` (High-Z) / `FIFTy` (50 Ω): erwartete Last, bestimmt die angezeigte Amplitude | Guide |
 | `:SOUR<n>:PHAS:SYNC` | „Align phase“ für GI und GII (Befehl `afg.align_phase`) | Guide |
 | `:SOUR<n>:LOAD:ARB <C:/…\|D:/…>` | lädt eine Arb-Datei vom Scope/USB-Stick; ein SCPI-Upload existiert nicht (Befehle `afg1.load_arb`, `afg2.load_arb`, Ablesewert `afg.arb`) | Guide |
-| `:SOUR<n>:MOD:*` | AM/FM/PM mit internem Modulator (Gruppe `afg.modulation`) | Guide |
+| `:SOUR<n>:MOD:*` | AM/FM/PM mit internem Modulator (Gruppe `afg.modulation`). Einschalten bzw. Typwechsel setzt die Parameter zurück (AM-Tiefe 40 % vor `:MOD:STAT ON`/`:MOD:TYP AM` geschrieben → 100 %); das Programm schreibt Zustand und Typ deshalb zuerst | Guide, Gerät |
 | Bündel-, Sweep-, Burst-, Kopplungsbefehle | gibt es nicht | Guide |
 
 Die Grenzen werden vor dem Schreiben geprüft (`crates/mho-driver/src/generator.rs`). Der Ausgang
@@ -194,10 +198,13 @@ Utility → About.
 
 ## Verifikation am Gerät (`mho954 verify`, Ergebnisse in `docs/verified-commands.json`)
 
+`detail` in `docs/verified-commands.json` ist die Antwort zum Zeitpunkt der Prüfung (die
+Options-Abfragen stammen von vor dem Upgrade, daher dort `0`).
+
 | Befehl | Ergebnis |
 |---|---|
-| `:SYST:OPT:STAT? <token>` für alle 11 Tokens (BWU05T08 … BND) | beantwortet, alle `0` (keine Option installiert) |
-| `:SYST:MOD?` | `1,0,0,0,0` → Logikanalysator-Hardware vorhanden, Funktionsgenerator (DG) nicht |
+| `:SYST:OPT:STAT? <token>` für alle 11 Tokens (BWU05T08 … BND) | beantwortet; vor dem Upgrade alle `0`, danach `1` für BWU05T08, RLU-05, AFG50, AFG100, CAN-FD, FLEX, AUDio, AERO |
+| `:SYST:MOD?` | `1,0,0,0,0`, vor und nach dem Upgrade: das zweite Feld (DG) spiegelt die AFG-Lizenz nicht wider, der Generator arbeitet trotzdem (siehe „Upgrade-Optionen“) |
 | `*ESR?`, `*STB?`, `*CLS` | beantwortet bzw. angenommen |
 | Compound mit parametrierten Abfragen `:MEAS:STAT:ITEM? CURR,…;:MEAS:STAT:ITEM? AVER,…` | **falsch**: Jede Position liefert den Wert der letzten Teilabfrage → Statistik einzeln abfragen |
 | `:MEAS:STAT:ITEM? <CURR\|AVER\|MIN\|MAX\|DEV\|CNT>,<item>,<src>` einzeln | korrekt (z. B. VRMS CH3: 1,21 mV / 1,23 mV / 1,05 mV / 1,35 mV / 39,5 µV / 1000) |
@@ -236,9 +243,10 @@ Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigg
 
 ## Offene Punkte
 
-- `verify <gruppe>` nimmt die Untergruppen mit (`bus` → `bus.rs232` …), die Proben `bus.data`
-  und `math.peaks` aber nur, wenn sie ausdrücklich genannt werden. Sie verstellen das Scope und
-  kosten bei fehlender Antwort Budget. Set-Befehle schickt `verify` immer, auch wenn sie schon
+- `verify <gruppe>` nimmt die Untergruppen mit (`bus` → `bus.rs232` …), die festen Proben
+  (`bus.data`, `math.peaks`, `dvm.value`, `system.dg` …) aber nur, wenn sie ausdrücklich genannt
+  werden; ohne Gruppenangabe läuft alles. `bus.data` und `math.peaks` verstellen das Scope dafür
+  kurz, alle kosten bei fehlender Antwort Budget. Set-Befehle schickt `verify` immer, auch wenn sie schon
   geprüft sind (Setup und Restore der Proben), und vor jedem Kandidaten wird die Fehlerqueue
   geleert.
 - Noch am Gerät zu prüfen: `:MATH<n>:FFT:SEAR:RES?` mit
@@ -248,15 +256,18 @@ Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigg
   sind nur Buchstaben, Ziffern, `_ - . /`, damit kein `;` einen zweiten Befehl einschleusen kann.
 - Parameter mit vorangestelltem Index (`:LA:DIG:ENAB D3,ON`, `:REF:SOUR 2,CHAN1`,
   `:BOD:VOLT ALL,0.5`) sind „prefixed“ in der Tabelle; Abfrage jeweils `…? <index>`.
-- `afg*`, `bode*` und die Options-Gruppen sind seit dem Upgrade verfügbar, aber noch am Gerät
-  zu prüfen (siehe unten, Reihenfolge der Prüfblöcke).
 - Nicht umgesetzt: `:NAVigate`, `:SAVe:SMB` (Netzlaufwerk mit Passwort), `*TST?` (Laufzeit
   länger als der Timeout).
 
-### Prüfblöcke nach dem Upgrade (je Block ein Einschaltzyklus, über USB)
+### Prüfblöcke nach dem Upgrade (erledigt 2026-10-18; Vorlage für eine neue Firmware)
 
-`verify` überspringt nach einer unbeantworteten Query den Rest der Gruppe und ihre
-Untergruppen; ein fehlender Generator kostet so 1 statt 3 Budget-Einheiten.
+Alle fünf Blöcke liefen am 2026-10-18 in einem Einschaltzyklus mit 2 von 3 Budget-Einheiten
+(unbeantwortet: `:BOD:PHASE:ENAB?`, `:BUS1:THR? I2SClk`). Nach einem Firmware-Update so wiederholen.
+
+`verify` überspringt den Rest einer Gruppe und ihre Untergruppen, wenn schon die erste Query der
+Gruppe unbeantwortet bleibt (die Gruppe fehlt dann vermutlich ganz); ein fehlender Generator kostet
+so 1 statt 3 Budget-Einheiten. Wurde eine Query der Gruppe beantwortet, gilt ein späterer Ausfall
+als einzelner falscher Befehl, und die Prüfung läuft weiter.
 
 | Block | Befehl | Aufbau |
 |---|---|---|
@@ -268,4 +279,4 @@ Untergruppen; ein fehlender Generator kostet so 1 statt 3 Budget-Einheiten.
 
 Danach `~/.local/state/mho954/verified.json` in `docs/verified-commands.json` übernehmen und
 neu bauen; Hardwaretests: `MHO954_HW=1 MHO954_HW_AFG=1 cargo test -p mho-driver --test hw --
---ignored --test-threads=1`.
+--ignored --test-threads=1` (`MHO954_HW_BODE=1` mit T-Stück, `MHO954_HW_CONN=tcp:…` für LAN).

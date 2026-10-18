@@ -1,8 +1,9 @@
 //! SCPI transport layer for Rigol oscilloscopes.
 //!
-//! [`Transport`] abstracts the byte pipe (Linux `usbtmc` kernel driver, raw TCP socket on
-//! port 5555, or a scripted mock), [`Scpi`] adds message framing on top: line responses,
-//! IEEE 488.2 definite-length blocks and automatic recovery after timeouts.
+//! [`Transport`] abstracts the byte pipe: USBTMC in user space over nusb (the default; robust
+//! over USB/IP, skips stale replies, never sends ABORT), the Linux `usbtmc` kernel driver, a raw
+//! TCP socket on port 5555, or a scripted mock. [`Scpi`] adds message framing on top: line
+//! responses, IEEE 488.2 definite-length blocks and automatic recovery after timeouts.
 
 mod block;
 mod error;

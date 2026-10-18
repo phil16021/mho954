@@ -674,7 +674,7 @@ async fn measure_action(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Hardware frequency counter reading (`null` = off or no signal).
+/// Hardware frequency counter reading (`null` = no valid reading; 409 while the counter is off).
 #[utoipa::path(get, path = "/api/v1/counter", responses((status = 200, body = Option<f64>)))]
 async fn counter(State(s): State<AppState>) -> HttpResult<Json<Option<f64>>> {
     Ok(Json(s.backend.counter_value().await?))

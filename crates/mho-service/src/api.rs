@@ -232,9 +232,13 @@ pub trait ScopeApi: Send + Sync + 'static {
                 .group_set("afg".into(), Some(channel), settings, false)
                 .await?;
         }
-        if !modulation.is_empty() {
-            self.group_set("afg.modulation".into(), Some(channel), modulation, false)
-                .await?;
+        // State and type first: changing them resets the modulation parameters.
+        let (head, rest) = mho_driver::generator::split_modulation(modulation);
+        for m in [head, rest] {
+            if !m.is_empty() {
+                self.group_set("afg.modulation".into(), Some(channel), m, false)
+                    .await?;
+            }
         }
         if update.output == Some(true) {
             state = self

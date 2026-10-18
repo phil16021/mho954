@@ -3,6 +3,8 @@
 //! * [`Device`] owns the [`mho_driver::Scope`] on a dedicated thread and serialises access.
 //! * [`LocalBackend`] implements [`ScopeApi`] on top of it and runs the live acquisition loop.
 //! * [`RemoteBackend`] implements the same trait against a running `mho954 serve` daemon.
+//! * The live hub publishes frames, measurements, errors, progress of long operations and the
+//!   state of every Bode sweep ([`LiveEvent`]); the WebSocket forwards them to all viewers.
 
 mod api;
 mod device;

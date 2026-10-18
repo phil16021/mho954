@@ -2,6 +2,14 @@
 //!
 //! [`Scope`] wraps a [`mho_scpi::Scpi`] session with typed getters/setters; [`SimTransport`]
 //! emulates the instrument for development and tests without hardware.
+//!
+//! * [`caps`]: what this scope can do (bandwidth after upgrades, memory limits, generator,
+//!   licensed protocols), derived from `*IDN?`, the options and `:SYST:MOD?`.
+//! * [`params`] / [`ops`]: tables of settings groups, readouts and one-shot commands, from
+//!   which validation, all frontends and the verification candidates are derived. Reading is
+//!   gated on queries confirmed on the instrument (`docs/verified-commands.json`, [`verify`]).
+//! * [`generator`]: function generator limits and typed updates; [`analysis`]: software and
+//!   scope-native Bode plots, logic-analyzer capture.
 
 pub mod analysis;
 pub mod caps;

@@ -1,5 +1,6 @@
-//! Signal processing on captured waveforms: amplitude/timing measurements, FFT,
-//! min/max decimation for display and file export.
+//! Signal processing on captured waveforms: amplitude/timing measurements, FFT, single-tone
+//! DFT and Bode evaluation (corner, crossovers, margins, unwrapped phase), parsing of the
+//! scope's decoder and FFT-peak tables, min/max decimation for display, and CSV/NPY/VCD export.
 
 pub mod bode;
 pub mod decimate;
