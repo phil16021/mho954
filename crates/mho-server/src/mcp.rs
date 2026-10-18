@@ -488,7 +488,8 @@ impl McpScope {
         description = "Read a set of values from the scope: cursor.manual / cursor.track (cursor \
         positions and deltas; set group `cursor.manual`/`cursor.track` with activate=true first), mask \
         (pass/fail counts; group `mask`), search (number of found events; group `search`), histogram \
-        (statistics; group `histogram`), save (1 = last save finished), afg.arb (loaded arbitrary \
+        (statistics; group `histogram`; for vertical histograms the scope's sigma is wrong on \
+        firmware 00.01.00, use measurement ACRMS), save (1 = last save finished), afg.arb (loaded arbitrary \
         files). enable=true switches an inactive mode on first (changes the scope's display)."
     )]
     async fn read_values(&self, Parameters(p): Parameters<ReadoutArg>) -> ToolResult {

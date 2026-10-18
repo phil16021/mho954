@@ -152,7 +152,7 @@ impl ToolsPanel {
             && let Some(info) = readouts.iter().find(|r| &r.id == id)
         {
             egui::Grid::new("readout_values")
-                .num_columns(2)
+                .num_columns(3)
                 .striped(true)
                 .show(ui, |ui| {
                     for (k, v) in map {
@@ -163,7 +163,14 @@ impl ToolsPanel {
                             .map(|(_, u)| u.as_str())
                             .unwrap_or("");
                         ui.label(k);
-                        ui.label(RichText::new(show(v, unit)).monospace());
+                        let shown = ui.label(RichText::new(show(v, unit)).monospace());
+                        if id == "histogram" && k == "statistics.sigma" {
+                            shown.on_hover_text(
+                                "vertical histograms: firmware 00.01.00 reports a wrong sigma \
+                                 (e.g. 3 mV for a 1 Vpp sine); use the ACRMS measurement",
+                            );
+                            ui.label(RichText::new("see tooltip").small().color(Color32::YELLOW));
+                        }
                         ui.end_row();
                     }
                 });

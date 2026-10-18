@@ -212,6 +212,7 @@ Utility → About.
 | `:MATH1:FILT:TYPE?` | **keine Antwort** → aus der Gruppe `math.filter` entfernt (den Filtertyp wählt der Math-Operator LPAS/HPAS/BPAS/BST) |
 | `:MATH1:FFT:SEAR:RES?` ohne gefundene Peaks | eine leere Zeile |
 | `:HIST:STAT:RES?` | `[Sum:0hits, Peaks:0hits, Max:0, …, Bin width:0, Sigma:0, meanPlusSigma:*****, …]` |
+| `:HIST:STAT:RES?` vertikal (`:HIST:TYPE VERT`, 2026-10-18, FW 00.01.00) | **`Sigma` falsch**: Sinus 1 Vpp an CH1 → `Sigma:3.024mV`, obwohl `ACRMS` 354,5 mV misst und `meanPlusSigma:0.508967` (50 % innerhalb ±σ, wie beim Sinus) zu σ ≈ 354 mV passt. Max/Min/Pk_Pk/Mean/Mode/Peaks/Sum stimmen. Horizontal ist `Sigma` richtig (57,73 µs bei Gleichverteilung über 200 µs = 200/√12). Für die Streuung der Spannung `ACRMS` verwenden |
 | Ablesewerte (`:CURS:MAN:AXV?` usw.) außerhalb ihres Modus | beantwortet. Die Wächter-Abfrage bleibt trotzdem, weil die Werte dann nichts bedeuten |
 | `*TST?` | bewusst nicht getestet (Selbsttest kann länger als der Timeout dauern) |
 
