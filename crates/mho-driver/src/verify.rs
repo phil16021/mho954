@@ -32,13 +32,24 @@ pub struct Candidate {
     pub kind: Kind,
     /// Guide reference or reason.
     pub note: String,
+    /// How long to wait for an answer.
+    pub timeout: Duration,
+    /// Hand-picked probe (changes settings, may cost budget): only run when its group is named
+    /// exactly, never as a subgroup of a broader selection (`verify bus` skips `bus.data`).
+    pub explicit: bool,
 }
+
+/// Answer timeout for settings read-backs.
+pub const QUERY_TIMEOUT: Duration = Duration::from_millis(1500);
+/// Answer timeout for queries that make the scope compile a table (decoder events, FFT peaks).
+pub const SLOW_QUERY_TIMEOUT: Duration = Duration::from_secs(8);
 
 struct Fixed {
     group: &'static str,
     command: &'static str,
     kind: Kind,
     note: &'static str,
+    slow: bool,
 }
 
 const fn q(group: &'static str, command: &'static str, note: &'static str) -> Fixed {
@@ -47,6 +58,18 @@ const fn q(group: &'static str, command: &'static str, note: &'static str) -> Fi
         command,
         kind: Kind::Query,
         note,
+        slow: false,
+    }
+}
+
+/// A query that may take several seconds to answer.
+const fn qs(group: &'static str, command: &'static str, note: &'static str) -> Fixed {
+    Fixed {
+        group,
+        command,
+        kind: Kind::Query,
+        note,
+        slow: true,
     }
 }
 
@@ -56,6 +79,7 @@ const fn c(group: &'static str, command: &'static str, note: &'static str) -> Fi
         command,
         kind: Kind::Command,
         note,
+        slow: false,
     }
 }
 
@@ -131,7 +155,7 @@ const FIXED: &[Fixed] = &[
     // The event table is only read with the decoder and its table on; restored afterwards.
     c("bus.data", ":BUS1:DISP ON", "decoder 1 on (guide 3.4.2)"),
     c("bus.data", ":BUS1:EVEN ON", "event table on (guide 3.4.4)"),
-    q("bus.data", ":BUS1:DATA?", "guide 3.4.6 (block + text)"),
+    qs("bus.data", ":BUS1:DATA?", "guide 3.4.6 (block + text)"),
     c("bus.data", ":BUS1:EVEN OFF", "restore"),
     c("bus.data", ":BUS1:DISP OFF", "restore"),
     // Peak results with FFT and peak search on; restored afterwards.
@@ -146,7 +170,7 @@ const FIXED: &[Fixed] = &[
         ":MATH1:FFT:SEAR:ENAB ON",
         "peak search on (guide 3.16.25)",
     ),
-    q(
+    qs(
         "math.peaks",
         ":MATH1:FFT:SEAR:RES?",
         "guide 3.16.30 (several lines)",
@@ -166,6 +190,12 @@ pub fn candidates() -> Vec<Candidate> {
             command: f.command.into(),
             kind: f.kind,
             note: f.note.into(),
+            timeout: if f.slow {
+                SLOW_QUERY_TIMEOUT
+            } else {
+                QUERY_TIMEOUT
+            },
+            explicit: true,
         })
         .collect();
     for g in crate::params::GROUPS {
@@ -175,6 +205,8 @@ pub fn candidates() -> Vec<Candidate> {
                 command: q,
                 kind: Kind::Query,
                 note: g.title.into(),
+                timeout: QUERY_TIMEOUT,
+                explicit: false,
             });
         }
     }
@@ -185,6 +217,8 @@ pub fn candidates() -> Vec<Candidate> {
             command: command.into(),
             kind: Kind::Command,
             note: note.into(),
+            timeout: QUERY_TIMEOUT,
+            explicit: false,
         };
         out.extend(r.setup.iter().map(|c| cmd(c, "enable the mode")));
         for q in crate::ops::readout_queries(r) {
@@ -193,11 +227,26 @@ pub fn candidates() -> Vec<Candidate> {
                 command: q,
                 kind: Kind::Query,
                 note: r.title.into(),
+                timeout: QUERY_TIMEOUT,
+                explicit: false,
             });
         }
         out.extend(r.restore.iter().map(|c| cmd(c, "restore")));
     }
     out
+}
+
+/// The candidates `verify <groups>` runs: a named group plus its subgroups (`bus` →
+/// `bus.rs232`, …), except hand-picked probes, which need their exact name. No names: all.
+pub fn select(all: Vec<Candidate>, groups: &[String]) -> Vec<Candidate> {
+    all.into_iter()
+        .filter(|c| {
+            groups.is_empty()
+                || groups.iter().any(|g| {
+                    *g == c.group || (!c.explicit && c.group.starts_with(&format!("{g}.")))
+                })
+        })
+        .collect()
 }
 
 pub fn groups() -> Vec<String> {
@@ -234,7 +283,7 @@ pub struct VerifyResult {
 
 /// Verifies one candidate. `Outcome::ScopeUnresponsive` means: stop and power-cycle.
 pub fn check(scope: &mut Scope, cand: &Candidate) -> Result<VerifyResult> {
-    let timeout = Duration::from_millis(1500);
+    let timeout = cand.timeout;
     let (outcome, detail) = match cand.kind {
         Kind::Query => match scope.raw(&cand.command, timeout) {
             Ok(r) => (Outcome::Ok, r.unwrap_or_default()),
@@ -261,4 +310,40 @@ pub fn check(scope: &mut Scope, cand: &Candidate) -> Result<VerifyResult> {
         outcome,
         detail,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(groups: &[&str]) -> Vec<String> {
+        let g: Vec<String> = groups.iter().map(|g| g.to_string()).collect();
+        let mut out: Vec<String> = Vec::new();
+        for c in select(candidates(), &g) {
+            if !out.contains(&c.group) {
+                out.push(c.group);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn probes_need_their_exact_name() {
+        let bus = names(&["bus"]);
+        assert!(bus.contains(&"bus".to_string()));
+        assert!(bus.contains(&"bus.rs232".to_string()));
+        assert!(!bus.contains(&"bus.data".to_string()));
+        assert_eq!(names(&["bus.data"]), ["bus.data"]);
+        assert!(!names(&["math"]).contains(&"math.peaks".to_string()));
+        assert!(names(&[]).contains(&"math.peaks".to_string()));
+    }
+
+    #[test]
+    fn table_queries_wait_longer() {
+        let all = candidates();
+        let t = |cmd: &str| all.iter().find(|c| c.command == cmd).unwrap().timeout;
+        assert_eq!(t(":BUS1:DATA?"), SLOW_QUERY_TIMEOUT);
+        assert_eq!(t(":MATH1:FFT:SEAR:RES?"), SLOW_QUERY_TIMEOUT);
+        assert_eq!(t(":BUS1:MODE?"), QUERY_TIMEOUT);
+    }
 }

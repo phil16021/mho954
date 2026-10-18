@@ -1036,5 +1036,35 @@
     "group": "measure.stats",
     "outcome": "ok",
     "detail": "0.0000E+00"
+  },
+  {
+    "command": ":BUS1:DISP ON",
+    "group": "bus.data",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":BUS1:EVEN ON",
+    "group": "bus.data",
+    "outcome": "ok",
+    "detail": ""
+  },
+  {
+    "command": ":BUS1:DATA?",
+    "group": "bus.data",
+    "outcome": "no_answer",
+    "detail": "invalid argument: no answer to `:BUS1:DATA?` (unknown query?)"
+  },
+  {
+    "command": ":BUS1:EVEN OFF",
+    "group": "bus.data",
+    "outcome": "rejected",
+    "detail": "-200: Command execute failed"
+  },
+  {
+    "command": ":BUS1:DISP OFF",
+    "group": "bus.data",
+    "outcome": "ok",
+    "detail": ""
   }
 ]

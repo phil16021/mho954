@@ -1440,7 +1440,7 @@ async fn verify_cmd(
     output: Option<std::path::PathBuf>,
 ) -> anyhow::Result<()> {
     use mho_driver::verify::{
-        Kind, Outcome, UNKNOWN_QUERY_BUDGET, VerifyResult, candidates, check,
+        Kind, Outcome, UNKNOWN_QUERY_BUDGET, VerifyResult, candidates, check, select,
     };
     let all = candidates();
     if list {
@@ -1473,15 +1473,7 @@ async fn verify_cmd(
     }
     ensure_no_daemon(cli, cfg).await?;
 
-    let selected: Vec<_> = all
-        .into_iter()
-        .filter(|c| {
-            groups.is_empty()
-                || groups
-                    .iter()
-                    .any(|g| *g == c.group || c.group.starts_with(&format!("{g}.")))
-        })
-        .collect();
+    let selected = select(all, &groups);
     if selected.is_empty() {
         bail!("no candidates for {groups:?} (see `mho954 verify --list`)");
     }
@@ -1496,7 +1488,11 @@ async fn verify_cmd(
         let mut scope = Scope::open(&conn)?;
         let mut stop = None;
         for cand in selected {
-            if results.iter().any(|r| r.command == cand.command && r.outcome == Outcome::Ok) {
+            let confirmed = cand.kind == Kind::Query
+                && mho_driver::params::query_verified(&cand.command);
+            if confirmed
+                || results.iter().any(|r| r.command == cand.command && r.outcome == Outcome::Ok)
+            {
                 println!("{:<32} already verified", cand.command);
                 continue;
             }

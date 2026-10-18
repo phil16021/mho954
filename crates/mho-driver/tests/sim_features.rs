@@ -10,7 +10,10 @@ fn strict_simulator_refuses_unverified_queries() {
     assert!(!s.trusts_unverified());
     assert!(matches!(s.bus_data(1), Err(DriverError::Unsupported(_))));
     assert!(matches!(s.dvm_value(), Err(DriverError::Unsupported(_))));
-    assert!(matches!(s.logic_capture(1), Err(DriverError::Unsupported(_))));
+    assert!(matches!(
+        s.logic_capture(1),
+        Err(DriverError::Unsupported(_))
+    ));
     assert!(matches!(
         s.group_get("bus.spi", Some(1), false),
         Err(DriverError::Unsupported(_))

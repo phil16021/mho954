@@ -114,6 +114,9 @@ Utility → About.
 | Compound `:TIM:SCAL?;:CHAN1:SCAL?` | eine Zeile, Werte mit `;` getrennt. Das Scope braucht aber ~20 ms je Teilabfrage (10 Abfragen: 0,2 s statt 0,25 s); der Gewinn ist also klein |
 | `:WAV:SOUR D0` | **abgelehnt** (`-200 Command execute failed`) → Digitalkanäle nicht über `:WAV:DATA?` lesbar |
 | `:MEAS:ITEM VPP,CHAN1` (Set-Form) | angenommen (Messung anlegen ohne Abfrage) |
+| `:BUS1:DISP ON`, `:BUS1:EVEN ON` (Standard-Dekoder, Scope läuft, kein Signal) | angenommen |
+| `:BUS1:DATA?` direkt danach | **keine Antwort innerhalb 1,5 s** (2026-10-18). Der nächste Versuch nutzt eine Frist von 8 s; erst danach ist geklärt, ob die Abfrage zu langsam ist oder auf dieser Firmware fehlt |
+| `:BUS1:EVEN OFF` nach der unbeantworteten Abfrage | abgelehnt (`-200 Command execute failed`); `:BUS1:DISP OFF` angenommen |
 | `*TST?` | bewusst nicht getestet (Selbsttest kann länger als der Timeout dauern) |
 
 Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigger`/`acquire`/`timebase`
@@ -137,6 +140,9 @@ Bereits durch Hardware-Tests belegt: alle Abfragen von `status`/`channel`/`trigg
 
 ## Offene Punkte
 
+- `verify <gruppe>` nimmt die Untergruppen mit (`bus` → `bus.rs232` …), die Proben `bus.data`
+  und `math.peaks` aber nur, wenn sie ausdrücklich genannt werden. Sie verstellen das Scope und
+  kosten bei fehlender Antwort Budget.
 - Mit `mho954 verify` prüfen (Budget: 3 ungeprüfte Queries pro Einschaltzyklus):
   `bus`, `bus.*`, `bus.data`, `math`, `math.fft`, `math.filter`, `math.peaks`, `dvm.value`
   (bei eingeschaltetem DVM), `autoset`, `acquire.extra`, `channel`, `timebase.extra`, `display`,
