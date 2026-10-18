@@ -814,8 +814,25 @@ impl ScopeApp {
         self.caps_requested = true;
         self.client.op(
             "capabilities",
-            |api| async move { api.capabilities().await },
-            |sh: &mut Shared, c: Capabilities| sh.capabilities = Some(c),
+            |api| async move {
+                let caps = api.capabilities().await?;
+                // Output state of both generator channels, for the header and the panel.
+                let mut outputs = Vec::new();
+                if caps.generator.is_some() {
+                    for n in 1..=2u8 {
+                        if let Ok(st) = api.group_get("afg".into(), Some(n)).await {
+                            outputs.push((n, st));
+                        }
+                    }
+                }
+                Ok((caps, outputs))
+            },
+            |sh: &mut Shared, (c, outputs): (Capabilities, Vec<(u8, ParamMap)>)| {
+                sh.capabilities = Some(c);
+                for (n, st) in outputs {
+                    sh.set_generator_state(n, st);
+                }
+            },
         );
     }
 
@@ -1562,9 +1579,17 @@ impl ScopeApp {
             .map(|s| s.timebase.scale)
             .unwrap_or((t1 - t0) / H_DIVS);
 
-        // A cursor under the pointer is dragged instead of panning the view.
+        // A cursor under the pointer is dragged instead of panning the view. While the
+        // button is down the press position counts: egui reports the drag only after the
+        // pointer has moved a few pixels, by then it may be off the cursor line.
         let near = self.view.drag.or_else(|| {
-            let pos = ui.ctx().pointer_hover_pos()?;
+            let pos = ui.input(|i| {
+                if i.pointer.primary_down() {
+                    i.pointer.press_origin()
+                } else {
+                    i.pointer.hover_pos()
+                }
+            })?;
             let tr = self.plot_transform?;
             if !tr.frame().contains(pos) {
                 return None;
@@ -1575,7 +1600,7 @@ impl ScopeApp {
                     let p = tr.position_from_point(&egui_plot::PlotPoint::new(x, y));
                     [p.x, p.y]
                 },
-                6.0,
+                8.0,
             )
         });
 
